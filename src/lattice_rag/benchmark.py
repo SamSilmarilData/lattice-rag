@@ -14,6 +14,7 @@ from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.graph_traversal import GraphTraverser
 from lattice_rag.retrieval.reranker import PrecisionReranker
+from lattice_rag.retrieval.retriever import HybridRetriever
 from lattice_rag.retrieval.vector_search import HybridSearcher
 from lattice_rag.storage.db import LatticeStore
 
@@ -221,24 +222,15 @@ class BenchmarkEngine:
     ) -> LatencyStats:
         """Measure End-to-End pipeline execution latency."""
         if not self.orchestrator:
-            # Create a lightweight in-process pipeline measurement
-            searcher = HybridSearcher(self.store, self.embed_svc)
-            traverser = GraphTraverser(self.store)
-            reranker = PrecisionReranker(self.embed_svc)
+            # Create a lightweight in-process pipeline measurement using deep HybridRetriever
+            retriever = HybridRetriever(self.store, self.embed_svc)
 
             q_idx = 0
             async def _pipeline():
                 nonlocal q_idx
                 q = queries[q_idx % len(queries)]
                 q_idx += 1
-                stage1 = await searcher.search(q, top_k=3)
-                anchor_ids = [c.node_id for c in stage1[:2]]
-                stage2 = await traverser.traverse(anchor_ids, route="hybrid", budget=15)
-                chunks_dict = [
-                    {"node_id": c.node_id, "text": c.text, "score": c.score, "metadata": c.metadata}
-                    for c in stage1[:3]
-                ]
-                await reranker.rerank(q, chunks_dict, stage2, top_k=3, max_triples=5)
+                await retriever.retrieve(q, route="hybrid", apply_guardrail=False, top_k=3, max_triples=5)
                 return True
 
             return await self.benchmark_callable(

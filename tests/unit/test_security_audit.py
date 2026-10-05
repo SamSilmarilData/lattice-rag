@@ -28,7 +28,7 @@ async def test_rfc9457_error_shielding_scrubs_all_credentials():
     """Verify RFC 9457 error handler completely strips API keys and Bearer tokens."""
     sensitive_error_msg = (
         "Upstream 401 Unauthorized calling https://api.groq.com with header "
-        "Authorization: Bearer gsk_liveSecretKey998877665544332211 and token=AIzaSyA1234567890abcdef"
+        "Authorization: Bearer gsk_dummySecretKey998877665544332211 and token=AIzaSyA1234567890abcdef"
     )
 
     @get("/error-test")
@@ -48,7 +48,7 @@ async def test_rfc9457_error_shielding_scrubs_all_credentials():
         assert "detail" in data
 
         # Assert no sensitive credentials survived in detail
-        assert "gsk_liveSecretKey" not in data["detail"]
+        assert "gsk_dummySecretKey" not in data["detail"]
         assert "AIzaSy" not in data["detail"]
         assert "Bearer" not in data["detail"]
         assert "[REDACTED]" in data["detail"]

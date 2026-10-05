@@ -6,7 +6,7 @@
 [![LatticeDB](https://img.shields.io/badge/LatticeDB-In--Process_Graph-00ADD8)](https://github.com/latticedb/latticedb)
 [![TypeSafe AI](https://img.shields.io/badge/TypeSafe_AI-Jev_System_1-4B32C3)](https://typesafe.ai/)
 [![Release](https://img.shields.io/badge/Release-v1.0.0-success.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/Tests-108%20Passed%20(100%25)-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-124%20Passed%20(100%25)-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **In-process, zero-cloud-cost Hybrid GraphRAG engine and CI/CD evaluation suite.**  
@@ -114,6 +114,8 @@ lattice-rag/
 │   ├── api/
 │   │   ├── dtos.py              # msgspec Structs (camelCase wire contracts)
 │   │   └── controllers/         # Query, Ingestion, Cache, Health, Eval & Benchmark controllers
+│   ├── ingestion/
+│   │   └── ingester.py          # Unified document ingester: chunking, batch ONNX embeddings, GLiNER, LatticeDB
 │   ├── storage/
 │   │   ├── db.py                # LatticeStore embedded database manager
 │   │   └── extract.py           # GLiNER2.5-Decide local triple extraction
@@ -124,12 +126,14 @@ lattice-rag/
 │   │   ├── semantic_cache.py    # Tier 1 Semantic Vector Cache (<20ms)
 │   │   └── fallback_cache.py    # Tier 2 pybreaker + Redis Hash top 50 FAQ
 │   ├── retrieval/
+│   │   ├── retriever.py         # Deep HybridRetriever: unifies 3-stage search, guardrail, timings
 │   │   ├── embeddings.py        # FastEmbed dense/sparse ONNX models
 │   │   ├── vector_search.py     # Stage 1: HNSW vector + BM25 RRF recall
 │   │   ├── graph_traversal.py   # Stage 2: Dynamic 1-to-2 hop Cypher traversal
 │   │   ├── reranker.py          # Stage 3: Cross-encoder precision reranking
-│   │   └── pipeline.py          # 3-Stage hybrid retrieval orchestrator
+│   │   └── pipeline.py          # Legacy/internal 3-stage retrieval pipeline
 │   ├── generation/
+│   │   ├── resilient_synthesizer.py # Deep ResilientSynthesizer: multi-tier failovers (Groq -> Gemini -> Redis)
 │   │   ├── groq_synthesizer.py  # Primary Groq streaming generator (qwen/qwen3.8-27b @ 200+ tok/s)
 │   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
@@ -141,7 +145,7 @@ lattice-rag/
 │       ├── triage_gate.py       # TypeSafe AI Jev Score & Noul continuous evaluation engine
 │       └── runner.py            # Ephemeral isolated database evaluation runner & regression gate
 └── tests/
-    ├── unit/                    # Hermetic unit tests (eval, storage, security, config, routing, generation, caching)
+    ├── unit/                    # Hermetic unit tests (eval, storage, security, config, routing, generation, caching, ingestion, retrieval)
     └── integration/             # Live E2E tests (LatticeDB + FastEmbed + Groq + TypeSafe + Phase 7 Benchmarks)
 ```
 
@@ -314,12 +318,12 @@ For detailed architectural benchmarks, memory consumption profiles (stable at 34
 Run the automated test suite across unit and integration suites:
 
 ```bash
-# Run full test suite (108 tests, 100% green, 0 warnings)
+# Run full test suite (124 tests, 100% green, 0 warnings)
 pytest tests/ -v
 ```
 
-All 108 tests execute cleanly with 0 warnings:
-- **Hermetic Unit Tests (96 tests)**: Security secret masking, RFC 9457 error shielding, log redaction, config post-init validation, fast embeddings, dynamic Cypher traversal, Stage 3 triples capping, Jev triage & contradiction veto, semantic cache cosine similarity, Redis circuit breaker transitions, and API controllers.
+All 124 tests execute cleanly with 0 warnings:
+- **Hermetic Unit Tests (112 tests)**: Security secret masking, RFC 9457 error shielding, log redaction, config post-init validation, fast embeddings, dynamic Cypher traversal, Stage 3 triples capping, Jev triage & contradiction veto, semantic cache cosine similarity, Redis circuit breaker transitions, API controllers, unified document ingestion with batched embeddings, deep hybrid retrieval, resilient synthesis cascading failover, and unified orchestrator streaming/buffered parity.
 - **Integration Tests (12 tests)**: Live end-to-end RAG pipeline, live CI/CD regression gate, benchmark engine SLA verification, and benchmark API endpoints.
 
 ---

@@ -55,6 +55,12 @@ class RAGOrchestrator:
         self.gemini = gemini
         self.chitchat = chitchat
         self.embedding_service = embedding_service
+        from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer
+        self.synthesizer = ResilientSynthesizer(
+            groq=self.groq,
+            gemini=self.gemini,
+            fallback_cache=self.fallback_cache,
+        )
         self._graph = self._build_graph()
 
     # ── Graph Construction ──────────────────────────────────────────────
@@ -171,12 +177,26 @@ class RAGOrchestrator:
 
         try:
             # Primary: Groq under circuit breaker
-            answer = await self.fallback_cache.call_with_breaker(
-                self.groq.synthesize,
-                state.query,
-                state.filtered_chunks,
-                state.graph_context,
-            )
+            if hasattr(self.fallback_cache, "call_with_breaker") and callable(self.fallback_cache.call_with_breaker):
+                res = self.fallback_cache.call_with_breaker(
+                    self.groq.synthesize,
+                    state.query,
+                    state.filtered_chunks,
+                    state.graph_context,
+                )
+                if hasattr(res, "__await__"):
+                    answer = await res
+                else:
+                    answer = res
+            else:
+                synth = await self.synthesizer.synthesize(
+                    state.query,
+                    state.filtered_chunks,
+                    state.graph_context,
+                    state.route,
+                )
+                answer = synth.answer
+                degraded = synth.degraded
         except Exception as e:
             logger.warning("Groq synthesis failed, cascading to Gemini: %s", e)
             try:
@@ -382,47 +402,17 @@ class RAGOrchestrator:
         yield {"event": "stage", "data": {"stage": "generation", "chunks_count": len(ret_result.final_chunks)}}
         t_gen = time.perf_counter()
         full_tokens: list[str] = []
-        degraded = False
 
-        if route_decision.route == "massive_context":
-            try:
-                async for tok in self.gemini.stream(query, ret_result.final_chunks, graph_dict):
-                    full_tokens.append(tok)
-                    yield {"event": "token", "data": {"delta": tok}}
-            except Exception as e:
-                logger.warning("Gemini stream failed: %s", e)
-                fallback_ans = await self.fallback_cache.find_closest_fallback(query)
-                ans = fallback_ans or "Unable to process massive context query at this time."
-                full_tokens.append(ans)
-                yield {"event": "token", "data": {"delta": ans}}
-                degraded = True
-        else:
-            try:
-                # Primary Groq streaming under circuit breaker check
-                if self.fallback_cache.circuit_status == "open":
-                    raise RuntimeError("Circuit breaker is OPEN")
+        async for tok in self.synthesizer.stream(
+            query=query,
+            context_chunks=ret_result.final_chunks,
+            graph_context=graph_dict,
+            route=route_decision.route,
+        ):
+            full_tokens.append(tok)
+            yield {"event": "token", "data": {"delta": tok}}
 
-                async for tok in self.groq.stream(query, ret_result.final_chunks, graph_dict):
-                    full_tokens.append(tok)
-                    yield {"event": "token", "data": {"delta": tok}}
-            except Exception as e:
-                logger.warning("Groq stream failed, falling back to Gemini stream: %s", e)
-                try:
-                    async for tok in self.gemini.stream(query, ret_result.final_chunks, graph_dict):
-                        full_tokens.append(tok)
-                        yield {"event": "token", "data": {"delta": tok}}
-                    degraded = True
-                except Exception as e2:
-                    logger.warning("Gemini stream failed, falling back to Redis FAQ: %s", e2)
-                    fallback_ans = await self.fallback_cache.find_closest_fallback(query)
-                    ans = (
-                        fallback_ans
-                        or "I'm sorry, all generation services are currently unavailable. Please try again in a moment."
-                    )
-                    full_tokens.append(ans)
-                    yield {"event": "token", "data": {"delta": ans}}
-                    degraded = True
-
+        degraded = self.synthesizer.circuit_status != "closed"
         gen_elapsed = (time.perf_counter() - t_gen) * 1000
         timings.append({"stage": "generation", "duration_ms": gen_elapsed})
 

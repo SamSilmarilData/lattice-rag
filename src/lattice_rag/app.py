@@ -34,6 +34,7 @@ from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.orchestration.pool import shutdown_pool
+from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import ContextGuardrail
@@ -102,7 +103,15 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         embedding_service=embedding_service,
     )
 
-    # 8. Jev Evaluator & CI/CD Eval Runner
+    # 8. Document Ingester (deep module)
+    ingester = DocumentIngester(
+        store=store,
+        embedding_service=embedding_service,
+        extractor=extractor,
+        cache=semantic_cache,
+    )
+
+    # 9. Jev Evaluator & CI/CD Eval Runner
     evaluator = JevEvaluator(api_key=config.typesafe_api_key)
     eval_runner = EvalRunner(
         orchestrator=orchestrator,
@@ -116,6 +125,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     app.state.store = store
     app.state.embedding_service = embedding_service
     app.state.extractor = extractor
+    app.state.ingester = ingester
     app.state.semantic_cache = semantic_cache
     app.state.fallback_cache = fallback_cache
     app.state.orchestrator = orchestrator
@@ -163,6 +173,10 @@ def provide_orchestrator(state: State) -> RAGOrchestrator:
 
 def provide_config(state: State) -> LatticeAppConfig:
     return state.config
+
+
+def provide_ingester(state: State) -> DocumentIngester:
+    return state.ingester
 
 
 def provide_eval_runner(state: State) -> EvalRunner:
@@ -256,6 +270,7 @@ class ApplicationCore(InitPluginProtocol):
             "extractor": Provide(provide_extractor, sync_to_thread=False),
             "semantic_cache": Provide(provide_semantic_cache, sync_to_thread=False),
             "fallback_cache": Provide(provide_fallback_cache, sync_to_thread=False),
+            "ingester": Provide(provide_ingester, sync_to_thread=False),
             "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
             "config": Provide(provide_config, sync_to_thread=False),
             "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),

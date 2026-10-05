@@ -125,50 +125,24 @@ def query(text: str, stream: bool) -> None:
 def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     """Ingest a text file into the knowledge graph."""
     import asyncio
-    from lattice_rag.api.controllers.ingest import chunk_text
     from lattice_rag.config import get_config
+    from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.retrieval.embeddings import EmbeddingService
-    from lattice_rag.storage.db import ChunkData, EntityData, LatticeStore
+    from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
 
     path = Path(filepath)
-    text = path.read_text(encoding='utf-8')
-    d_id = doc_id or path.stem
-    d_title = title or path.name
-
-    click.echo(f"Ingesting: {path.name} ({len(text)} chars) as doc_id='{d_id}'")
+    click.echo(f"Ingesting: {path.name} as doc_id='{doc_id or path.stem}'")
 
     async def _ingest() -> None:
         config = get_config()
         store = LatticeStore(config.latticedb_path)
         embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
         extractor = EntityExtractor()
+        ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
-        text_chunks = chunk_text(text, 512, 64)
-        click.echo(f"Created {len(text_chunks)} chunks. Generating embeddings...")
-        embeddings = embed_svc.embed_texts(text_chunks)
-        chunk_data = [ChunkData(text=t, embedding=e, position=i) for i, (t, e) in enumerate(zip(text_chunks, embeddings))]
-        stats = store.ingest_document(d_id, d_title, chunk_data)
-
-        total_entities = 0
-        total_relations = 0
-        click.echo("Extracting entities & relations...")
-        for i, chunk_node_id in enumerate(stats.chunk_ids):
-            c_text = text_chunks[i]
-            entities = extractor.extract_entities(c_text)
-            if entities:
-                triples = extractor.extract_triples(c_text, entities)
-                ent_names = [e.name for e in entities]
-                ent_embs = embed_svc.embed_texts(ent_names)
-                embedded_entities = [
-                    EntityData(name=e.name, entity_type=e.entity_type, embedding=ent_embs[j])
-                    for j, e in enumerate(entities)
-                ]
-                ent_stats = store.ingest_entities(chunk_node_id, embedded_entities, triples)
-                total_entities += ent_stats.entity_count
-                total_relations += ent_stats.relation_count
-
-        click.echo(f"✓ Ingestion complete: {len(text_chunks)} chunks, {total_entities} entities, {total_relations} relations.")
+        stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+        click.echo(f"✓ Ingestion complete: {stats.chunk_count} chunks, {stats.entity_count} entities, {stats.relation_count} relations.")
         store.close()
 
     asyncio.run(_ingest())
@@ -180,10 +154,10 @@ def seed(dataset: str) -> None:
     """Pre-seed LatticeDB with the golden corpus documents."""
     import json
     import asyncio
-    from lattice_rag.api.controllers.ingest import chunk_text
     from lattice_rag.config import get_config
+    from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.retrieval.embeddings import EmbeddingService
-    from lattice_rag.storage.db import ChunkData, EntityData, LatticeStore
+    from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
 
     path = Path(dataset)
@@ -204,30 +178,14 @@ def seed(dataset: str) -> None:
         store = LatticeStore(config.latticedb_path)
         embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
         extractor = EntityExtractor()
+        ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
         for doc in corpus:
             d_id = doc.get("document_id", "doc")
             d_title = doc.get("title", d_id)
             d_text = doc.get("text", "")
             click.echo(f"  Ingesting '{d_title}' ({len(d_text)} chars)...")
-
-            text_chunks = chunk_text(d_text, 512, 64)
-            embeddings = embed_svc.embed_texts(text_chunks)
-            chunk_data = [ChunkData(text=t, embedding=e, position=i) for i, (t, e) in enumerate(zip(text_chunks, embeddings))]
-            stats = store.ingest_document(d_id, d_title, chunk_data)
-
-            for i, chunk_node_id in enumerate(stats.chunk_ids):
-                c_text = text_chunks[i]
-                entities = extractor.extract_entities(c_text)
-                if entities:
-                    triples = extractor.extract_triples(c_text, entities)
-                    ent_names = [e.name for e in entities]
-                    ent_embs = embed_svc.embed_texts(ent_names)
-                    embedded_entities = [
-                        EntityData(name=e.name, entity_type=e.entity_type, embedding=ent_embs[j])
-                        for j, e in enumerate(entities)
-                    ]
-                    store.ingest_entities(chunk_node_id, embedded_entities, triples)
+            await ingester.ingest(d_id, d_title, d_text)
 
         click.echo("✓ LatticeDB pre-seeding complete!")
         store.close()

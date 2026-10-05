@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-10-06 (Architecture Deepening & Zero-Seam Refactoring)
+
+### Added
+- **Deep Document Ingestion Subsystem (`src/lattice_rag/ingestion/ingester.py`):**
+  - Created `DocumentIngester` deep module encapsulating sentence-aware chunking, batch ONNX embedding generation, GLiNER entity-relation extraction, LatticeDB property-graph persistence, and Tier 1 semantic cache invalidation.
+  - Reduced ONNX embedding cross-process invocations from $N$ chunks to a single batched call per document for all unique entities, eliminating repetitive model round-trips.
+  - Re-exported `DocumentIngester` cleanly via `src/lattice_rag/ingestion/__init__.py`.
+  - Registered `provide_ingester` provider in `app.py` for Litestar dependency injection.
+- **Deep Hybrid Retriever Subsystem (`src/lattice_rag/retrieval/retriever.py`):**
+  - Built `HybridRetriever` unifying 3-stage search (HNSW+BM25 with RRF, dynamic Cypher graph traversal, cross-encoder precision reranking) and Jev Noul context guardrails behind a single high-leverage interface.
+  - Streamlined `retrieval/pipeline.py` and `benchmark.py` to delegate to `HybridRetriever`, eliminating leaked stage coordination and fragmented timing calculation logic.
+- **Deep Resilient Synthesizer Subsystem (`src/lattice_rag/generation/resilient_synthesizer.py`):**
+  - Created `ResilientSynthesizer` encapsulating full multi-tier failover logic across GroqCloud (under `pybreaker.CircuitBreaker`), Google AI Studio Gemini 2.5 Flash, and local Redis FAQ fallback.
+  - Unified buffered (`synthesize`) and token-by-token streaming (`stream`) generation pipelines with exact parity in circuit breaker tripping and fallback triggers.
+- **Unified Orchestration Parity (`src/lattice_rag/orchestration/graph.py`):**
+  - Refactored `RAGOrchestrator` to delegate generative synthesis and failover to `ResilientSynthesizer` in both `_generate_node` and `stream_query`.
+  - Eliminated duplicate circuit-breaker cascade code between buffered and SSE streaming query paths.
+- **Comprehensive TDD Test Suite (16 New Unit Tests):**
+  - Added `tests/unit/test_document_ingester.py` (4 tests) verifying edge cases, single/multi-chunk flows, and batch entity embedding efficiency.
+  - Added `tests/unit/test_hybrid_retriever.py` (4 tests) verifying end-to-end 3-stage coordination, empty results, and guardrail integration.
+  - Added `tests/unit/test_resilient_synthesizer.py` (5 tests) verifying Groq normal execution, circuit breaker tripping, Gemini fallback, and Redis FAQ cascades for both buffered and streaming paths.
+  - Added `tests/unit/test_orchestrator_unified.py` (3 tests) verifying buffered and streaming synthesis parity.
+  - Expanded test suite to **124 tests (100% green, 0 warnings)**.
+
+### Changed
+- Refactored `IngestController` in `src/lattice_rag/api/controllers/ingest.py` from 89 lines down to a lean controller delegating entirely to `DocumentIngester`.
+- Refactored CLI commands `ingest` and `seed` in `src/lattice_rag/cli.py` to use `DocumentIngester`, deleting ~80 lines of duplicate orchestration.
+- Sanitized mock test tokens in `tests/unit/test_security_audit.py` to prevent false positive triggers during automated git secret scans.
+
+---
+
 ## [1.0.0] - 2026-10-06 (Phase 7: Production Verification, Benchmarking, Performance Profiling & Release Hardening)
 
 ### Added
