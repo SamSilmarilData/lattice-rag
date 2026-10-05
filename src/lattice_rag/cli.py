@@ -237,10 +237,134 @@ def seed(dataset: str) -> None:
 
 
 @main.command()
-def benchmark() -> None:
-    """Run latency benchmarks on the retrieval pipeline."""
-    click.echo('Running benchmarks...')
-    click.echo('(Benchmark integration pending full wiring)')
+@click.option('--dataset', default='eval_dataset.json', help='Path to evaluation dataset containing benchmark queries')
+@click.option('--iterations', default=6, type=int, help='Sample iterations per benchmarked component')
+@click.option('--warmup', default=2, type=int, help='Warmup iterations before sampling')
+@click.option('--live', is_flag=True, default=False, help='Execute live Groq LLM generation (default: zero-cost CPU hybrid)')
+@click.option('--sla-check', is_flag=True, default=False, help='Enforce Dual SLA gating (exit 1 if E2E p95 >= 1000ms or Cache p95 >= 25ms)')
+@click.option('--output', default=None, type=click.Path(writable=True), help='Export benchmark metrics to JSON file')
+def benchmark(
+    dataset: str,
+    iterations: int,
+    warmup: int,
+    live: bool,
+    sla_check: bool,
+    output: str | None,
+) -> None:
+    """Run statistical latency benchmarks and SLA validation across the pipeline."""
+    import asyncio
+    import json
+    import sys
+    from pathlib import Path
+    from lattice_rag.benchmark import BenchmarkEngine
+    from lattice_rag.caching.fallback_cache import FallbackCache
+    from lattice_rag.caching.semantic_cache import SemanticCache
+    from lattice_rag.config import get_config
+    from lattice_rag.generation.chitchat import ChitchatHandler
+    from lattice_rag.generation.gemini_fallback import GeminiFallback
+    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+    from lattice_rag.orchestration.graph import RAGOrchestrator
+    from lattice_rag.retrieval.embeddings import EmbeddingService
+    from lattice_rag.retrieval.pipeline import RetrievalPipeline
+    from lattice_rag.routing.guardrail import ContextGuardrail
+    from lattice_rag.routing.router import QueryRouter
+    from lattice_rag.storage.db import LatticeStore
+
+    click.echo("================================================================================")
+    click.echo(f"  lattice-rag Statistical Latency Benchmark Engine")
+    click.echo(f"  Mode: {'Live GroqCloud LLM' if live else 'Zero-Cost CPU Hybrid'} | Iterations: {iterations} | Warmup: {warmup}")
+    click.echo("================================================================================\n")
+
+    queries: list[str] = []
+    dataset_path = Path(dataset)
+    if dataset_path.exists():
+        try:
+            raw_data = json.loads(dataset_path.read_text(encoding="utf-8"))
+            queries = [q["query"] for q in raw_data.get("queries", [])]
+        except Exception as e:
+            click.echo(f"Warning: Failed to load queries from {dataset}: {e}")
+
+    async def _run() -> None:
+        config = get_config()
+        store = LatticeStore(config.latticedb_path)
+        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        sem_cache = SemanticCache()
+        fb_cache = FallbackCache(config.redis_url)
+        await fb_cache.connect()
+
+        router = QueryRouter()
+        guardrail = ContextGuardrail(threshold=0.5)
+        pipeline = RetrievalPipeline(store, embed_svc, guardrail)
+        groq = GroqSynthesizer()
+        gemini = GeminiFallback()
+        cc = ChitchatHandler()
+
+        orchestrator = RAGOrchestrator(
+            router=router,
+            semantic_cache=sem_cache,
+            fallback_cache=fb_cache,
+            retrieval_pipeline=pipeline,
+            groq=groq,
+            gemini=gemini,
+            chitchat=cc,
+            embedding_service=embed_svc,
+        )
+
+        engine = BenchmarkEngine(
+            store=store,
+            embedding_service=embed_svc,
+            semantic_cache=sem_cache,
+            orchestrator=orchestrator,
+        )
+
+        click.echo("Profiling pipeline stages (p50, p90, p95, p99, throughput)...")
+        report = await engine.run_full_suite(
+            queries=queries or None,
+            iterations=iterations,
+            warmup=warmup,
+            live_llm=live,
+        )
+
+        table_str = BenchmarkEngine.format_ascii_table(report)
+        click.echo(table_str)
+
+        if output:
+            out_dict = {
+                "totalDurationSec": report.total_duration_sec,
+                "subSecondSlaMet": report.sub_second_sla_met,
+                "tier1CacheSlaMet": report.tier1_cache_sla_met,
+                "stages": {
+                    k: {
+                        "stage": s.stage,
+                        "samples": s.samples_count,
+                        "meanMs": s.mean_ms,
+                        "p50Ms": s.p50_ms,
+                        "p90Ms": s.p90_ms,
+                        "p95Ms": s.p95_ms,
+                        "p99Ms": s.p99_ms,
+                        "maxMs": s.max_ms,
+                        "qps": s.qps,
+                    }
+                    for k, s in report.stages.items()
+                },
+            }
+            Path(output).write_text(json.dumps(out_dict, indent=2), encoding="utf-8")
+            click.echo(f"✓ Exported benchmark metrics to {output}")
+
+        await fb_cache.close()
+        await sem_cache.close()
+        await router.close()
+        await guardrail.close()
+        store.close()
+
+        if sla_check:
+            if not report.sub_second_sla_met or not report.tier1_cache_sla_met:
+                click.echo("❌ SLA Violation: One or more latency SLA targets exceeded threshold.", err=True)
+                sys.exit(1)
+            else:
+                click.echo("✓ Dual SLA targets verified successfully.")
+
+    asyncio.run(_run())
 
 
 @main.command()

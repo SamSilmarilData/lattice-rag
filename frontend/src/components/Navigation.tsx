@@ -49,7 +49,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             <div className="flex items-center space-x-2">
               <span className="font-semibold text-white tracking-tight text-base">lattice-rag</span>
               <span className="px-1.5 py-0.5 text-[10px] font-mono font-medium uppercase bg-cyan-950/60 text-cyan-400 border border-cyan-800/40 rounded">
-                v0.6.0
+                v1.0.0
               </span>
             </div>
             <p className="text-[11px] text-gray-400 hidden sm:block">

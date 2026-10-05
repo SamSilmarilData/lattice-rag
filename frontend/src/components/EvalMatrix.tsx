@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert } from 'lucide-react';
-import { EvalQueryResult, EvalRunResponse } from '../types';
+import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert, Zap, Timer, Activity } from 'lucide-react';
+import { EvalQueryResult, EvalRunResponse, BenchmarkRunResponse } from '../types';
 
 interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
@@ -153,6 +153,9 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
 export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) => {
   const [evalData, setEvalData] = useState<EvalQueryResult[]>(INITIAL_EVAL_DATA);
   const [running, setRunning] = useState(false);
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
+  const [benchmarkData, setBenchmarkData] = useState<BenchmarkRunResponse | null>(null);
+  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [expandedQuery, setExpandedQuery] = useState<string | null>(null);
@@ -183,6 +186,26 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
     }
   };
 
+  const runBenchmark = async () => {
+    setBenchmarkRunning(true);
+    setBenchmarkError(null);
+    try {
+      const res = await fetch('/api/v1/benchmark/run', {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        throw new Error(`Benchmark failed with status ${res.status}`);
+      }
+      const data: BenchmarkRunResponse = await res.json();
+      setBenchmarkData(data);
+    } catch (err) {
+      console.error('Failed to run performance benchmark:', err);
+      setBenchmarkError(err instanceof Error ? err.message : 'Unknown benchmark failure');
+    } finally {
+      setBenchmarkRunning(false);
+    }
+  };
+
   const filteredQueries = evalData.filter((item) => {
     const matchesSearch = item.query.toLowerCase().includes(search.toLowerCase());
     const matchesStatus =
@@ -204,19 +227,131 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
             <h2 className="text-base font-semibold text-gray-100">CI/CD Evaluation Matrix & Benchmark Gate</h2>
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            Golden 20-query evaluation suite verified across Faithfulness, Context Precision, and Relevance.
+            Golden 20-query evaluation suite verified across Faithfulness, Precision, and Sub-Second Latency SLAs.
           </p>
         </div>
 
-        <button
-          onClick={runLiveEval}
-          disabled={running}
-          className="flex items-center space-x-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-800 disabled:text-gray-600 text-slate-950 font-semibold text-xs rounded-lg shadow-sm transition"
-        >
-          <Play className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
-          <span>{running ? 'Running Evaluation Gate...' : 'Trigger Live Evaluation Gate'}</span>
-        </button>
+        <div className="flex items-center space-x-2.5">
+          <button
+            onClick={runBenchmark}
+            disabled={benchmarkRunning}
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-950/70 hover:bg-indigo-900/80 disabled:bg-gray-800 disabled:text-gray-600 text-indigo-300 border border-indigo-700/50 font-semibold text-xs rounded-lg shadow-sm transition"
+          >
+            <Zap className={`w-3.5 h-3.5 ${benchmarkRunning ? 'animate-pulse text-amber-400' : 'text-indigo-400'}`} />
+            <span>{benchmarkRunning ? 'Benchmarking Pipeline...' : 'Run Performance Benchmark'}</span>
+          </button>
+
+          <button
+            onClick={runLiveEval}
+            disabled={running}
+            className="flex items-center space-x-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-800 disabled:text-gray-600 text-slate-950 font-semibold text-xs rounded-lg shadow-sm transition"
+          >
+            <Play className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
+            <span>{running ? 'Running Gate...' : 'Trigger Live Eval Gate'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Latency & SLA Performance Breakdown Card */}
+      {benchmarkData && (
+        <div className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/80 pb-3">
+            <div className="flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-cyan-400" />
+              <h3 className="text-sm font-semibold text-gray-200">Production Latency & Dual-SLA Profiling</h3>
+              <span className="text-[10px] font-mono text-gray-500 bg-background px-2 py-0.5 rounded border border-border">
+                {benchmarkData.totalDurationSec.toFixed(2)}s runtime
+              </span>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              {/* End-to-End Sub-Second SLA Badge */}
+              <div className="flex items-center space-x-1 px-2.5 py-1 rounded text-[11px] font-mono font-medium border bg-background">
+                <span className="text-gray-400">E2E SLA (p95 &lt; 1000ms):</span>
+                {benchmarkData.subSecondSlaMet ? (
+                  <span className="text-emerald-400 font-bold flex items-center space-x-0.5">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400 inline" />
+                    <span>PASSED</span>
+                  </span>
+                ) : (
+                  <span className="text-rose-400 font-bold flex items-center space-x-0.5">
+                    <XCircle className="w-3 h-3 text-rose-400 inline" />
+                    <span>FAILED</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Tier 1 Semantic Cache SLA Badge */}
+              <div className="flex items-center space-x-1 px-2.5 py-1 rounded text-[11px] font-mono font-medium border bg-background">
+                <span className="text-gray-400">Cache SLA (p95 &lt; 25ms):</span>
+                {benchmarkData.tier1CacheSlaMet ? (
+                  <span className="text-emerald-400 font-bold flex items-center space-x-0.5">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400 inline" />
+                    <span>PASSED</span>
+                  </span>
+                ) : (
+                  <span className="text-rose-400 font-bold flex items-center space-x-0.5">
+                    <XCircle className="w-3 h-3 text-rose-400 inline" />
+                    <span>FAILED</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Benchmark Stages Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-background/90 text-gray-400 border-b border-border font-medium">
+                <tr>
+                  <th className="py-2.5 px-3">Pipeline Stage</th>
+                  <th className="py-2.5 px-3 text-center">p50</th>
+                  <th className="py-2.5 px-3 text-center">p90</th>
+                  <th className="py-2.5 px-3 text-center">p95</th>
+                  <th className="py-2.5 px-3 text-center">p99</th>
+                  <th className="py-2.5 px-3 text-center">Mean</th>
+                  <th className="py-2.5 px-3 text-right">Throughput</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {benchmarkData.stages.map((st, i) => (
+                  <tr key={i} className="hover:bg-surface/30 transition">
+                    <td className="py-2.5 px-3 font-medium text-gray-200 flex items-center space-x-2">
+                      <Timer className="w-3.5 h-3.5 text-cyan-400/80 shrink-0" />
+                      <span>{st.stage}</span>
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-mono text-gray-300">
+                      {st.p50Ms.toFixed(1)}ms
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-mono text-gray-300">
+                      {st.p90Ms.toFixed(1)}ms
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-mono text-cyan-400 font-semibold">
+                      {st.p95Ms.toFixed(1)}ms
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-mono text-gray-400">
+                      {st.p99Ms.toFixed(1)}ms
+                    </td>
+                    <td className="py-2.5 px-3 text-center font-mono text-gray-300">
+                      {st.meanMs.toFixed(1)}ms
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono text-emerald-400">
+                      {st.qps.toFixed(1)} QPS
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {benchmarkError && (
+        <div className="bg-rose-950/40 border border-rose-800/60 rounded-xl p-3.5 text-xs text-rose-300 flex items-center space-x-2">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>Benchmark Execution Notice: {benchmarkError}</span>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

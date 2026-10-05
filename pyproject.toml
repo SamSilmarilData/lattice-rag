@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "lattice-rag"
-version = "0.1.0"
+version = "1.0.0"
 description = "In-process Hybrid GraphRAG engine built on LatticeDB, Litestar/Granian, and CPU-quantized SLMs."
 readme = "README.md"
 license = "MIT"

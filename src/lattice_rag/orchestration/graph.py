@@ -50,6 +50,7 @@ class RAGOrchestrator:
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
+        self.retrieval_pipeline = retrieval_pipeline
         self.groq = groq
         self.gemini = gemini
         self.chitchat = chitchat

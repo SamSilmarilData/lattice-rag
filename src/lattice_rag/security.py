@@ -44,9 +44,9 @@ class RedactingFilter(logging.Filter):
     key prefixes (sk-, gsk_, AIza, Bearer, token=) using regex substitution.
     """
     
-    # Matches common token patterns
+    # Matches common token patterns and URI credentials
     REDACT_PATTERN = re.compile(
-        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+)"
+        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+|://[^:]+:[^@]+@)"
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -116,6 +116,6 @@ def sanitize_error_detail(detail: str) -> str:
     if not detail:
         return detail
     pattern = re.compile(
-        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+)"
+        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+|://[^:]+:[^@]+@)"
     )
     return pattern.sub("[REDACTED]", detail)

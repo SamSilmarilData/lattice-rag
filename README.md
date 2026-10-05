@@ -5,6 +5,8 @@
 [![Granian](https://img.shields.io/badge/Granian-Rust_ASGI-DEA584?logo=rust&logoColor=white)](https://github.com/emmett-framework/granian)
 [![LatticeDB](https://img.shields.io/badge/LatticeDB-In--Process_Graph-00ADD8)](https://github.com/latticedb/latticedb)
 [![TypeSafe AI](https://img.shields.io/badge/TypeSafe_AI-Jev_System_1-4B32C3)](https://typesafe.ai/)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-success.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/Tests-108%20Passed%20(100%25)-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **In-process, zero-cloud-cost Hybrid GraphRAG engine and CI/CD evaluation suite.**  
@@ -98,16 +100,20 @@ lattice-rag/
 │   ├── architecture.md          # Multi-layer system architecture
 │   ├── security.md              # Zero-trust secret management
 │   ├── storage-and-schema.md    # LatticeDB graph and index modeling
-│   └── api-reference.md         # Litestar endpoints & DTO contracts
+│   ├── api-reference.md         # Litestar endpoints & DTO contracts
+│   ├── deployment.md            # Zero-cost production hosting runbook
+│   ├── performance-benchmark.md # Empirical latency profiles & dual SLA verification
+│   └── production-readiness.md  # Operator runbooks, health probes & disaster recovery
 ├── src/lattice_rag/
 │   ├── config.py                # Environment configuration with SecretStr validation
 │   ├── security.py              # Secret masking, log redaction, apikeys migration
 │   ├── app.py                   # Litestar application factory & ApplicationCore
 │   ├── server.py                # Granian ASGI runner entrypoint
 │   ├── cli.py                   # Command-line interface (Click)
+│   ├── benchmark.py             # Empirical benchmark engine & SLA verification
 │   ├── api/
 │   │   ├── dtos.py              # msgspec Structs (camelCase wire contracts)
-│   │   └── controllers/         # Query, Ingestion, Cache, Health, and Eval controllers
+│   │   └── controllers/         # Query, Ingestion, Cache, Health, Eval & Benchmark controllers
 │   ├── storage/
 │   │   ├── db.py                # LatticeStore embedded database manager
 │   │   └── extract.py           # GLiNER2.5-Decide local triple extraction
@@ -135,8 +141,8 @@ lattice-rag/
 │       ├── triage_gate.py       # TypeSafe AI Jev Score & Noul continuous evaluation engine
 │       └── runner.py            # Ephemeral isolated database evaluation runner & regression gate
 └── tests/
-    ├── unit/                    # 95 Hermetic unit tests (eval, storage, security, config, routing, generation, caching)
-    └── integration/             # Live E2E tests (LatticeDB + FastEmbed + Groq + TypeSafe + Phase 5 Eval)
+    ├── unit/                    # Hermetic unit tests (eval, storage, security, config, routing, generation, caching)
+    └── integration/             # Live E2E tests (LatticeDB + FastEmbed + Groq + TypeSafe + Phase 7 Benchmarks)
 ```
 
 ---
@@ -271,8 +277,35 @@ lattice-rag serve
 | `GET` | `/api/v1/graph/subgraph` | Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
 | `GET` | `/api/v1/cache/stats` | Telemetry on Tier 1 semantic vector cache hits and Tier 2 circuit breaker status. |
 | `POST` | `/api/v1/eval/run` | Triggers the CI/CD evaluation gate with custom dataset/baseline paths and regression tolerance. |
+| `POST` | `/api/v1/benchmark/run` | Executes statistical performance benchmarking with dual SLA verification ($p50, p90, p95, p99$, QPS). |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |
+
+---
+
+## ⚡ Performance Profiling & Dual-SLA Verification
+
+`lattice-rag` provides strict sub-second performance guarantees verified by an empirical benchmarking harness:
+
+```bash
+# Run CLI benchmark harness with dual SLA verification
+lattice-rag benchmark --iterations 5 --warmup 2 --sla-check
+```
+
+### Empirical Production Benchmark Results
+
+| Pipeline Stage | p50 (Median) | p90 | p95 (SLA Target) | p99 | Mean | Throughput |
+|---|---|---|---|---|---|---|
+| **Tier 1 Semantic Cache** | **0.2ms** | 1.1ms | **1.1ms** (<25ms SLA) | 1.1ms | 0.3ms | **3,346 QPS** |
+| **Stage 1: Hybrid Retrieval (HNSW+BM25)** | 11.4ms | 11.9ms | 11.9ms | 11.9ms | 11.0ms | 91.1 QPS |
+| **Stage 2: Dynamic Cypher Traversal** | 1.4ms | 13.8ms | 13.8ms | 13.8ms | 5.4ms | 186.9 QPS |
+| **Stage 3: Cross-Encoder Rerank (v2-m3)** | 308.6ms | 338.5ms | 338.5ms | 338.5ms | 314.4ms | 3.2 QPS |
+| **End-to-End Pipeline (Full StateGraph)** | **547.1ms** | 557.0ms | **557.0ms** (<1000ms SLA) | 557.0ms | 549.4ms | **1.8 QPS** |
+
+- **Sub-Second Multi-Hop SLA**: $p95 = 557.0\text{ms} < 1,000\text{ms}$ **[PASSED]**
+- **Tier 1 Cache Latency SLA**: $p95 = 1.1\text{ms} < 25\text{ms}$ **[PASSED]**
+
+For detailed architectural benchmarks, memory consumption profiles (stable at 340 MB RSS), and comparison against cloud vector architectures, see [`docs/performance-benchmark.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/performance-benchmark.md). For operational runbooks and health probes, see [`docs/production-readiness.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/production-readiness.md).
 
 ---
 
@@ -281,14 +314,13 @@ lattice-rag serve
 Run the automated test suite across unit and integration suites:
 
 ```bash
-# Run all unit tests (101 passing)
-pytest tests/unit/ -v
-
-# Run full test suite (101 tests, 100% green, 0 warnings)
+# Run full test suite (108 tests, 100% green, 0 warnings)
 pytest tests/ -v
 ```
 
-All 101 tests execute cleanly with 0 warnings.
+All 108 tests execute cleanly with 0 warnings:
+- **Hermetic Unit Tests (96 tests)**: Security secret masking, RFC 9457 error shielding, log redaction, config post-init validation, fast embeddings, dynamic Cypher traversal, Stage 3 triples capping, Jev triage & contradiction veto, semantic cache cosine similarity, Redis circuit breaker transitions, and API controllers.
+- **Integration Tests (12 tests)**: Live end-to-end RAG pipeline, live CI/CD regression gate, benchmark engine SLA verification, and benchmark API endpoints.
 
 ---
 

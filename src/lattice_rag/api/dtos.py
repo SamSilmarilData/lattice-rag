@@ -98,3 +98,24 @@ class HealthResponse(msgspec.Struct, rename='camel'):
     typesafe_configured: bool
     groq_configured: bool
     gemini_configured: bool
+
+class StageBenchmarkDTO(msgspec.Struct, rename='camel'):
+    """DTO representing latency metrics for a benchmarked stage."""
+    stage: str
+    samples_count: int
+    mean_ms: float
+    min_ms: float
+    p50_ms: float
+    p90_ms: float
+    p95_ms: float
+    p99_ms: float
+    max_ms: float
+    qps: float
+
+class BenchmarkRunResponse(msgspec.Struct, rename='camel'):
+    """Response DTO for an end-to-end performance benchmark run."""
+    total_duration_sec: float
+    sub_second_sla_met: bool
+    tier1_cache_sla_met: bool
+    stages: list[StageBenchmarkDTO] = []
+

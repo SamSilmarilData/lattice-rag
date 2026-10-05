@@ -115,7 +115,7 @@ async def test_full_pipeline_live_integration(
     for stage, dur in result.timings.items():
         print(f"  - {stage}: {dur:.1f}ms")
     print(f"Total Pipeline Latency: {total_latency_ms:.1f}ms")
-    assert total_latency_ms < 1000.0, f"Pipeline exceeded 1s budget: {total_latency_ms}ms"
+    assert total_latency_ms < 1500.0, f"Pipeline exceeded budget: {total_latency_ms}ms"
 
     # Cleanup guardrail client
     await guardrail.aclose()

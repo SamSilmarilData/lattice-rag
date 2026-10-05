@@ -24,6 +24,7 @@ http://localhost:8000/schema/scalar
 | `GET` | `/api/v1/graph/subgraph` | — (Query param: `limit`) | `SubgraphDTO` | Knowledge graph snapshot (nodes & edges) for 2D visualizer. |
 | `GET` | `/api/v1/cache/stats` | — | `CacheStatsResponse` | Hit/miss metrics for Tier 1 & 2 caches. |
 | `POST` | `/api/v1/eval/run` | — (Query params) | `EvalRunResponse` | Run CI/CD evaluation gate against benchmark dataset. |
+| `POST` | `/api/v1/benchmark/run` | — (Query params: `iterations`, `warmup`) | `BenchmarkRunResponse` | Run automated latency and throughput micro-benchmarks with dual-SLA validation. |
 | `GET` | `/health` | — | `HealthResponse` | System health and connectivity telemetry. |
 
 ---
@@ -139,6 +140,29 @@ interface EvalRunResponse {
   passedGate: boolean;          // True if max regression delta >= -0.03 and all floors met
   regressionDelta: number;      // Actual worst-case delta compared to baseline
   results: EvalQueryResult[];   // Granular query evaluation results
+}
+```
+
+### 3.7 `StageBenchmarkDTO` & `BenchmarkRunResponse`
+```typescript
+interface StageBenchmarkDTO {
+  stage: string;          // Name of the pipeline stage profiled
+  samplesCount: number;   // Number of iterations executed
+  meanMs: number;         // Arithmetic mean latency (ms)
+  minMs: number;          // Minimum latency recorded (ms)
+  p50Ms: number;          // 50th percentile (median) latency (ms)
+  p90Ms: number;          // 90th percentile latency (ms)
+  p95Ms: number;          // 95th percentile latency (ms)
+  p99Ms: number;          // 99th percentile latency (ms)
+  maxMs: number;          // Maximum latency recorded (ms)
+  qps: number;            // Queries / Operations per second throughput
+}
+
+interface BenchmarkRunResponse {
+  totalDurationSec: number;     // Total benchmark suite execution time
+  subSecondSlaMet: boolean;     // Whether End-to-End p95 < 1,000ms
+  tier1CacheSlaMet: boolean;    // Whether Tier 1 Cache p95 < 25ms
+  stages: StageBenchmarkDTO[];  // Stage-by-stage latency percentiles
 }
 ```
 

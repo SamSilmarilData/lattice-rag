@@ -49,7 +49,12 @@ class RetrievalPipeline:
         self.graph_traverser = GraphTraverser(self.store)
         self.precision_reranker = PrecisionReranker(self.embedding_service)
 
-    async def execute(self, query: str, route: str) -> RetrievalResult:
+    async def execute(
+        self,
+        query: str,
+        route: str,
+        apply_guardrail: bool = True,
+    ) -> RetrievalResult:
         """Execute the full retrieval pipeline:
         Stage 1: Vector + BM25 Hybrid Search
         Stage 2: Graph Traversal
@@ -59,6 +64,7 @@ class RetrievalPipeline:
         Args:
             query: The search query.
             route: The chosen route strategy (e.g., 'hybrid', 'graph_relational', 'vector_exact').
+            apply_guardrail: Whether to run TypeSafe Jev Noul guardrail filtering.
 
         Returns:
             RetrievalResult containing chunks, graph context, stage timings, and grounding status.
@@ -96,10 +102,10 @@ class RetrievalPipeline:
         graph_context = await self.graph_traverser.traverse(anchor_ids, route)
         timings["stage2_traverse"] = (time.perf_counter() - t0) * 1000.0
 
-        # Stage 3: Precision Reranking
+        # Stage 3: Precision Reranking (rerank top 5 candidates)
         t0 = time.perf_counter()
         stage3_results = await self.precision_reranker.rerank(
-            query, stage1_chunks, graph_context, top_k=5
+            query, stage1_chunks[:5], graph_context, top_k=5, max_triples=5
         )
         timings["stage3_rerank"] = (time.perf_counter() - t0) * 1000.0
 
@@ -108,7 +114,7 @@ class RetrievalPipeline:
         final_chunks = stage3_results
         low_grounding = False
 
-        if self.router_guardrail is not None:
+        if apply_guardrail and self.router_guardrail is not None:
             filtered = self.router_guardrail.filter_chunks(query, stage3_results)
             if hasattr(filtered, "__await__"):
                 final_chunks = await filtered

@@ -121,3 +121,23 @@ export type StreamEvent =
       };
     }
   | { event: 'error'; data: { detail: string } };
+
+export interface StageBenchmarkDTO {
+  stage: string;
+  samplesCount: number;
+  meanMs: number;
+  minMs: number;
+  p50Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maxMs: number;
+  qps: number;
+}
+
+export interface BenchmarkRunResponse {
+  totalDurationSec: number;
+  subSecondSlaMet: boolean;
+  tier1CacheSlaMet: boolean;
+  stages: StageBenchmarkDTO[];
+}

@@ -16,6 +16,7 @@ from litestar.plugins import InitPluginProtocol
 from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetailsPlugin
 
 from lattice_rag.api.controllers import (
+    BenchmarkController,
     CacheController,
     EvalController,
     GraphController,
@@ -223,6 +224,7 @@ class ApplicationCore(InitPluginProtocol):
         """Register controllers, configure CORS, OpenAPI, DI, and error handling."""
         # Register controllers
         app_config.route_handlers.extend([
+            BenchmarkController,
             QueryController,
             IngestController,
             CacheController,
@@ -268,7 +270,7 @@ class ApplicationCore(InitPluginProtocol):
         # Configure OpenAPI with Scalar render plugin
         app_config.openapi_config = OpenAPIConfig(
             title="lattice-rag API",
-            version="0.6.0",
+            version="1.0.0",
             render_plugins=[ScalarRenderPlugin()],
         )
 

@@ -28,6 +28,7 @@ class PrecisionReranker:
         chunks: list[dict],
         graph_context: SubgraphResult,
         top_k: int = 5,
+        max_triples: int = 15,
     ) -> list[dict]:
         """Rerank chunks based on query and linearized graph context.
 
@@ -36,6 +37,7 @@ class PrecisionReranker:
             chunks: List of chunk dictionaries to rerank.
             graph_context: Subgraph result containing relationships.
             top_k: Number of top results to return.
+            max_triples: Maximum number of graph triples to linearize.
 
         Returns:
             List of top_k dictionaries with original chunk data and rerank_score.
@@ -52,7 +54,7 @@ class PrecisionReranker:
 
         triples: list[str] = []
         edges = getattr(graph_context, "edges", [])
-        for e in edges[:15]:  # Cap at 15 triples to stay safely within context limits
+        for e in edges[:max_triples]:  # Cap at max_triples to balance graph context and inference speed
             if isinstance(e, dict):
                 s_id = e.get("source_id")
                 t_id = e.get("target_id")

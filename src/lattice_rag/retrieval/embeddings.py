@@ -25,7 +25,7 @@ class ONNXReranker:
         self,
         repo_id: str = "onnx-community/bge-reranker-v2-m3-ONNX",
         filename: str = "onnx/model_int8.onnx",
-        max_length: int = 512,
+        max_length: int = 160,
     ) -> None:
         self.repo_id = repo_id
         self.filename = filename
@@ -35,6 +35,7 @@ class ONNXReranker:
 
     def _ensure_loaded(self) -> None:
         if self._session is None or self._tokenizer is None:
+            import os
             import onnxruntime as ort
             from huggingface_hub import hf_hub_download
             from tokenizers import Tokenizer
@@ -48,8 +49,14 @@ class ONNXReranker:
                 repo_id=self.repo_id,
                 filename="tokenizer.json",
             )
+            opts = ort.SessionOptions()
+            cpu_count = os.cpu_count() or 4
+            opts.intra_op_num_threads = min(4, cpu_count)
+            opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             self._session = ort.InferenceSession(
                 model_path,
+                sess_options=opts,
                 providers=["CPUExecutionProvider"],
             )
             self._tokenizer = Tokenizer.from_file(tok_path)
