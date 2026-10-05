@@ -21,6 +21,7 @@ http://localhost:8000/schema/scalar
 | `POST` | `/api/v1/query/stream` | `QueryRequest` | `text/event-stream` | Real-time SSE token & event stream. |
 | `POST` | `/api/v1/ingest` | `IngestRequest` | `IngestResponse` | Document ingestion & graph construction. |
 | `GET` | `/api/v1/cache/stats` | — | `CacheStatsResponse` | Hit/miss metrics for Tier 1 & 2 caches. |
+| `POST` | `/api/v1/eval/run` | — (Query params) | `EvalRunResponse` | Run CI/CD evaluation gate against benchmark dataset. |
 | `GET` | `/health` | — | `HealthResponse` | System health and connectivity telemetry. |
 
 ---
@@ -115,6 +116,27 @@ interface HealthResponse {
   typesafeConfigured: boolean;
   groqConfigured: boolean;
   geminiConfigured: boolean;
+}
+```
+
+### 3.6 `EvalRunResponse` & `EvalQueryResult`
+```typescript
+interface EvalQueryResult {
+  query: string;               // Evaluated benchmark query
+  faithfulness: number;        // Jev Score normalized expected value [0.0, 1.0]
+  contextPrecision: number;    // Jev Score normalized expected value [0.0, 1.0]
+  answerRelevance: number;     // Jev Score normalized expected value [0.0, 1.0]
+  passed: boolean;             // True if all metric floors (>= 0.50) are met
+}
+
+interface EvalRunResponse {
+  totalQueries: number;         // Total evaluated queries
+  meanFaithfulness: number;     // Average faithfulness across all queries
+  meanContextPrecision: number; // Average context precision across all queries
+  meanAnswerRelevance: number;  // Average answer relevance across all queries
+  passedGate: boolean;          // True if max regression delta >= -0.03 and all floors met
+  regressionDelta: number;      // Actual worst-case delta compared to baseline
+  results: EvalQueryResult[];   // Granular query evaluation results
 }
 ```
 

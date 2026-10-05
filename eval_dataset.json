@@ -1,0 +1,199 @@
+{
+  "version": "1.0.0",
+  "domain": "High-Performance AI Engineering & Database Internals",
+  "corpus": [
+    {
+      "document_id": "doc_latticedb_internals",
+      "title": "LatticeDB Embedded Property-Graph Architecture",
+      "text": "LatticeDB is a serverless, embedded property-graph database designed for high-performance in-process execution. Operating similarly to SQLite for graph and vector data, LatticeDB eliminates remote database network boundaries by running entirely inside the host application process. It uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search using the <=> operator and BM25 inverted index text searches using the @@ operator in a single local binary file. Nodes follow a hierarchical schema comprising Document, Chunk, and Entity labels. Edges include [:HAS_CHUNK] linking documents to chunks, [:CONTAINS] linking chunks to extracted entities, and [:RELATION {type: ...}] linking entities together for multi-hop graph traversals. Because all indices share the same transactional storage layer, hybrid vector-graph queries execute with sub-millisecond latency."
+    },
+    {
+      "document_id": "doc_fastembed_reranking",
+      "title": "FastEmbed Quantized Embeddings and Cross-Encoder Reranking",
+      "text": "FastEmbed provides CPU-quantized dense and sparse vector generation without requiring GPU hardware. The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity. For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding. During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+    },
+    {
+      "document_id": "doc_gliner_extraction",
+      "title": "GLiNER Zero-Shot Named Entity Recognition and Triples",
+      "text": "The knowledge extraction pipeline employs GLiNER (Generalist and Lightweight Model for Named Entity Recognition). By default, the system leverages urchade/gliner_small-v2.1 as an efficient in-process extractor. GLiNER extracts domain entities corresponding to predefined labels including person, organization, technology, concept, algorithm, database, and protocol. Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created between their respective nodes in LatticeDB with relationship type derived from context. Extracted entities are tied to their originating text chunk through [:CONTAINS] edges, ensuring tight provenance tracking and citation grounding."
+    },
+    {
+      "document_id": "doc_typesafe_system_one",
+      "title": "TypeSafe AI Jev System One Decision Architecture",
+      "text": "TypeSafe AI Jev is a specialized System One decision model trained to provide fast, calibrated judgments rather than generating free-form conversational text. The pipeline utilizes three primary Jev primitives. First, the Choice primitive acts as a front-door router, classifying incoming prompts in 70 to 500 milliseconds into vector_exact, graph_relational, hybrid, chitchat, or massive_context routes. Second, the boolean Noul primitive serves as a context guardrail, evaluating retrieved candidate chunks in parallel and pruning tangential passages with relevance probability below 0.50. Third, the Score primitive evaluates content across ordered descriptive criteria, returning expected-value continuous scores and probability distributions. By decomposing complex workflows into small typed judgments, Jev ensures deterministic control, low token usage, and sub-second pipeline throughput."
+    },
+    {
+      "document_id": "doc_litestar_granian_stack",
+      "title": "Litestar and Granian Rust-Optimized Web Framework",
+      "text": "The web API layer is built on Litestar 2.24+ and served by Granian, a high-performance HTTP server written in Rust that delivers 2 to 4 times the throughput of standard Python Uvicorn servers. All data transfer objects are defined as msgspec.Struct instances with rename='camel' to ensure zero-copy sub-millisecond JSON serialization. The service provides dual query APIs: a synchronous POST /api/v1/query endpoint and a streaming POST /api/v1/query/stream endpoint emitting typed Server-Sent Events (SSE) with stage, token, and done events for frontend telemetry. Error handling complies with RFC 9457 Problem Details, and all logging and error responses pass through automated regex sanitizers to scrub API keys, tokens, and authorization headers before reaching the network."
+    }
+  ],
+  "queries": [
+    {
+      "id": "eval_01",
+      "query": "How does LatticeDB combine HNSW vector similarity with BM25 text search in a single binary?",
+      "route": "vector_exact",
+      "expected_entities": ["LatticeDB", "HNSW", "BM25"],
+      "gold_chunks": ["LatticeDB is a serverless, embedded property-graph database... It uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search using the <=> operator and BM25 inverted index text searches using the @@ operator in a single local binary file."],
+      "ground_truth": "LatticeDB combines HNSW vector similarity using the <=> operator and BM25 inverted index text search using the @@ operator directly in a single embedded local binary file, querying both concurrently and eliminating external database network boundaries."
+    },
+    {
+      "id": "eval_02",
+      "query": "What edge relationships link Document, Chunk, and Entity nodes in LatticeDB?",
+      "route": "graph_relational",
+      "expected_entities": ["Document", "Chunk", "Entity", "HAS_CHUNK", "CONTAINS", "RELATION"],
+      "gold_chunks": ["Nodes follow a hierarchical schema comprising Document, Chunk, and Entity labels. Edges include [:HAS_CHUNK] linking documents to chunks, [:CONTAINS] linking chunks to extracted entities, and [:RELATION {type: ...}] linking entities together for multi-hop graph traversals."],
+      "ground_truth": "Document nodes are linked to Chunk nodes via [:HAS_CHUNK] edges, Chunk nodes are linked to Entity nodes via [:CONTAINS] edges, and Entity nodes are connected to each other via [:RELATION {type: ...}] edges."
+    },
+    {
+      "id": "eval_03",
+      "query": "What cross-encoder model is used in Stage 3 reranking and what is its context window size?",
+      "route": "vector_exact",
+      "expected_entities": ["BAAI/bge-reranker-v2-m3", "FastEmbed", "ONNX"],
+      "gold_chunks": ["For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters..."],
+      "ground_truth": "The Stage 3 reranker uses BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX, which features an 8,192 token context window."
+    },
+    {
+      "id": "eval_04",
+      "query": "How are traversed graph paths incorporated into candidate chunks during cross-encoder reranking?",
+      "route": "hybrid",
+      "expected_entities": ["LatticeDB", "Entity", "RELATION", "Cross-Encoder"],
+      "gold_chunks": ["During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."],
+      "ground_truth": "Traversed graph paths are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to the text chunks, allowing the cross-encoder to score text relevance and relational graph context together."
+    },
+    {
+      "id": "eval_05",
+      "query": "What GLiNER model is loaded for entity extraction and what heuristic creates relations between entities?",
+      "route": "hybrid",
+      "expected_entities": ["GLiNER", "urchade/gliner_small-v2.1", "EntityExtractor"],
+      "gold_chunks": ["By default, the system leverages urchade/gliner_small-v2.1 as an efficient in-process extractor... Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created..."],
+      "ground_truth": "The system uses urchade/gliner_small-v2.1 for entity extraction, and creates relationship edges between entities using sentence-level co-occurrence heuristics whenever two entities appear within the same sentence."
+    },
+    {
+      "id": "eval_06",
+      "query": "What are the three TypeSafe AI Jev primitives used in the architecture and what are their respective roles?",
+      "route": "hybrid",
+      "expected_entities": ["TypeSafe AI", "Jev", "Choice", "Noul", "Score"],
+      "gold_chunks": ["The pipeline utilizes three primary Jev primitives. First, the Choice primitive acts as a front-door router... Second, the boolean Noul primitive serves as a context guardrail, evaluating retrieved candidate chunks in parallel and pruning tangential passages with relevance probability below 0.50. Third, the Score primitive evaluates content across ordered descriptive criteria, returning expected-value continuous scores and probability distributions."],
+      "ground_truth": "The three Jev primitives are: (1) Choice, which acts as the front-door router for prompt classification; (2) Noul, which serves as the context guardrail pruning chunks below 0.50 probability; and (3) Score, which evaluates multi-dimensional content across ordered criteria."
+    },
+    {
+      "id": "eval_07",
+      "query": "What threshold does the Jev Noul context guardrail use to prune irrelevant chunks?",
+      "route": "vector_exact",
+      "expected_entities": ["Noul", "ContextGuardrail", "Jev"],
+      "gold_chunks": ["Second, the boolean Noul primitive serves as a context guardrail, evaluating retrieved candidate chunks in parallel and pruning tangential passages with relevance probability below 0.50."],
+      "ground_truth": "The Jev Noul context guardrail uses a probability threshold of 0.50, pruning any candidate chunk whose relevance probability falls below this value."
+    },
+    {
+      "id": "eval_08",
+      "query": "Why was Granian selected as the ASGI server over standard Uvicorn in this architecture?",
+      "route": "vector_exact",
+      "expected_entities": ["Granian", "Uvicorn", "Litestar", "Rust"],
+      "gold_chunks": ["The web API layer is built on Litestar 2.24+ and served by Granian, a high-performance HTTP server written in Rust that delivers 2 to 4 times the throughput of standard Python Uvicorn servers."],
+      "ground_truth": "Granian was chosen because it is written in Rust and delivers 2 to 4 times the throughput of standard Python Uvicorn servers, eliminating Python-level GIL bottlenecks under concurrent workloads."
+    },
+    {
+      "id": "eval_09",
+      "query": "What typed lifecycle events are emitted by the POST /api/v1/query/stream endpoint?",
+      "route": "vector_exact",
+      "expected_entities": ["POST /api/v1/query/stream", "SSE", "Server-Sent Events"],
+      "gold_chunks": ["The service provides dual query APIs: a synchronous POST /api/v1/query endpoint and a streaming POST /api/v1/query/stream endpoint emitting typed Server-Sent Events (SSE) with stage, token, and done events for frontend telemetry."],
+      "ground_truth": "The streaming query endpoint emits three typed Server-Sent Events: 'stage' (progress updates for routing, retrieval, guardrail), 'token' (synthesized answer tokens), and 'done' (final metadata and execution metrics)."
+    },
+    {
+      "id": "eval_10",
+      "query": "How are API credentials, tokens, and authorization headers shielded from leaking in error responses?",
+      "route": "vector_exact",
+      "expected_entities": ["RFC 9457", "Problem Details", "RedactingFilter", "SecretStr"],
+      "gold_chunks": ["Error handling complies with RFC 9457 Problem Details, and all logging and error responses pass through automated regex sanitizers to scrub API keys, tokens, and authorization headers before reaching the network."],
+      "ground_truth": "Error responses comply with RFC 9457 Problem Details and use automated regex sanitizers (via sanitize_error_detail) to strip API keys, tokens, and authorization headers from error messages before emitting them to clients."
+    },
+    {
+      "id": "eval_11",
+      "query": "Explain the multi-hop connection between an ingested Document and the relational entities extracted from it.",
+      "route": "graph_relational",
+      "expected_entities": ["Document", "Chunk", "Entity", "HAS_CHUNK", "CONTAINS", "RELATION"],
+      "gold_chunks": ["Nodes follow a hierarchical schema comprising Document, Chunk, and Entity labels. Edges include [:HAS_CHUNK] linking documents to chunks, [:CONTAINS] linking chunks to extracted entities, and [:RELATION {type: ...}] linking entities together for multi-hop graph traversals."],
+      "ground_truth": "An ingested Document is linked to one or more Chunk nodes via [:HAS_CHUNK] edges. Each Chunk node is linked to the Entity nodes mentioned in its text via [:CONTAINS] edges. Those Entity nodes are then connected to other Entity nodes via [:RELATION] edges."
+    },
+    {
+      "id": "eval_12",
+      "query": "What serialization library replaces Pydantic in the web stack and what JSON wire naming format is enforced?",
+      "route": "vector_exact",
+      "expected_entities": ["msgspec", "Struct", "camelCase"],
+      "gold_chunks": ["All data transfer objects are defined as msgspec.Struct instances with rename='camel' to ensure zero-copy sub-millisecond JSON serialization."],
+      "ground_truth": "The msgspec library replaces Pydantic, using msgspec.Struct with rename='camel' to enforce camelCase JSON serialization over the wire."
+    },
+    {
+      "id": "eval_13",
+      "query": "How does the Jev Score primitive compute continuous evaluation scores from discrete level criteria?",
+      "route": "hybrid",
+      "expected_entities": ["TypeSafe AI", "Jev", "Score", "Probability"],
+      "gold_chunks": ["Third, the Score primitive evaluates content across ordered descriptive criteria, returning expected-value continuous scores and probability distributions."],
+      "ground_truth": "The Jev Score primitive evaluates a probability distribution across the ordered criteria levels and calculates the continuous score as the mathematical expected value (sum of index * probability), normalized across the levels."
+    },
+    {
+      "id": "eval_14",
+      "query": "What dimension and model are used for generating dense vector embeddings in FastEmbed?",
+      "route": "vector_exact",
+      "expected_entities": ["FastEmbed", "BAAI/bge-small-en-v1.5", "384"],
+      "gold_chunks": ["The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity."],
+      "ground_truth": "FastEmbed uses the BAAI/bge-small-en-v1.5 model, which generates 384-dimensional normalized dense vectors optimized for cosine similarity."
+    },
+    {
+      "id": "eval_15",
+      "query": "What operator does LatticeDB use for native BM25 full-text searches across nodes?",
+      "route": "vector_exact",
+      "expected_entities": ["LatticeDB", "BM25", "@@"],
+      "gold_chunks": ["It uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search using the <=> operator and BM25 inverted index text searches using the @@ operator in a single local binary file."],
+      "ground_truth": "LatticeDB uses the @@ operator to execute native BM25 inverted index full-text searches across indexed node properties."
+    },
+    {
+      "id": "eval_16",
+      "query": "How does the architecture prevent heavy CPU tasks like ONNX embeddings from blocking Litestar's async loop?",
+      "route": "hybrid",
+      "expected_entities": ["ProcessPoolExecutor", "Litestar", "FastEmbed", "run_in_pool"],
+      "gold_chunks": ["To prevent the single-threaded asynchronous event loop from freezing, all CPU-bound machine learning tasks (embeddings, graph extraction) are strictly isolated in a ProcessPoolExecutor."],
+      "ground_truth": "All heavy CPU-bound machine learning tasks (embeddings, cross-encoder reranking, and entity extraction) are isolated in a dedicated ProcessPoolExecutor using run_in_pool(), offloading execution from Litestar's event loop."
+    },
+    {
+      "id": "eval_17",
+      "query": "What five classification routes are supported by the TypeSafe AI Jev Choice router?",
+      "route": "vector_exact",
+      "expected_entities": ["TypeSafe AI", "Jev", "Choice", "router"],
+      "gold_chunks": ["First, the Choice primitive acts as a front-door router, classifying incoming prompts in 70 to 500 milliseconds into vector_exact, graph_relational, hybrid, chitchat, or massive_context routes."],
+      "ground_truth": "The five classification routes supported by the Jev Choice router are: vector_exact, graph_relational, hybrid, chitchat, and massive_context."
+    },
+    {
+      "id": "eval_18",
+      "query": "What role does the [:CONTAINS] edge play in the RAG retrieval and citation grounding pipeline?",
+      "route": "graph_relational",
+      "expected_entities": ["CONTAINS", "Chunk", "Entity", "Citation"],
+      "gold_chunks": ["Extracted entities are tied to their originating text chunk through [:CONTAINS] edges, ensuring tight provenance tracking and citation grounding."],
+      "ground_truth": "The [:CONTAINS] edge binds extracted entity nodes to their exact originating text chunk, enabling provenance tracking, citation grounding, and expanding from vector chunk anchors into relational graph paths."
+    },
+    {
+      "id": "eval_19",
+      "query": "How does LatticeDB's in-process model compare with remote database architectures like Neo4j or Pinecone?",
+      "route": "hybrid",
+      "expected_entities": ["LatticeDB", "Neo4j", "Pinecone", "In-Process"],
+      "gold_chunks": ["LatticeDB is a serverless, embedded property-graph database designed for high-performance in-process execution. Operating similarly to SQLite for graph and vector data, LatticeDB eliminates remote database network boundaries by running entirely inside the host application process."],
+      "ground_truth": "LatticeDB operates as an embedded in-process database (like SQLite), eliminating the HTTP network latency (30-100ms) and heavy server infrastructure costs associated with remote databases like Neo4j or Pinecone."
+    },
+    {
+      "id": "eval_20",
+      "query": "Describe the full end-to-end flow from receiving a user query to generating an SSE-streamed response.",
+      "route": "massive_context",
+      "expected_entities": ["Litestar", "Granian", "Jev", "LatticeDB", "FastEmbed", "Groq"],
+      "gold_chunks": [
+        "The web API layer is built on Litestar 2.24+ and served by Granian...",
+        "The Choice primitive acts as a front-door router...",
+        "LatticeDB uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search...",
+        "The boolean Noul primitive serves as a context guardrail...",
+        "emitting typed Server-Sent Events (SSE) with stage, token, and done events..."
+      ],
+      "ground_truth": "The query arrives at Litestar (served by Granian). TypeSafe Jev Choice classifies the route while Tier 1 semantic cache is checked. On cache miss, Stage 1 hybrid search (HNSW + BM25 via RRF) recalls chunks from LatticeDB; Stage 2 traverses graph edges from entity anchors; Stage 3 reranks via bge-reranker-v2-m3 INT8 ONNX with linearized triples; Jev Noul prunes irrelevant chunks (threshold 0.50); GroqCloud qwen/qwen3.8-27b streams grounded answer tokens under a pybreaker circuit breaker; and Litestar emits typed SSE events (stage, token, done)."
+    }
+  ]
+}

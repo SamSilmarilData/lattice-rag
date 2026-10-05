@@ -75,7 +75,7 @@ flowchart TD
 | **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 local semantic vector cache (<20ms); Tier 2 `pybreaker` circuit breaker cascading to Redis Top 50 FAQ. |
 | **Primary Synthesis** | **GroqCloud** | Ultra-fast token streaming (200+ tok/s) via `qwen/qwen3.8-27b` with structured citation grounding. |
 | **Context Fallback** | **Gemini 3.8 Flash** | Massive context window (>100k tokens) reserved for cross-document synthesis and circuit breaker failover. |
-| **CI/CD Quality Gate** | **Jev Score + DeepEval** | Automated 20-query evaluation gate blocking PRs on regression (`Score_PR >= Score_main - 0.03`). |
+| **CI/CD Quality Gate** | **TypeSafe Jev Score + Noul** | Automated 20-query evaluation gate blocking PRs on regression ($\Delta \ge -0.03$), floor drop ($< 0.50$), and contradiction veto. |
 | **Secret Hygiene** | **Zero-Trust Security** | `SecretStr` masking, log redaction, RFC 9457 error shielding, and automated `apikeys.md` migration. |
 
 ---
@@ -90,6 +90,10 @@ lattice-rag/
 ├── LICENSE                      # MIT License
 ├── .gitignore                   # Strict boundary blocking .env, apikeys.md, and databases
 ├── .env.example                 # Sanitized configuration template
+├── eval_dataset.json            # Version-controlled 20-query golden benchmark dataset
+├── eval_baseline.json           # Tracked main-branch baseline metrics & gate thresholds
+├── .github/workflows/           # GitHub Actions CI/CD workflows
+│   └── eval-gate.yml            # Two-tier PR regression gate (hermetic tests + live Jev evaluation)
 ├── docs/                        # In-depth architectural guides
 │   ├── architecture.md          # Multi-layer system architecture
 │   ├── security.md              # Zero-trust secret management
@@ -103,7 +107,7 @@ lattice-rag/
 │   ├── cli.py                   # Command-line interface (Click)
 │   ├── api/
 │   │   ├── dtos.py              # msgspec Structs (camelCase wire contracts)
-│   │   └── controllers/         # Query, Ingestion, Cache, and Health controllers
+│   │   └── controllers/         # Query, Ingestion, Cache, Health, and Eval controllers
 │   ├── storage/
 │   │   ├── db.py                # LatticeStore embedded database manager
 │   │   └── extract.py           # GLiNER2.5-Decide local triple extraction
@@ -123,13 +127,16 @@ lattice-rag/
 │   │   ├── groq_synthesizer.py  # Primary Groq streaming generator (qwen/qwen3.8-27b @ 200+ tok/s)
 │   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
-│   └── orchestration/
-│       ├── pool.py              # Centralized ProcessPoolExecutor for CPU ML tasks
-│       ├── state.py             # LangGraph typed PipelineState
-│       └── graph.py             # RAGOrchestrator StateGraph pipeline
+│   ├── orchestration/
+│   │   ├── pool.py              # Centralized ProcessPoolExecutor for CPU ML tasks
+│   │   ├── state.py             # LangGraph typed PipelineState
+│   │   └── graph.py             # RAGOrchestrator StateGraph pipeline
+│   └── eval/
+│       ├── triage_gate.py       # TypeSafe AI Jev Score & Noul continuous evaluation engine
+│       └── runner.py            # Ephemeral isolated database evaluation runner & regression gate
 └── tests/
-    ├── unit/                    # 86 Hermetic unit tests (storage, security, config, routing, generation, caching)
-    └── integration/             # Live E2E tests (LatticeDB + FastEmbed + Groq + TypeSafe)
+    ├── unit/                    # 95 Hermetic unit tests (eval, storage, security, config, routing, generation, caching)
+    └── integration/             # Live E2E tests (LatticeDB + FastEmbed + Groq + TypeSafe + Phase 5 Eval)
 ```
 
 ---
@@ -236,6 +243,7 @@ lattice-rag serve
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
 | `POST` | `/api/v1/ingest` | Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB. |
 | `GET` | `/api/v1/cache/stats` | Telemetry on Tier 1 semantic vector cache hits and Tier 2 circuit breaker status. |
+| `POST` | `/api/v1/eval/run` | Triggers the CI/CD evaluation gate with custom dataset/baseline paths and regression tolerance. |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |
 
@@ -246,17 +254,20 @@ lattice-rag serve
 Run the automated test suite across unit and integration suites:
 
 ```bash
-# Run all unit tests (86 passing in ~5s)
+# Run all hermetic unit tests (95 passing in ~6s)
 pytest tests/unit/ -v
 
-# Run live E2E integration test (LatticeDB + FastEmbed + Groq + TypeSafe)
+# Run live E2E pipeline integration test (LatticeDB + FastEmbed + Groq + TypeSafe)
 pytest tests/integration/test_phase4_e2e.py -v
 
-# Run full suite (87 tests, 100% green, 0 warnings)
+# Run live Phase 5 Jev evaluation gate integration test
+pytest tests/integration/test_phase5_eval_live.py -v
+
+# Run full test suite (97 tests, 100% green, 0 warnings)
 pytest tests/ -v
 ```
 
-All 87 tests execute cleanly with 0 warnings.
+All 97 tests execute cleanly with 0 warnings.
 
 ---
 

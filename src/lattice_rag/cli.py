@@ -184,11 +184,105 @@ def benchmark() -> None:
 @main.command()
 @click.option('--dataset', default='eval_dataset.json', help='Path to evaluation dataset')
 @click.option('--baseline', default='eval_baseline.json', help='Path to baseline scores')
-def eval(dataset: str, baseline: str) -> None:
-    """Run the CI/CD evaluation gate."""
-    click.echo(f'Running evaluation with dataset: {dataset}')
-    click.echo(f'Comparing against baseline: {baseline}')
-    click.echo('(Evaluation integration pending full wiring)')
+@click.option('--fail-on-regression/--no-fail-on-regression', default=True, help='Exit with 1 if regression occurs')
+def eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
+    """Run the CI/CD evaluation gate against the golden benchmark dataset."""
+    import asyncio
+    import sys
+    from pathlib import Path
+    from lattice_rag.caching.fallback_cache import FallbackCache
+    from lattice_rag.caching.semantic_cache import SemanticCache
+    from lattice_rag.config import get_config
+    from lattice_rag.eval import EvalRunner, JevEvaluator
+    from lattice_rag.generation.chitchat import ChitchatHandler
+    from lattice_rag.generation.gemini_fallback import GeminiFallback
+    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+    from lattice_rag.orchestration.graph import RAGOrchestrator
+    from lattice_rag.orchestration.pool import shutdown_pool
+    from lattice_rag.retrieval.embeddings import EmbeddingService
+    from lattice_rag.retrieval.pipeline import RetrievalPipeline
+    from lattice_rag.routing.guardrail import ContextGuardrail
+    from lattice_rag.routing.router import QueryRouter
+    from lattice_rag.storage.db import LatticeStore
+    from lattice_rag.storage.extract import EntityExtractor
+
+    click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
+
+    async def _run() -> bool:
+        config = get_config()
+        store = LatticeStore(config.latticedb_path)
+        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        extractor = EntityExtractor()
+        router = QueryRouter()
+        guardrail = ContextGuardrail()
+        sem_cache = SemanticCache()
+        fb_cache = FallbackCache(config.redis_url)
+        await fb_cache.connect()
+
+        groq = GroqSynthesizer(
+            api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
+            model=config.groq_model,
+        )
+        gemini = GeminiFallback(
+            api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
+            model=config.gemini_model,
+        )
+        chitchat = ChitchatHandler()
+        pipeline = RetrievalPipeline(store, embed_svc, guardrail)
+        orchestrator = RAGOrchestrator(
+            router=router,
+            semantic_cache=sem_cache,
+            fallback_cache=fb_cache,
+            retrieval_pipeline=pipeline,
+            groq=groq,
+            gemini=gemini,
+            chitchat=chitchat,
+            embedding_service=embed_svc,
+        )
+        evaluator = JevEvaluator(api_key=config.typesafe_api_key)
+        runner = EvalRunner(
+            orchestrator=orchestrator,
+            evaluator=evaluator,
+            embedding_service=embed_svc,
+            extractor=extractor,
+        )
+
+        try:
+            resp = await runner.run_evaluation(dataset_path=dataset, baseline_path=baseline, use_temp_db=True)
+
+            click.echo("\n=================== Evaluation Results ===================")
+            click.echo(f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} {'Status':<10}")
+            click.echo("-" * 65)
+            for idx, r in enumerate(resp.results):
+                status_str = "✓ PASS" if r.passed else "✗ FAIL"
+                q_id = f"eval_{idx+1:02d}"
+                click.echo(f"{q_id:<10} {r.faithfulness:<15.4f} {r.context_precision:<15.4f} {r.answer_relevance:<15.4f} {status_str:<10}")
+
+            click.echo("=" * 65)
+            click.echo(f"Total Evaluated Queries: {resp.total_queries}")
+            click.echo(f"Mean Faithfulness:       {resp.mean_faithfulness:.4f}")
+            click.echo(f"Mean Context Precision:  {resp.mean_context_precision:.4f}")
+            click.echo(f"Mean Answer Relevance:   {resp.mean_answer_relevance:.4f}")
+            click.echo(f"Max Regression Delta:    {resp.regression_delta:+.4f}")
+
+            if resp.passed_gate:
+                click.echo("\n✓ CI/CD QUALITY GATE PASSED (No regression detected)")
+                return True
+            else:
+                click.echo("\n✗ CI/CD QUALITY GATE FAILED (Regression delta < -0.03 or floor violation)")
+                return False
+        finally:
+            await evaluator.close()
+            await fb_cache.close()
+            await sem_cache.close()
+            await router.close()
+            await guardrail.close()
+            store.close()
+            shutdown_pool()
+
+    passed = asyncio.run(_run())
+    if fail_on_regression and not passed:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

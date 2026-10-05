@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - 2026-10-05 (Phase 5: Golden Benchmark Dataset & Automated CI/CD Evaluation Gate)
+
+### Added
+- **Jev-Native Continuous Evaluation Engine (`JevEvaluator`):**
+  - Engineered continuous expected-value semantic scoring using TypeSafe AI Jev `Score` primitive across 5-level descriptive criteria (0.0 to 1.0) for Faithfulness, Context Precision, and Answer Relevance.
+  - Replaced non-deterministic LLM-as-a-judge temperature drift and fragile JSON output parsers with mathematically calibrated discrete probability distributions ($E[S] = \sum p_i \cdot s_i / 4.0$).
+  - Implemented hard-zero contradiction veto using Jev `Noul` ($P(\text{contradiction}) \ge 0.40 \implies \text{faithfulness} = 0.0$) preventing ungrounded hallucinations from slipping past the gate.
+  - Executed all 3 RAG Triad metrics plus the contradiction check in a single atomic TypeSafe System 1 request (~300ms) with zero generative token costs.
+- **Hermetic Ephemeral Evaluation Runner (`EvalRunner`):**
+  - Isolated evaluation runs into ephemeral temporary directories (`tempfile.TemporaryDirectory()`), indexing the evaluation corpus into an isolated SQLite-backed LatticeDB without mutating or locking production `data/lattice_rag.db`.
+  - Implemented concurrent batch query execution through the complete `RAGOrchestrator` pipeline.
+  - Engineered independent regression detection checking $\Delta = \text{Metric}_{\text{run}} - \text{Metric}_{\text{baseline}} \ge -0.03$ across all metrics, plus a hard per-query floor check ($\ge 0.50$).
+- **Version-Controlled 20-Query Golden Dataset & Baseline (`eval_dataset.json`, `eval_baseline.json`):**
+  - Authored a 5-document technical corpus spanning LatticeDB, FastEmbed, GLiNER, TypeSafe AI, and Litestar.
+  - Formulated 20 multi-hop queries across `vector_exact`, `graph_relational`, and `hybrid` routes with expected entity anchors and ground-truth references.
+  - Tracked main branch baseline metrics: Faithfulness (0.88), Context Precision (0.85), Answer Relevance (0.90), Max Allowed Regression Delta (0.03), and Floor (0.50).
+- **Web API & CLI Evaluation Surface:**
+  - Added `EvalController` (`POST /api/v1/eval/run`) with `FromQuery` parameters for dataset and baseline paths, returning camelCase `EvalRunResponse` DTOs.
+  - Wired `lattice-rag eval --dataset ... --baseline ... --fail-on-regression` CLI command rendering ASCII tabular per-query telemetry, metric means, regression deltas, and CI/CD exit codes.
+- **GitHub Actions CI/CD Quality Gate (`.github/workflows/eval-gate.yml`):**
+  - Built two-tier workflow executing 97 hermetic unit and integration tests across Ubuntu and macOS runners, running live TypeSafe Jev quality gate checks on pull requests.
+- **Automated Test Suite Expansion:**
+  - Added 10 new tests across `test_eval_triage.py`, `test_eval_runner.py`, `test_eval_controller.py`, and `test_phase5_eval_live.py`.
+  - Test suite now stands at 97 tests, 100% green with 0 warnings.
+
+---
+
 ## [0.4.0] - 2026-10-05 (Phase 4: Generation Model Orchestration & Web API Layer)
 
 ### Added

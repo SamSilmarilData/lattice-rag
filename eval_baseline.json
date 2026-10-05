@@ -1,0 +1,14 @@
+{
+  "version": "0.4.0",
+  "updated_at": "2026-10-05T20:00:00Z",
+  "total_queries": 20,
+  "metrics": {
+    "faithfulness": 0.88,
+    "context_precision": 0.85,
+    "answer_relevance": 0.90
+  },
+  "gate_thresholds": {
+    "max_regression_delta": 0.03,
+    "min_query_floor": 0.50
+  }
+}

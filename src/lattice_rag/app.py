@@ -17,12 +17,14 @@ from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetail
 
 from lattice_rag.api.controllers import (
     CacheController,
+    EvalController,
     HealthController,
     IngestController,
     QueryController,
 )
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
+from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.config import get_config
 from lattice_rag.config import AppConfig as LatticeAppConfig
 from lattice_rag.generation.chitchat import ChitchatHandler
@@ -98,6 +100,15 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         embedding_service=embedding_service,
     )
 
+    # 8. Jev Evaluator & CI/CD Eval Runner
+    evaluator = JevEvaluator(api_key=config.typesafe_api_key)
+    eval_runner = EvalRunner(
+        orchestrator=orchestrator,
+        evaluator=evaluator,
+        embedding_service=embedding_service,
+        extractor=extractor,
+    )
+
     # Store state on application for DI resolution
     app.state.config = config
     app.state.store = store
@@ -106,11 +117,14 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     app.state.semantic_cache = semantic_cache
     app.state.fallback_cache = fallback_cache
     app.state.orchestrator = orchestrator
+    app.state.evaluator = evaluator
+    app.state.eval_runner = eval_runner
 
     try:
         yield
     finally:
         # Graceful shutdown of connections and worker pool
+        await evaluator.close()
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
@@ -149,6 +163,10 @@ def provide_config(state: ImmutableState) -> LatticeAppConfig:
     return state.config
 
 
+def provide_eval_runner(state: ImmutableState) -> EvalRunner:
+    return state.eval_runner
+
+
 # ── RFC 9457 Secret-Sanitizing Error Handler ──────────────────────────
 
 def secret_sanitizing_exception_handler(request: Request, exc: Exception) -> Response:
@@ -177,6 +195,7 @@ class ApplicationCore(InitPluginProtocol):
             IngestController,
             CacheController,
             HealthController,
+            EvalController,
         ])
 
         # Register DI providers
@@ -188,6 +207,7 @@ class ApplicationCore(InitPluginProtocol):
             "fallback_cache": Provide(provide_fallback_cache, sync_to_thread=False),
             "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
             "config": Provide(provide_config, sync_to_thread=False),
+            "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),
         })
 
         # Register RFC 9457 error handler
