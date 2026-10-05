@@ -154,15 +154,35 @@ export const GraphExplorer: React.FC<GraphExplorerProps> = ({ traversedPath }) =
       .force('charge', forceManyBody().strength(-180))
       .force('center', forceCenter(width / 2, height / 2))
       .force('collision', forceCollide().radius(35))
-      .on('tick', () => {
-        setSimNodes([...nodes]);
-        setSimEdges([...edges]);
-      });
+      .stop();
+
+    // 60-tick synchronous warmup off-screen for instant stabilization
+    for (let i = 0; i < 60; ++i) {
+      sim.tick();
+    }
+    setSimNodes([...nodes]);
+    setSimEdges([...edges]);
+
+    // Continue remaining simulation settling, throttled by requestAnimationFrame
+    let animFrameId: number | null = null;
+    sim.restart();
+    sim.on('tick', () => {
+      if (animFrameId === null) {
+        animFrameId = requestAnimationFrame(() => {
+          setSimNodes([...nodes]);
+          setSimEdges([...edges]);
+          animFrameId = null;
+        });
+      }
+    });
 
     simulationRef.current = sim;
 
     return () => {
       sim.stop();
+      if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+      }
     };
   }, [activeData]);
 

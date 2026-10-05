@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 import datetime
 import difflib
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 import pybreaker
@@ -14,6 +13,12 @@ from redis.asyncio import Redis
 logger = structlog.get_logger(__name__)
 
 REDIS_HASH_KEY = "cache:fallback:queries"
+_TOKEN_REGEX = re.compile(r"\w+")
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "in", "on", "at", "of",
+    "for", "to", "from", "what", "how", "why", "does", "do", "did", "can",
+    "explain", "tell", "me", "about", "show", "describe", "with", "and", "or",
+})
 
 
 class FallbackCache:
@@ -30,6 +35,7 @@ class FallbackCache:
         self.breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30)
         self.redis: Redis | None = None
         self._cached_queries: list[str] = []
+        self._candidate_tokens: dict[str, set[str]] = {}
 
     async def connect(self) -> None:
         """Establishes Redis connection (in-process fakeredis by default)."""
@@ -131,20 +137,16 @@ class FallbackCache:
             logger.info("fuzzy_fallback_matched", query=query, matched=best_match)
             return await self.get_fallback(best_match)
 
-        # Token overlap matching with stop-word filtering
-        stop_words = {
-            "a", "an", "the", "is", "are", "was", "were", "in", "on", "at", "of",
-            "for", "to", "from", "what", "how", "why", "does", "do", "did", "can",
-            "explain", "tell", "me", "about", "show", "describe", "with", "and", "or",
-        }
-        import re
-
-        q_tokens = set(re.findall(r"\w+", norm_query)) - stop_words
+        # Token overlap matching with pre-tokenized index
+        q_tokens = set(_TOKEN_REGEX.findall(norm_query)) - _STOP_WORDS
         if q_tokens:
             best_score = 0.0
             best_candidate = None
             for candidate in self._cached_queries:
-                c_tokens = set(re.findall(r"\w+", candidate)) - stop_words
+                c_tokens = self._candidate_tokens.get(candidate)
+                if c_tokens is None:
+                    c_tokens = set(_TOKEN_REGEX.findall(candidate)) - _STOP_WORDS
+                    self._candidate_tokens[candidate] = c_tokens
                 if not c_tokens:
                     continue
                 overlap = len(q_tokens & c_tokens) / max(len(q_tokens), 1)
@@ -175,6 +177,8 @@ class FallbackCache:
             to_store[norm_q] = a
             if norm_q not in self._cached_queries:
                 self._cached_queries.append(norm_q)
+            # Pre-tokenize candidate query once
+            self._candidate_tokens[norm_q] = set(_TOKEN_REGEX.findall(norm_q)) - _STOP_WORDS
 
         await self.redis.hset(REDIS_HASH_KEY, mapping=to_store)  # type: ignore
         logger.info("fallback_seeded", count=len(queries))

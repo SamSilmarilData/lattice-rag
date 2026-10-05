@@ -1,13 +1,13 @@
-from __future__ import annotations
-
+from collections import OrderedDict
 import os
 import time
+from dataclasses import dataclass
 import numpy as np
 import structlog
-from dataclasses import dataclass
 from typesafe_sdk import AsyncTypeSafeClient, Noul
 
 logger = structlog.get_logger(__name__)
+
 
 @dataclass
 class CacheEntry:
@@ -19,20 +19,28 @@ class CacheEntry:
 
 class SemanticCache:
     """Tier 1 Semantic Vector Cache.
-    
-    Stores prior query embeddings and responses in-memory.
+
+    Stores prior query embeddings and responses in-memory with O(1) exact match,
+    vectorized BLAS dot product similarity, and bounded LRU eviction.
     """
 
     def __init__(
         self,
         similarity_threshold: float = 0.90,
         ts_client: AsyncTypeSafeClient | None = None,
+        max_size: int = 1000,
+        vector_dimensions: int = 384,
     ) -> None:
         """Initialize empty cache storage."""
         self.similarity_threshold = similarity_threshold
+        self.max_size = max_size
+        self.vector_dimensions = vector_dimensions
         self._cache: list[CacheEntry] = []
+        self._exact_map: OrderedDict[str, dict] = OrderedDict()
+        self._embeddings_matrix: np.ndarray | None = None
         self._hits = 0
         self._misses = 0
+
         if ts_client is not None:
             self._ts_client = ts_client
         elif os.environ.get("TYPESAFE_API_KEY"):
@@ -40,31 +48,41 @@ class SemanticCache:
         else:
             self._ts_client = None
 
+    def __len__(self) -> int:
+        """Return the number of cached items."""
+        return len(self._cache)
+
+    def get_exact(self, query_text: str) -> dict | None:
+        """O(1) exact-match shortcut bypassing embedding and Jev Noul verification."""
+        norm_key = query_text.strip().lower()
+        if norm_key in self._exact_map:
+            self._exact_map.move_to_end(norm_key)
+            self._hits += 1
+            logger.info("cache_hit_exact", query=query_text)
+            return self._exact_map[norm_key]
+        return None
+
     async def get(self, query_text: str, query_embedding: np.ndarray) -> dict | None:
-        """Search cache for semantic match."""
+        """Search cache for semantic match using vectorized BLAS dot product and Jev Noul."""
         if not self._cache:
             self._misses += 1
             return None
 
-        best_score = -1.0
-        best_entry = None
-
-        norm_q = np.linalg.norm(query_embedding)
-        if norm_q == 0:
+        # 2. Vectorized BLAS Cosine Similarity
+        norm_q = float(np.linalg.norm(query_embedding))
+        if norm_q == 0.0:
             self._misses += 1
             return None
 
-        for entry in self._cache:
-            norm_e = np.linalg.norm(entry.query_embedding)
-            if norm_e == 0:
-                continue
-            
-            sim = np.dot(query_embedding, entry.query_embedding) / (norm_q * norm_e)
-            if sim > best_score:
-                best_score = float(sim)
-                best_entry = entry
+        q_unit = (query_embedding / norm_q).astype(np.float32)
+        n_entries = len(self._cache)
+        # Single C-level BLAS dot product across all cached embeddings: O(N * D)
+        sims = np.dot(self._embeddings_matrix[:n_entries], q_unit)
+        best_idx = int(np.argmax(sims))
+        best_score = float(sims[best_idx])
+        best_entry = self._cache[best_idx]
 
-        if best_score >= self.similarity_threshold and best_entry is not None:
+        if best_score >= self.similarity_threshold:
             if self._ts_client is None:
                 logger.warning("ts_client_not_configured_for_semantic_verification")
                 self._misses += 1
@@ -87,7 +105,7 @@ class SemanticCache:
                 if noul_result is not None and noul_result.noul >= 0.70:
                     self._hits += 1
                     logger.info(
-                        "cache_hit",
+                        "cache_hit_fuzzy",
                         query=query_text,
                         score=best_score,
                         noul_prob=noul_result.noul,
@@ -103,20 +121,54 @@ class SemanticCache:
                     )
             except Exception as e:
                 logger.error("noul_verification_failed", error=str(e))
-        
+
         self._misses += 1
         return None
 
     def put(self, query_text: str, query_embedding: np.ndarray, response: dict) -> None:
-        """Store a new entry."""
+        """Store a new entry with normalized vector and bounded LRU eviction."""
+        norm_key = query_text.strip().lower()
+
+        # Compute normalized unit vector for fast BLAS dot product
+        norm_val = float(np.linalg.norm(query_embedding))
+        norm_vec = (query_embedding / norm_val).astype(np.float32) if norm_val > 0.0 else query_embedding.astype(np.float32)
+
+        # Initialize or adjust embeddings matrix to match vector dimension
+        vec_dim = len(norm_vec)
+        if self._embeddings_matrix is None or self._embeddings_matrix.shape[1] != vec_dim:
+            self._embeddings_matrix = np.zeros((self.max_size, vec_dim), dtype=np.float32)
+            for i, c_entry in enumerate(self._cache):
+                if len(c_entry.query_embedding) == vec_dim:
+                    self._embeddings_matrix[i] = c_entry.query_embedding
+
+        # LRU eviction if at capacity
+        if len(self._cache) >= self.max_size:
+            # Evict least recently used key from exact map and oldest from cache list
+            oldest_key, _ = self._exact_map.popitem(last=False)
+            # Find and remove matching entry in _cache
+            idx_to_remove = next(
+                (i for i, entry in enumerate(self._cache) if entry.query_text.strip().lower() == oldest_key),
+                0,
+            )
+            self._cache.pop(idx_to_remove)
+            # Shift remaining rows in embeddings matrix
+            if idx_to_remove < len(self._cache):
+                self._embeddings_matrix[idx_to_remove : len(self._cache)] = self._embeddings_matrix[
+                    idx_to_remove + 1 : len(self._cache) + 1
+                ]
+
+        insert_idx = len(self._cache)
         entry = CacheEntry(
             query_text=query_text,
-            query_embedding=query_embedding,
+            query_embedding=norm_vec,
             response=response,
-            created_at=time.time()
+            created_at=time.time(),
         )
         self._cache.append(entry)
-        logger.debug("cache_put", query=query_text)
+        self._exact_map[norm_key] = response
+        self._exact_map.move_to_end(norm_key)
+        self._embeddings_matrix[insert_idx] = norm_vec
+        logger.debug("cache_put", query=query_text, size=len(self._cache))
 
     @property
     def stats(self) -> tuple[int, int]:
@@ -126,6 +178,9 @@ class SemanticCache:
     def clear(self) -> None:
         """Clears all entries."""
         self._cache.clear()
+        self._exact_map.clear()
+        if self._embeddings_matrix is not None:
+            self._embeddings_matrix.fill(0.0)
         self._hits = 0
         self._misses = 0
         logger.info("cache_cleared")

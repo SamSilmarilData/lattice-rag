@@ -37,13 +37,15 @@ class HybridSearcher:
         if not query or not query.strip():
             return []
 
-        # Run embedding generation in thread pool
-        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
-
-        # Concurrently execute vector search and BM25 search
-        vector_results, bm25_results = await asyncio.gather(
-            asyncio.to_thread(self.store.vector_search, query_embedding, top_k=top_k * 2),
+        # Concurrently execute CPU query embedding and BM25 full-text search
+        query_embedding, bm25_results = await asyncio.gather(
+            asyncio.to_thread(self.embedding_service.embed_query, query),
             asyncio.to_thread(self.store.bm25_search, query, top_k=top_k * 2),
+        )
+
+        # Run vector search with ready embedding
+        vector_results = await asyncio.to_thread(
+            self.store.vector_search, query_embedding, top_k=top_k * 2
         )
 
         # Merge using Reciprocal Rank Fusion (RRF)
@@ -66,12 +68,14 @@ class HybridSearcher:
                 node_map[node_id] = res
             fused_scores[node_id] += 1.0 / (k + rank)
 
-        # Sort by fused score descending
-        sorted_nodes = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+        # Select top_k by fused score using O(M log K) heap
+        import heapq
+
+        top_nodes = heapq.nlargest(top_k, fused_scores.items(), key=lambda x: x[1])
 
         # Build final top_k deduplicated results
         final_results: list[SearchResult] = []
-        for node_id, score in sorted_nodes[:top_k]:
+        for node_id, score in top_nodes:
             res = node_map[node_id]
             res.score = score
             final_results.append(res)

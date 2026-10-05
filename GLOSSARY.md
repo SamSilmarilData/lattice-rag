@@ -29,4 +29,6 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Synthesis**: Grounded generation producing a verifiable natural language answer with inline citations from retrieved chunks and subgraphs.
 - **Resilient Synthesizer**: The deep module encapsulating multi-tier generative resilience, managing circuit breaker state across GroqCloud, Gemini Flash, and local Redis FAQ fallbacks in both buffered and token-streaming modes.
 - **Tiered Cache**: Multi-level query caching combining Tier 1 in-memory semantic vector similarity with Tier 2 circuit-broken Redis FAQ fallback.
+- **Exact Cache Shortcut**: An $O(1)$ fast-path in Tier 1 cache that bypasses dense embedding generation and Jev Noul verification on exact query string matches, returning in $< 0.5$ms at zero API cost.
+- **Document Bundle**: An atomic single-transaction ingestion payload committing Document, Chunk, Entity, and Relation graph nodes and edges into LatticeDB in a single WAL disk sync.
 

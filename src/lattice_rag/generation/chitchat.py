@@ -6,6 +6,15 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+_CHITCHAT_AUTOMATON = re.compile(
+    r"(?P<greetings>\b(?:hello|hi|hey|greetings|morning)\b)|"
+    r"(?P<farewell>\b(?:bye|goodbye|farewell|cya)\b)|"
+    r"(?P<thanks>\b(?:thanks|thank you|thx|appreciate)\b)|"
+    r"(?P<help>\b(?:help|what can you do|assist)\b)",
+    re.IGNORECASE,
+)
+
+
 class ChitchatHandler:
     """Instant deterministic handler for chitchat queries. Zero LLM cost."""
 
@@ -17,20 +26,10 @@ class ChitchatHandler:
         "default": "I am a specialized knowledge engine. Could you please ask me a question about your documents or knowledge base?",
     }
 
-    _PATTERNS = {
-        "greetings": [r"\bhello\b", r"\bhi\b", r"\bhey\b", r"\bgreetings\b", r"\bmorning\b"],
-        "farewell": [r"\bbye\b", r"\bgoodbye\b", r"\bfarewell\b", r"\bcya\b"],
-        "thanks": [r"\bthanks\b", r"\bthank you\b", r"\bthx\b", r"\bappreciate\b"],
-        "help": [r"\bhelp\b", r"\bwhat can you do\b", r"\bassist\b"],
-    }
-
     async def handle(self, query: str) -> str:
-        """Pattern-matches query against common chitchat patterns."""
+        """Pattern-matches query against common chitchat patterns in a single regex pass."""
         logger.debug("Handling potential chitchat query", query=query)
-        q = query.lower()
-
-        for category, patterns in self._PATTERNS.items():
-            if any(re.search(p, q) for p in patterns):
-                return self.responses[category]
-
+        match = _CHITCHAT_AUTOMATON.search(query)
+        if match and match.lastgroup:
+            return self.responses.get(match.lastgroup, self.responses["default"])
         return self.responses["default"]

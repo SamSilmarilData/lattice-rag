@@ -66,107 +66,91 @@ class EvalRunner:
         temp_dir_obj: tempfile.TemporaryDirectory | None = None
         temp_store: LatticeStore | None = None
 
-        if use_temp_db and corpus_data:
-            logger.info("seeding_ephemeral_eval_database", doc_count=len(corpus_data))
-            temp_dir_obj = tempfile.TemporaryDirectory()
-            temp_db_path = Path(temp_dir_obj.name) / "eval_ephemeral.db"
-            temp_store = LatticeStore(temp_db_path)
+        try:
+            if use_temp_db and corpus_data:
+                logger.info("seeding_ephemeral_eval_database", doc_count=len(corpus_data))
+                temp_dir_obj = tempfile.TemporaryDirectory()
+                temp_db_path = Path(temp_dir_obj.name) / "eval_ephemeral.db"
+                temp_store = LatticeStore(temp_db_path)
 
-            embed_svc = self.embedding_service or self.orchestrator.retrieval.embedding_service
-            extractor = self.extractor or EntityExtractor()
+                embed_svc = self.embedding_service or self.orchestrator.retrieval.embedding_service
+                extractor = self.extractor or EntityExtractor()
 
-            # Seed documents
-            for doc in corpus_data:
-                doc_id = doc.get("document_id", "doc_eval")
-                title = doc.get("title", "Evaluation Document")
-                text = doc.get("text", "")
-
-                # Paragraph / sentence chunking (~512 chars with 64 overlap)
-                step = 512 - 64
-                text_chunks: list[str] = []
-                for i in range(0, len(text), step):
-                    chunk_text = text[i : i + 512].strip()
-                    if chunk_text:
-                        text_chunks.append(chunk_text)
-
-                if not text_chunks:
-                    text_chunks = [text]
-
-                embeddings = embed_svc.embed_texts(text_chunks)
-                chunk_nodes = [
-                    ChunkData(text=c_text, embedding=c_emb, position=idx)
-                    for idx, (c_text, c_emb) in enumerate(zip(text_chunks, embeddings))
-                ]
-                stats = temp_store.ingest_document(doc_id=doc_id, title=title, chunks=chunk_nodes)
-
-                # Extract and persist entities
-                for chunk_id, c_text in zip(stats.chunk_ids, text_chunks):
-                    entities = extractor.extract_entities(c_text)
-                    if entities:
-                        triples = extractor.extract_triples(c_text, entities)
-                        temp_store.ingest_entities(chunk_id=chunk_id, entities=entities, relations=triples)
-
-            # Build ephemeral retrieval pipeline and orchestrator
-            ephemeral_retrieval = RetrievalPipeline(
-                store=temp_store,
-                embedding_service=embed_svc,
-                router_guardrail=self.orchestrator.retrieval.router_guardrail,
-            )
-
-            active_orchestrator = RAGOrchestrator(
-                router=self.orchestrator.router,
-                semantic_cache=self.orchestrator.semantic_cache,
-                fallback_cache=self.orchestrator.fallback_cache,
-                retrieval_pipeline=ephemeral_retrieval,
-                groq=self.orchestrator.groq,
-                gemini=self.orchestrator.gemini,
-                chitchat=self.orchestrator.chitchat,
-                embedding_service=embed_svc,
-            )
-
-        # Clear semantic cache before eval run so every query is freshly evaluated
-        if active_orchestrator.semantic_cache is not None:
-            active_orchestrator.semantic_cache.clear()
-
-        semaphore = asyncio.Semaphore(max_concurrency)
-
-        async def _eval_single(item: dict[str, Any]) -> EvalQueryResult:
-            async with semaphore:
-                query = item["query"]
-                ground_truth = item.get("ground_truth", "")
-
-                try:
-                    pipeline_state = await active_orchestrator.run(query, stream=False)
-                    answer = pipeline_state.answer
-                    chunks = pipeline_state.filtered_chunks
-                except Exception as e:
-                    logger.error("eval_query_execution_failed", query=query, error=str(e))
-                    answer = f"ERROR: {e}"
-                    chunks = []
-
-                return await self.evaluator.evaluate_query(
-                    query=query,
-                    retrieved_chunks=chunks,
-                    generated_answer=answer,
-                    ground_truth=ground_truth,
+                from lattice_rag.ingestion.ingester import DocumentIngester
+                ingester = DocumentIngester(
+                    store=temp_store,
+                    embedding_service=embed_svc,
+                    extractor=extractor,
                 )
 
-        logger.info("running_eval_suite", total_queries=len(queries_data))
-        eval_tasks = [_eval_single(q) for q in queries_data]
-        results = await asyncio.gather(*eval_tasks)
+                # Seed documents using batched DocumentIngester
+                for doc in corpus_data:
+                    doc_id = doc.get("document_id", "doc_eval")
+                    title = doc.get("title", "Evaluation Document")
+                    text = doc.get("text", "")
+                    await ingester.ingest(doc_id=doc_id, title=title, text=text)
 
-        # Clean up ephemeral resources
-        if temp_store is not None:
-            try:
-                temp_store.close()
-            except Exception:
-                pass
+                # Build ephemeral retrieval pipeline and orchestrator
+                ephemeral_retrieval = RetrievalPipeline(
+                    store=temp_store,
+                    embedding_service=embed_svc,
+                    router_guardrail=self.orchestrator.retrieval.router_guardrail,
+                )
 
-        if temp_dir_obj is not None:
-            try:
-                temp_dir_obj.cleanup()
-            except Exception:
-                pass
+                active_orchestrator = RAGOrchestrator(
+                    router=self.orchestrator.router,
+                    semantic_cache=self.orchestrator.semantic_cache,
+                    fallback_cache=self.orchestrator.fallback_cache,
+                    retrieval_pipeline=ephemeral_retrieval,
+                    groq=self.orchestrator.groq,
+                    gemini=self.orchestrator.gemini,
+                    chitchat=self.orchestrator.chitchat,
+                    embedding_service=embed_svc,
+                )
+
+            # Clear semantic cache before eval run so every query is freshly evaluated
+            if active_orchestrator.semantic_cache is not None:
+                active_orchestrator.semantic_cache.clear()
+
+            semaphore = asyncio.Semaphore(max_concurrency)
+
+            async def _eval_single(item: dict[str, Any]) -> EvalQueryResult:
+                async with semaphore:
+                    query = item["query"]
+                    ground_truth = item.get("ground_truth", "")
+
+                    try:
+                        pipeline_state = await active_orchestrator.run(query, stream=False)
+                        answer = pipeline_state.answer
+                        chunks = pipeline_state.filtered_chunks
+                    except Exception as e:
+                        logger.error("eval_query_execution_failed", query=query, error=str(e))
+                        answer = f"ERROR: {e}"
+                        chunks = []
+
+                    return await self.evaluator.evaluate_query(
+                        query=query,
+                        retrieved_chunks=chunks,
+                        generated_answer=answer,
+                        ground_truth=ground_truth,
+                    )
+
+            logger.info("running_eval_suite", total_queries=len(queries_data))
+            eval_tasks = [_eval_single(q) for q in queries_data]
+            results = await asyncio.gather(*eval_tasks)
+        finally:
+            # Clean up ephemeral resources
+            if temp_store is not None:
+                try:
+                    temp_store.close()
+                except Exception:
+                    pass
+
+            if temp_dir_obj is not None:
+                try:
+                    temp_dir_obj.cleanup()
+                except Exception:
+                    pass
 
         # Calculate mean scores
         total = len(results)

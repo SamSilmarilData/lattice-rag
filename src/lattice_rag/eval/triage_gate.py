@@ -39,6 +39,24 @@ CONTRADICTION_INSTRUCTIONS = (
     "directly contradicts the facts stated in the source context?"
 )
 
+_EVAL_QUESTIONS: dict[str, Any] = {
+    "faithfulness": Score(
+        instructions="Rate the factual faithfulness of the answer based strictly on the provided context.",
+        criteria=FAITHFULNESS_CRITERIA,
+    ),
+    "context_precision": Score(
+        instructions="Rate how precisely the retrieved context contains the exact facts necessary to answer the query according to the ground truth.",
+        criteria=CONTEXT_PRECISION_CRITERIA,
+    ),
+    "answer_relevance": Score(
+        instructions="Rate how directly, completely, and appropriately the answer addresses the specific question asked in the query.",
+        criteria=ANSWER_RELEVANCE_CRITERIA,
+    ),
+    "contradiction": Noul(
+        instructions=CONTRADICTION_INSTRUCTIONS,
+    ),
+}
+
 
 class JevEvaluator:
     """TypeSafe AI Jev System One evaluation engine.
@@ -107,25 +125,7 @@ class JevEvaluator:
             "ground_truth": ground_truth,
         }
 
-        questions = {
-            "faithfulness": Score(
-                instructions="Rate the factual faithfulness of the answer based strictly on the provided context.",
-                criteria=FAITHFULNESS_CRITERIA,
-            ),
-            "context_precision": Score(
-                instructions="Rate how precisely the retrieved context contains the exact facts necessary to answer the query according to the ground truth.",
-                criteria=CONTEXT_PRECISION_CRITERIA,
-            ),
-            "answer_relevance": Score(
-                instructions="Rate how directly, completely, and appropriately the answer addresses the specific question asked in the query.",
-                criteria=ANSWER_RELEVANCE_CRITERIA,
-            ),
-            "contradiction": Noul(
-                instructions=CONTRADICTION_INSTRUCTIONS,
-            ),
-        }
-
-        response = await self._client.system_one(state=state, questions=questions)
+        response = await self._client.system_one(state=state, questions=_EVAL_QUESTIONS)
 
         raw_faith = response.scores["faithfulness"].score
         raw_prec = response.scores["context_precision"].score

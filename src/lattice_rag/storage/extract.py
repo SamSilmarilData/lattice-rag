@@ -80,7 +80,7 @@ class EntityExtractor:
                     name=name,
                     entity_type=p["label"],
                     # Placeholder — FastEmbed fills real embeddings before storage.
-                    embedding=np.zeros(384, dtype=np.float32),
+                    embedding=None,
                 )
             )
         return entities
@@ -94,23 +94,30 @@ class EntityExtractor:
 
         If two entities appear in the same sentence, they are linked with a
         ``CO_OCCURS`` relation whose type encodes both entity labels.
+        Duplicate triples across sentences are pruned in O(1) time.
         """
         sentences = _SENTENCE_SPLIT.split(text) if text else []
 
         relations: list[RelationData] = []
+        seen_triples: set[tuple[str, str, str]] = set()
+
         for sentence in sentences:
             present = [e for e in entities if e.name in sentence]
             for i, ent1 in enumerate(present):
                 for ent2 in present[i + 1 :]:
-                    relations.append(
-                        RelationData(
-                            source_name=ent1.name,
-                            target_name=ent2.name,
-                            relation_type=(
-                                f"CO_OCCURS_IN_"
-                                f"{ent1.entity_type.upper()}_"
-                                f"{ent2.entity_type.upper()}"
-                            ),
-                        )
+                    rel_type = (
+                        f"CO_OCCURS_IN_"
+                        f"{ent1.entity_type.upper()}_"
+                        f"{ent2.entity_type.upper()}"
                     )
+                    triple_key = (ent1.name, ent2.name, rel_type)
+                    if triple_key not in seen_triples:
+                        seen_triples.add(triple_key)
+                        relations.append(
+                            RelationData(
+                                source_name=ent1.name,
+                                target_name=ent2.name,
+                                relation_type=rel_type,
+                            )
+                        )
         return relations

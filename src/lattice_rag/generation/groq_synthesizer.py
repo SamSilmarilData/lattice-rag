@@ -18,10 +18,12 @@ class GroqSynthesizer:
         self,
         api_key: str | None = None,
         model: str = "qwen/qwen3.8-27b",
+        max_tokens: int = 512,
         client: AsyncGroq | None = None,
     ) -> None:
         """Initializes the AsyncGroq client with configurable model and API key."""
         self.model = model
+        self.max_tokens = max_tokens
         if client is not None:
             self.client = client
         elif api_key:
@@ -36,25 +38,29 @@ class GroqSynthesizer:
         graph_context: dict[str, Any] | None = None,
     ) -> str:
         """Builds the structured system prompt with verified evidence and citation anchors."""
-        prompt = (
-            "You are a helpful and precise technical assistant answering questions based on provided evidence.\n"
-            "Instructions:\n"
-            "- Ground every factual claim directly in the provided evidence.\n"
-            "- Cite source chunks by their position or ID (e.g. [Chunk 0], [Doc: xyz]) when making statements.\n"
-            "- If relational graph triples are provided, use them to explain connections between entities.\n"
-            "- Acknowledge when the evidence is insufficient to answer the question.\n"
-            "- Be concise, direct, and authoritative.\n\n"
-        )
-        prompt += "Text Chunks:\n"
+        parts: list[str] = [
+            "You are a helpful and precise technical assistant answering questions based on provided evidence.",
+            "Instructions:",
+            "- Ground every factual claim directly in the provided evidence.",
+            "- Cite source chunks by their position or ID (e.g. [Chunk 0], [Doc: xyz]) when making statements.",
+            "- If relational graph triples are provided, use them to explain connections between entities.",
+            "- Acknowledge when the evidence is insufficient to answer the question.",
+            "- Be concise, direct, and authoritative.",
+            "",
+            "Text Chunks:",
+        ]
+
         if not context_chunks:
-            prompt += "(No text chunks retrieved)\n"
-        for i, chunk in enumerate(context_chunks):
-            doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
-            chunk_text = chunk.get("text", str(chunk))
-            prompt += f"[Chunk {i} (Doc: {doc_id})]: {chunk_text}\n"
+            parts.append("(No text chunks retrieved)")
+        else:
+            for i, chunk in enumerate(context_chunks):
+                doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
+                chunk_text = chunk.get("text", str(chunk))
+                parts.append(f"[Chunk {i} (Doc: {doc_id})]: {chunk_text}")
 
         if graph_context:
-            prompt += "\nKnowledge Graph Context:\n"
+            parts.append("")
+            parts.append("Knowledge Graph Context:")
             edges = graph_context.get("edges", [])
             nodes = {n.get("node_id", n.get("id")): n.get("name", "") for n in graph_context.get("nodes", [])}
             if edges:
@@ -62,12 +68,13 @@ class GroqSynthesizer:
                     src = nodes.get(edge.get("source_id"), edge.get("source_name", "Unknown"))
                     tgt = nodes.get(edge.get("target_id"), edge.get("target_name", "Unknown"))
                     rel = edge.get("relation_type", "RELATION")
-                    prompt += f"- {src} --[{rel}]--> {tgt}\n"
+                    parts.append(f"- {src} --[{rel}]--> {tgt}")
             else:
-                prompt += f"{json.dumps(graph_context)}\n"
+                parts.append(json.dumps(graph_context))
 
-        prompt += f"\nUser Question: {query}"
-        return prompt
+        parts.append("")
+        parts.append(f"User Question: {query}")
+        return "\n".join(parts)
 
     async def synthesize(
         self,
@@ -83,6 +90,7 @@ class GroqSynthesizer:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=self.max_tokens,
                 stream=False,
             )
             return response.choices[0].message.content or ""
@@ -105,6 +113,7 @@ class GroqSynthesizer:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=self.max_tokens,
                 stream=True,
             )
             async for chunk in response:

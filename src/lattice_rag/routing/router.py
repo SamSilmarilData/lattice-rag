@@ -9,6 +9,19 @@ from typesafe_sdk import AsyncTypeSafeClient, Choice
 logger = structlog.get_logger(__name__)
 
 
+_ROUTER_INSTRUCTIONS = (
+    "Classify the user query into the single most appropriate routing category "
+    "for a Hybrid GraphRAG system."
+)
+_ROUTER_CRITERIA = {
+    "vector_exact": "Precise factual lookups, e.g., 'What is X?', 'Define Y'.",
+    "graph_relational": "Multi-hop relational queries, e.g., 'How does X relate to Y?', 'What connects A to B?'.",
+    "hybrid": "Complex queries needing both vector and graph context, e.g., 'Explain the relationship between X, Y, and Z in the context of W'.",
+    "chitchat": "Greetings, small talk, non-technical conversation.",
+    "massive_context": "Queries requiring cross-document synthesis, e.g., 'Summarize all findings about...', 'Compare everything we know about...'.",
+}
+
+
 @dataclass(frozen=True)
 class RouteDecision:
     route: str
@@ -38,7 +51,6 @@ class QueryRouter:
             self._client = AsyncTypeSafeClient()
         logger.debug("QueryRouter initialized")
 
-
     async def route_query(self, query: str) -> RouteDecision:
         """Routes a query into one of the supported strategies.
 
@@ -49,24 +61,12 @@ class QueryRouter:
             RouteDecision: The chosen route and confidence score.
         """
         logger.info("Routing query", query=query)
-        instructions = (
-            "Classify the user query into the single most appropriate routing category "
-            "for a Hybrid GraphRAG system."
-        )
-        criteria = {
-            "vector_exact": "Precise factual lookups, e.g., 'What is X?', 'Define Y'.",
-            "graph_relational": "Multi-hop relational queries, e.g., 'How does X relate to Y?', 'What connects A to B?'.",
-            "hybrid": "Complex queries needing both vector and graph context, e.g., 'Explain the relationship between X, Y, and Z in the context of W'.",
-            "chitchat": "Greetings, small talk, non-technical conversation.",
-            "massive_context": "Queries requiring cross-document synthesis, e.g., 'Summarize all findings about...', 'Compare everything we know about...'."
-        }
-
         response = await self._client.system_one(
             state={"query": query},
             questions={
                 "route": Choice(
-                    instructions=instructions,
-                    criteria=criteria,
+                    instructions=_ROUTER_INSTRUCTIONS,
+                    criteria=_ROUTER_CRITERIA,
                 ),
             },
         )

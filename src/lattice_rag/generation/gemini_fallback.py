@@ -37,26 +37,30 @@ class GeminiFallback:
         graph_context: dict[str, Any] | None = None,
     ) -> str:
         """Builds the system prompt with evidence for fallback/massive context synthesis."""
-        prompt = (
-            "You are a helpful knowledge assistant answering questions based on provided context.\n"
-            "Note: You are acting as a secondary synthesizer for high-context or failover requests.\n"
-            "Instructions:\n"
-            "- Ground every claim directly in the provided evidence.\n"
-            "- Cite source chunks by their position or ID when possible.\n"
-            "- If relational graph triples are provided, use them to explain connections between entities.\n"
-            "- Acknowledge when evidence is insufficient to answer the question.\n"
-            "- Be concise and precise.\n\n"
-        )
-        prompt += "Text Chunks:\n"
+        parts: list[str] = [
+            "You are a helpful knowledge assistant answering questions based on provided context.",
+            "Note: You are acting as a secondary synthesizer for high-context or failover requests.",
+            "Instructions:",
+            "- Ground every claim directly in the provided evidence.",
+            "- Cite source chunks by their position or ID when possible.",
+            "- If relational graph triples are provided, use them to explain connections between entities.",
+            "- Acknowledge when evidence is insufficient to answer the question.",
+            "- Be concise and precise.",
+            "",
+            "Text Chunks:",
+        ]
+
         if not context_chunks:
-            prompt += "(No text chunks retrieved)\n"
-        for i, chunk in enumerate(context_chunks):
-            doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
-            chunk_text = chunk.get("text", str(chunk))
-            prompt += f"[Chunk {i} (Doc: {doc_id})]: {chunk_text}\n"
+            parts.append("(No text chunks retrieved)")
+        else:
+            for i, chunk in enumerate(context_chunks):
+                doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
+                chunk_text = chunk.get("text", str(chunk))
+                parts.append(f"[Chunk {i} (Doc: {doc_id})]: {chunk_text}")
 
         if graph_context:
-            prompt += "\nKnowledge Graph Context:\n"
+            parts.append("")
+            parts.append("Knowledge Graph Context:")
             edges = graph_context.get("edges", [])
             nodes = {n.get("node_id", n.get("id")): n.get("name", "") for n in graph_context.get("nodes", [])}
             if edges:
@@ -64,12 +68,13 @@ class GeminiFallback:
                     src = nodes.get(edge.get("source_id"), edge.get("source_name", "Unknown"))
                     tgt = nodes.get(edge.get("target_id"), edge.get("target_name", "Unknown"))
                     rel = edge.get("relation_type", "RELATION")
-                    prompt += f"- {src} --[{rel}]--> {tgt}\n"
+                    parts.append(f"- {src} --[{rel}]--> {tgt}")
             else:
-                prompt += f"{json.dumps(graph_context)}\n"
+                parts.append(json.dumps(graph_context))
 
-        prompt += f"\nUser Question: {query}"
-        return prompt
+        parts.append("")
+        parts.append(f"User Question: {query}")
+        return "\n".join(parts)
 
     async def synthesize(
         self,

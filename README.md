@@ -5,8 +5,8 @@
 [![Granian](https://img.shields.io/badge/Granian-Rust_ASGI-DEA584?logo=rust&logoColor=white)](https://github.com/emmett-framework/granian)
 [![LatticeDB](https://img.shields.io/badge/LatticeDB-In--Process_Graph-00ADD8)](https://github.com/latticedb/latticedb)
 [![TypeSafe AI](https://img.shields.io/badge/TypeSafe_AI-Jev_System_1-4B32C3)](https://typesafe.ai/)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-success.svg)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/Tests-124%20Passed%20(100%25)-brightgreen.svg)](tests/)
+[![Release](https://img.shields.io/badge/Release-v1.2.0-success.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/Tests-131%20Passed%20(100%25)-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > **In-process, zero-cloud-cost Hybrid GraphRAG engine and CI/CD evaluation suite.**  

@@ -107,17 +107,33 @@ class RAGOrchestrator:
     # ── Node Implementations ────────────────────────────────────────────
 
     async def _triage_node(self, state: PipelineState) -> dict[str, Any]:
-        """Concurrent front-door triage: cache check + Jev routing."""
+        """Two-stage front-door triage: O(1) exact match check, then concurrent Jev routing + CPU embedding."""
         t0 = time.perf_counter()
 
-        # Embed query for cache lookup
-        query_embedding = self.embedding_service.embed_query(state.query)
-
-        # Run cache check and Jev routing concurrently
-        cache_result, route_decision = await asyncio.gather(
-            self.semantic_cache.get(state.query, query_embedding),
-            self.router.route_query(state.query),
+        # Step 1: O(1) Exact-match cache shortcut
+        exact_hit = (
+            self.semantic_cache.get_exact(state.query)
+            if hasattr(type(self.semantic_cache), "get_exact")
+            else None
         )
+        if isinstance(exact_hit, dict):
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.info("Exact cache HIT for query in O(1) time")
+            return {
+                "cache_hit": True,
+                "cached_response": exact_hit,
+                "answer": exact_hit.get("answer", ""),
+                "filtered_chunks": exact_hit.get("sources", []),
+                "graph_context": exact_hit.get("graph_path"),
+                "route": exact_hit.get("route", "vector_exact"),
+                "timings": state.timings + [{"stage": "triage", "duration_ms": elapsed}],
+            }
+
+        # Step 2: Concurrently execute Jev routing and CPU embedding (offloaded to thread)
+        route_task = asyncio.create_task(self.router.route_query(state.query))
+        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, state.query)
+        cache_result = await self.semantic_cache.get(state.query, query_embedding)
+        route_decision = await route_task
 
         elapsed = (time.perf_counter() - t0) * 1000
 
@@ -327,11 +343,41 @@ class RAGOrchestrator:
         # 1. Triage Stage
         yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
         t_triage = time.perf_counter()
-        query_embedding = self.embedding_service.embed_query(query)
-        cache_result, route_decision = await asyncio.gather(
-            self.semantic_cache.get(query, query_embedding),
-            self.router.route_query(query),
+
+        # Step 1: O(1) Exact-match cache shortcut
+        exact_hit = (
+            self.semantic_cache.get_exact(query)
+            if hasattr(type(self.semantic_cache), "get_exact")
+            else None
         )
+        if isinstance(exact_hit, dict):
+            cached_answer = exact_hit.get("answer", "")
+            route_val = exact_hit.get("route", "vector_exact")
+            triage_elapsed = (time.perf_counter() - t_triage) * 1000
+            timings.append({"stage": "triage", "duration_ms": triage_elapsed})
+            yield {"event": "stage", "data": {"stage": "cache_hit", "route": route_val}}
+            yield {"event": "token", "data": {"delta": cached_answer}}
+            total_elapsed = (time.perf_counter() - t0) * 1000
+            yield {
+                "event": "done",
+                "data": {
+                    "answer": cached_answer,
+                    "route": route_val,
+                    "cached": True,
+                    "sources": exact_hit.get("sources", []),
+                    "graph_path": exact_hit.get("graph_path"),
+                    "timings": timings,
+                    "latency_ms": total_elapsed,
+                    "degraded": False,
+                },
+            }
+            return
+
+        # Step 2: Concurrently execute Jev routing and CPU embedding (offloaded to thread)
+        route_task = asyncio.create_task(self.router.route_query(query))
+        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
+        cache_result = await self.semantic_cache.get(query, query_embedding)
+        route_decision = await route_task
         triage_elapsed = (time.perf_counter() - t_triage) * 1000
         timings.append({"stage": "triage", "duration_ms": triage_elapsed})
 

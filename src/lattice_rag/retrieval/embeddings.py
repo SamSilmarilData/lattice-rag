@@ -156,8 +156,10 @@ class EmbeddingService:
         Returns:
             Numpy array representing the embedding.
         """
-        embeddings = list(self.embedder.embed([query]))
-        return embeddings[0]
+        res = self.embedder.embed([query])
+        if hasattr(res, "__next__") or hasattr(res, "__iter__"):
+            return next(iter(res))
+        return res[0]
 
     def rerank(
         self, query: str, documents: list[str], top_k: int = 5

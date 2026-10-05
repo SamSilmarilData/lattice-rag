@@ -168,6 +168,87 @@ class LatticeStore:
             relation_count=created_relations,
         )
 
+    def ingest_document_bundle(
+        self,
+        doc_id: str,
+        title: str,
+        chunks: list[ChunkData],
+        chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
+    ) -> IngestStats:
+        """Atomically ingest document, chunks, entities, and relations in a single write transaction."""
+        chunk_ids: list[int] = []
+        entity_name_to_id: dict[str, int] = {}
+        total_entities = 0
+        total_relations = 0
+
+        with self.db.write() as txn:
+            doc_node = txn.create_node(
+                labels=["Document"],
+                properties={"doc_id": doc_id, "title": title},
+            )
+
+            chunk_idx_to_id: dict[int, int] = {}
+            for idx, chunk in enumerate(chunks):
+                chunk_node = txn.create_node(
+                    labels=["Chunk"],
+                    properties={
+                        "text": chunk.text,
+                        "position": chunk.position,
+                        "doc_id": doc_id,
+                    },
+                )
+                if chunk.embedding is not None and len(chunk.embedding) == self.vector_dimensions:
+                    txn.set_vector(chunk_node.id, "embedding", chunk.embedding)
+
+                txn.create_edge(doc_node.id, chunk_node.id, "HAS_CHUNK")
+                chunk_ids.append(chunk_node.id)
+                chunk_idx_to_id[idx] = chunk_node.id
+
+            for c_ref, entities, relations in chunk_entities_relations:
+                if isinstance(c_ref, int) and c_ref in chunk_idx_to_id:
+                    real_chunk_id = chunk_idx_to_id[c_ref]
+                elif isinstance(c_ref, int) and c_ref in chunk_ids:
+                    real_chunk_id = c_ref
+                elif chunk_ids:
+                    real_chunk_id = chunk_ids[0]
+                else:
+                    real_chunk_id = None
+
+                for ent in entities:
+                    if ent.name not in entity_name_to_id:
+                        ent_node = txn.create_node(
+                            labels=["Entity", ent.entity_type],
+                            properties={"name": ent.name, "entity_type": ent.entity_type},
+                        )
+                        if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
+                            txn.set_vector(ent_node.id, "embedding", ent.embedding)
+                        entity_name_to_id[ent.name] = ent_node.id
+                        total_entities += 1
+
+                    if real_chunk_id is not None:
+                        txn.create_edge(real_chunk_id, entity_name_to_id[ent.name], "CONTAINS")
+
+                for rel in relations:
+                    s_id = entity_name_to_id.get(rel.source_name)
+                    t_id = entity_name_to_id.get(rel.target_name)
+                    if s_id is not None and t_id is not None:
+                        txn.create_edge(
+                            s_id,
+                            t_id,
+                            "RELATION",
+                            properties={"type": rel.relation_type},
+                        )
+                        total_relations += 1
+
+            txn.commit()
+
+        return IngestStats(
+            chunk_count=len(chunks),
+            entity_count=total_entities,
+            relation_count=total_relations,
+            chunk_ids=chunk_ids,
+        )
+
     def vector_search(
         self,
         query_embedding: np.ndarray,
@@ -324,6 +405,23 @@ class LatticeStore:
             edges = txn.get_outgoing_edges_by_type(chunk_id, "CONTAINS")
             for e in edges:
                 entity_ids.append(e.target_id)
+        return entity_ids
+
+    def get_entities_for_chunks(self, chunk_ids: list[int], budget: int = 25) -> list[int]:
+        """Retrieve all entity IDs linked to a batch of Chunk IDs via CONTAINS edge in a single read transaction."""
+        if not chunk_ids:
+            return []
+        entity_ids: list[int] = []
+        seen: set[int] = set()
+        with self.db.read() as txn:
+            for cid in chunk_ids:
+                edges = txn.get_outgoing_edges_by_type(cid, "CONTAINS")
+                for e in edges:
+                    if e.target_id not in seen:
+                        seen.add(e.target_id)
+                        entity_ids.append(e.target_id)
+                        if len(entity_ids) >= budget:
+                            return entity_ids
         return entity_ids
 
     def close(self) -> None:
