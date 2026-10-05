@@ -116,10 +116,15 @@ class EvalRunner:
             if active_orchestrator.semantic_cache is not None:
                 active_orchestrator.semantic_cache.clear()
 
-            semaphore = asyncio.Semaphore(max_concurrency)
+            # For suites with >5 queries, enforce concurrency 1 and inter-query pacing to avoid Groq 1000 OTPM rate limits
+            effective_concurrency = 1 if len(queries_data) > 5 else max_concurrency
+            semaphore = asyncio.Semaphore(effective_concurrency)
 
-            async def _eval_single(item: dict[str, Any]) -> EvalQueryResult:
+            async def _eval_single(item: dict[str, Any], idx: int) -> EvalQueryResult:
                 async with semaphore:
+                    if idx > 0 and len(queries_data) > 5:
+                        await asyncio.sleep(0.75)
+
                     query = item["query"]
                     ground_truth = item.get("ground_truth", "")
 
@@ -140,7 +145,7 @@ class EvalRunner:
                     )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
-            eval_tasks = [_eval_single(q) for q in queries_data]
+            eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
             results = await asyncio.gather(*eval_tasks)
         finally:
             # Clean up ephemeral resources

@@ -18,7 +18,7 @@ class GroqSynthesizer:
         self,
         api_key: str | None = None,
         model: str = "qwen/qwen3.8-27b",
-        max_tokens: int = 512,
+        max_tokens: int = 256,
         client: AsyncGroq | None = None,
     ) -> None:
         """Initializes the AsyncGroq client with configurable model and API key."""
