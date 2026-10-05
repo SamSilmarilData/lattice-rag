@@ -1,0 +1,152 @@
+# Changelog
+
+All notable changes to the `lattice-rag` project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [0.4.0] - 2026-10-05 (Phase 4: Generation Model Orchestration & Web API Layer)
+
+### Added
+- **Primary Synthesizer (`GroqSynthesizer` with `qwen/qwen3.8-27b`):**
+  - Integrated GroqCloud's ultra-fast Qwen 3.8 27B model (131k context window, thinking and instruct capabilities) delivering 200+ tok/s.
+  - Implemented structured citation grounding (`[Chunk i (Doc: ...)]` and `[Knowledge Graph Context]`) instructing the model to ground all assertions strictly in evidence.
+  - Added secret sanitization wrapping API exceptions via `sanitize_error_detail`.
+- **Context Fallback Synthesizer (`GeminiFallback` with `gemini-3.8-flash`):**
+  - Integrated Google AI Studio `gemini-3.8-flash` for massive cross-document context (>100k tokens) and multi-level circuit breaker cascade.
+  - Implemented dual-mode async execution: synchronous awaiting and token-by-token async generator streaming.
+- **LangGraph Agentic Orchestrator (`RAGOrchestrator`):**
+  - Built unified stateful pipeline coordinating query routing, Tier 1 semantic vector cache verification, 3-stage hybrid retrieval, generation, and multi-tier failover.
+  - Implemented typed Server-Sent Events (SSE) streaming yielding `event: stage`, `event: token`, and `event: done` for real-time frontend waterfalls.
+  - Implemented full cascading failover: Groq (under `pybreaker.CircuitBreaker`) $\to$ Gemini 3.8 Flash $\to$ Tier 2 Embedded Redis FAQ hash with fuzzy and token-overlap matching.
+  - Integrated automatic post-synthesis Tier 1 cache insertion for verified responses.
+- **Rust-Optimized Web Stack (Litestar 2.24+ ASGI & Granian):**
+  - `QueryController` (`POST /api/v1/query`, `POST /api/v1/query/stream`) with `NamedDependency[SkipValidation[...]]` pattern preventing msgspec DI type inspection conflicts.
+  - `IngestController` (`POST /api/v1/ingest`) featuring sentence-aware chunking (~512 chars, 64-char overlap), dense vector embedding, GLiNER named entity recognition, LatticeDB graph storage, and Tier 1 cache invalidation.
+  - `CacheController` (`GET /api/v1/cache/stats`) returning real-time hits, misses, and circuit breaker status.
+  - `HealthController` (`GET /health`) verifying connectivity to LatticeDB, Redis, and validation of all API keys.
+  - RFC 9457 Problem Details error shielding with zero-trust token redaction (`sanitize_error_detail`).
+  - Production-ready Granian server runner in `lattice_rag.server` configured for high-concurrency ASGI serving.
+- **Automated Test Suite & Live E2E Integration:**
+  - Added 21 new tests across `test_groq_synthesizer.py`, `test_gemini_fallback.py`, `test_orchestration_graph.py`, `test_api_controllers.py`, and `test_phase4_e2e.py`.
+  - Full end-to-end integration test (`test_phase4_e2e.py`) validating the entire 7-step user journey against real LatticeDB, real FastEmbed ONNX embeddings, real TypeSafe AI, and live GroqCloud inference.
+  - All 87 unit and integration tests passing 100% green with 0 warnings.
+
+### Fixed
+- **Retrieval Pipeline Logging Contract:** Replaced standard Python `logging.Logger` with `structlog.get_logger` across `pipeline.py`, `graph_traversal.py`, `reranker.py`, and `vector_search.py`, resolving `TypeError: Logger._log() got an unexpected keyword argument`.
+- **ProcessPool Teardown on macOS:** Added explicit `shutdown_pool()` cleanup in `test_pool.py` and session fixture in `conftest.py`, eliminating `libc++abi: recursive_mutex lock failed` on interpreter exit.
+- **Third-Party Warning Filter:** Configured pytest filterwarnings in `pyproject.toml` to silence upstream PyTorch JIT and Hugging Face Hub deprecation warnings.
+- **GLiNER Model Availability Fallback:** Added graceful automatic fallback in `EntityExtractor` to public `urchade/gliner_small-v2.1` when gated repositories return 401 Unauthorized.
+
+---
+
+## [0.3.0] - 2026-10-05 (Phase 3: 3-Stage Hybrid Retrieval Pipeline & Context Guardrails)
+
+### Added
+- **State-of-the-Art Cross-Encoder Reranking (`bge-reranker-v2-m3` INT8 ONNX):**
+  - Integrated `onnx-community/bge-reranker-v2-m3-ONNX` with an 8,192 token context window, 568M parameter quality, and a compact 544MB INT8 footprint.
+  - Benchmarked sub-100ms CPU inference using dynamic token batch padding in `onnxruntime`.
+  - Built unified `RerankerAdapter` in `EmbeddingService` supporting both `bge-reranker-v2-m3` (default) and FastEmbed `bge-reranker-base`.
+- **Stage 1 Hybrid Searcher (HNSW Dense + BM25 Lexical via RRF):**
+  - Implemented concurrent HNSW vector and BM25 index search merged via Reciprocal Rank Fusion ($k=60$) with node deduplication and non-blocking `asyncio.to_thread` execution.
+- **Stage 2 Dynamic Graph Traverser:**
+  - Implemented rank-ordered entity anchor extraction via `get_entities_for_chunk()`, dynamic 1-hop or 2-hop traversal (`route == "graph_relational"`), and a 25-node budget cap.
+- **Stage 3 Precision Cross-Encoder Reranking with Graph Linearization:**
+  - Linearized `SubgraphResult` into formatted relational triples (`Entity1 --[RELATION]--> Entity2`, capped at 15 triples / 1000 chars) appended to candidate chunks.
+- **Guardrail Integration & Low Grounding Telemetry:**
+  - Added `low_grounding: bool = False` to `RetrievalResult`, short-circuiting empty search queries and capturing Jev Noul relevance rejections.
+- **Live TypeSafe AI & Phase 3 Test Suite:**
+  - Added 17 new automated tests in `test_embeddings.py`, `test_vector_search.py`, `test_graph_traversal.py`, `test_reranker.py`, `test_pipeline.py`, and `test_retrieval_integration.py`.
+  - Verified live TypeSafe AI Jev Noul guardrail filtering with sub-second total pipeline execution (~598ms).
+  - All 66 test cases passing 100% green.
+
+### Fixed
+- **LatticeStore Parameter Mismatch:** Corrected `limit=top_k * 2` to `top_k=top_k * 2` in `vector_search.py`.
+- **Missing Query Method in Graph Traversal:** Replaced non-existent `store.query()` with `store.get_entities_for_chunk()` and `store.traverse_from_entities()`.
+- **Reranker Output Contract:** Corrected float score unpacking from cross-encoders without assuming missing `.corpus_id` attributes.
+- **Silent Graph Discarding:** Fixed `reranker.py` attribute checks to properly inspect `SubgraphResult.nodes` and `edges`.
+
+---
+
+## [0.2.0] - 2026-10-05 (Phase 2 Verification & Hardening)
+
+
+### Added
+- **Embedded In-Process Redis (`fakeredis`):**
+  - Integrated `fakeredis.aioredis` directly into `FallbackCache`, delivering microsecond in-memory key-value lookups with zero external Redis server dependencies and zero Redis API keys.
+  - Implemented `seed_from_file()` with `fallback_queries.json` containing 50 curated technical Q&A pairs covering LatticeDB, Litestar, FastEmbed, GLiNER, and TypeSafe AI.
+  - Added multi-tier query matching in `find_closest_fallback` combining exact matching, sequence similarity, and token overlap with stop-word pruning.
+- **Asynchronous Circuit Breaker (`pybreaker`):**
+  - Configured `CircuitBreaker(fail_max=3, reset_timeout=30s)` wrapping async generative calls via `call_with_breaker()`.
+  - Trips from `closed` to `open` on 3 consecutive LLM failures, blocking further remote calls and directing traffic to the embedded fallback cache.
+- **Strict Context Guardrail with Insufficient Evidence Injection:**
+  - Configured batched TypeSafe AI Jev `Noul` evaluations ($\ge 0.50$ threshold) with automatic `low_grounding_flag` tracking.
+  - Injected an `INSUFFICIENT_EVIDENCE` sentinel chunk when all retrieved chunks fail grounding, preventing LLM hallucination.
+- **Phase 2 Automated Test Suite:**
+  - Added 37 new unit tests across `test_routing.py`, `test_guardrail.py`, `test_caching.py`, and `test_chitchat.py`, bringing the test suite to 49 passing tests (100% green).
+
+### Fixed
+- **TypeSafe SDK Async Cleanup:** Fixed invalid `.close()` calls to `await client.aclose()` across `QueryRouter`, `ContextGuardrail`, and `SemanticCache`.
+- **TypeSafe Noul Semantic Cache Contract:** Replaced invalid `.noul(...)` method with `client.system_one(state=..., questions={"equivalent": Noul(...)})`.
+- **Chitchat Substring Collision:** Fixed naive substring matching in `ChitchatHandler` by applying regular expression word boundaries (`\b`) to prevent false triggers (e.g. "hi" inside "something").
+
+---
+
+## [0.1.0] - 2026-10-05
+
+
+### Added
+- **Rust-Optimized Web Stack:**
+  - Integrated **Litestar 2.24+** ASGI framework served by **Granian** for 2–4x throughput over Uvicorn.
+  - Built typed API contracts using **msgspec.Struct** with `rename="camel"` for sub-millisecond JSON serialization.
+  - Implemented OpenAPI documentation powered by **Scalar** accessible at `/schema/scalar`.
+  - Added `QueryController`, `IngestController`, `CacheController`, and `HealthController`.
+
+- **In-Process Graph & Vector Engine (LatticeDB):**
+  - Integrated **LatticeDB 0.15** embedded single-file property-graph engine (`data/lattice_rag.db`).
+  - Hierarchical schema: `(:Document)-[:HAS_CHUNK]->(:Chunk)`, `(:Chunk)-[:CONTAINS]->(:Entity)`, and `(:Entity)-[:RELATION]->(:Entity)`.
+  - Native HNSW vector index on chunk and entity embeddings (`<=>` operator) with 384 dimensions.
+  - Native BM25 inverted full-text index on chunk text and entity names (`@@` operator).
+  - Sub-millisecond multi-hop graph traversal expanding up to 2 hops with an entity budget cap of 25 nodes.
+
+- **Local Quantized SLMs (FastEmbed & GLiNER):**
+  - `EmbeddingService` wrapping **FastEmbed** ONNX models (`BAAI/bge-small-en-v1.5`) for local CPU dense and sparse vector generation.
+  - Cross-Encoder precision reranker using `BAAI/bge-reranker-v2-m3`.
+  - `EntityExtractor` wrapping Fastino Labs' **GLiNER2.5-Decide** (340M parameters) on CPU for local entity recognition and sentence-level triple extraction.
+
+- **System 1 Decision Routing & Guardrails (TypeSafe AI Jev):**
+  - Front-door traffic cop using Jev `Choice` primitive (70–500ms) to classify queries into `vector_exact`, `graph_relational`, `hybrid`, `chitchat`, or `massive_context`.
+  - Context guardrail using Jev `Noul` primitive to batch-filter candidate chunks and prune tangential noise before generative synthesis.
+
+- **Multi-Tier Latency & Fallback Caching:**
+  - **Tier 1:** In-memory semantic vector cache comparing query cosine similarity (>= 0.90) and verifying true semantic identity via Jev Noul (< 20ms response time).
+  - **Tier 2:** `pybreaker.CircuitBreaker` wrapping generative calls with cascading failover: Groq $\to$ Gemini 2.5 Flash $\to$ Redis Hash (`cache:fallback:queries`) storing pre-computed top 50 domain queries.
+
+- **Generation Model Orchestration:**
+  - Primary synthesis using **GroqCloud** (Llama 3.3 70B / DeepSeek-R1) streaming at 200+ tokens/s via Server-Sent Events (SSE) and JSON.
+  - Context fallback using **Google AI Studio** (Gemini 2.5 Flash) for queries requiring massive context analysis (> 100k tokens).
+  - Deterministic `ChitchatHandler` returning immediate structured conversational responses at zero cost.
+
+- **ProcessPool CPU Isolation:**
+  - Dedicated `ProcessPoolExecutor` with `run_in_pool()` to offload heavy ONNX embeddings and GLiNER extraction, preventing event loop starvation.
+
+- **Command-Line Interface (CLI):**
+  - CLI commands implemented via Click: `lattice-rag setup-keys`, `serve`, `query`, `ingest`, `benchmark`, and `eval`.
+
+### Changed
+- Standardized package build backend to `setuptools.build_meta` with `where = ["src"]` package discovery.
+- Pinned `vector_dimensions=384` on LatticeDB initialization to align with FastEmbed BGE models.
+
+### Fixed
+- **LatticeDB Transaction Commit:** Fixed critical bug where `latticedb` write transactions silently rolled back on context exit unless `txn.commit()` was explicitly invoked.
+- **LatticeDB Database Lifecycle:** Ensured explicit `self.db.open()` is called during `LatticeStore` initialization.
+- **Editable Install Discovery:** Configured `.pth` linking for local package imports across Python environments.
+
+### Security
+- **Zero Git Leaks:** Hardened `.gitignore` to strictly exclude `.env`, `apikeys.md`, `*.key`, `*.pem`, and `data/*.db`.
+- **Secret Masking:** Implemented `SecretStr` masking tokens as `sk-****{last_4}` in `str()` and `repr()`.
+- **Log Sanitizer:** Added `RedactingFilter` to redact Authorization headers and Bearer tokens from structured logs.
+- **RFC 9457 Error Shielding:** Sanitized outbound error responses to prevent credential leakage.
+- **Safe Key Migration:** Implemented `setup-keys` CLI command to migrate `apikeys.md` into `chmod 600 .env` and securely shred the plaintext file.

@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project]
+name = "lattice-rag"
+version = "0.1.0"
+description = "In-process Hybrid GraphRAG engine built on LatticeDB, Litestar/Granian, and CPU-quantized SLMs."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.14"
+authors = [
+    { name = "Samyak Meshram" },
+]
+keywords = ["rag", "graphrag", "latticedb", "litestar", "granian"]
+
+dependencies = [
+    # --- Web Stack (Rust-optimized) ---
+    "litestar>=2.24.0",
+    "granian>=2.8.0",
+    "msgspec>=0.22.0",
+
+    # --- Storage & Extraction ---
+    "latticedb>=0.15.0",
+    "fastembed>=0.8.0",
+    "gliner>=0.2.29",
+
+    # --- Routing & Decision ---
+    "typesafe-sdk>=0.7.2",
+
+    # --- Orchestration ---
+    "langgraph>=1.2.0",
+
+    # --- Caching & Resilience ---
+    "pybreaker>=1.4.0",
+    "redis>=5.0.0",
+    "fakeredis>=2.20.0",
+
+    # --- Generation ---
+    "groq>=0.15.0",
+    "google-genai>=1.10.0",
+
+    # --- Configuration ---
+    "python-dotenv>=1.0.0",
+
+    # --- Utilities ---
+    "numpy>=1.26.0",
+    "httpx>=0.27.0",
+    "structlog>=24.0.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+eval = [
+    "deepeval>=4.2.0",
+]
+
+[project.scripts]
+lattice-rag = "lattice_rag.cli:main"
+
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests (no external services)",
+    "integration: Integration tests (requires LatticeDB, Redis)",
+    "security: Secret masking and leakage tests",
+]
+filterwarnings = [
+    "ignore::FutureWarning:torch.jit.*",
+    "ignore::UserWarning:huggingface_hub.*",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "TCH"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

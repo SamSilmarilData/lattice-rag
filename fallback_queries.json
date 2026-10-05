@@ -1,0 +1,202 @@
+[
+  {
+    "query": "What is LatticeDB?",
+    "answer": "LatticeDB is an embedded, in-process property-graph database written in C with native vector search (HNSW) and BM25 full-text indexing, providing ACID transactional guarantees and zero external server dependencies."
+  },
+  {
+    "query": "How does vector search work in LatticeDB?",
+    "answer": "LatticeDB provides native Hierarchical Navigable Small World (HNSW) indexing using the `<=>` cosine distance operator, supporting high-dimensional float32 vector queries in-process."
+  },
+  {
+    "query": "How is full-text search executed in LatticeDB?",
+    "answer": "LatticeDB uses an inverted index with BM25 ranking via the `@@` match operator, enabling keyword search directly across node property text."
+  },
+  {
+    "query": "Why does LatticeDB require an explicit txn.commit()?",
+    "answer": "In LatticeDB (v0.15.0+), write transactions inside `with db.write() as txn:` default to rolling back on context exit unless `txn.commit()` is explicitly invoked, preventing partial state writes."
+  },
+  {
+    "query": "What vector dimension does LatticeDB use for bge-small-en-v1.5?",
+    "answer": "LatticeDB is initialized with `vector_dimensions=384` to match the exact output dimension of the FastEmbed `BAAI/bge-small-en-v1.5` dense embedding model."
+  },
+  {
+    "query": "How are relationships represented in LatticeDB?",
+    "answer": "Relationships in LatticeDB are directed, typed graph edges connecting nodes (e.g. `[:HAS_CHUNK]`, `[:CONTAINS]`, `[:RELATION]`), traversable via C-level pointer chasing."
+  },
+  {
+    "query": "What is Cypher traversal in LatticeDB?",
+    "answer": "LatticeDB supports Cypher-like graph query traversal (e.g., `MATCH (c:Chunk)-[:CONTAINS]->(e:Entity) RETURN e`), returning subgraphs of connected entities and chunks without network overhead."
+  },
+  {
+    "query": "How does LatticeDB handle concurrent writes?",
+    "answer": "LatticeDB employs write serialization via write transactions with ACID semantics, ensuring thread-safe data persistence without write skew or corruption."
+  },
+  {
+    "query": "Can LatticeDB run completely in-memory?",
+    "answer": "Yes, LatticeDB can operate on disk-backed files or temporary file stores with zero daemon processes, making it ideal for isolated, embedded RAG applications."
+  },
+  {
+    "query": "What is the difference between LatticeDB BM25 and vector search?",
+    "answer": "BM25 performs lexical keyword matching using inverted term frequencies, whereas vector search performs semantic similarity matching in continuous vector space via HNSW embeddings."
+  },
+  {
+    "query": "What is Litestar?",
+    "answer": "Litestar is a lightweight, high-performance Python ASGI web framework featuring native type validation, dependency injection, and automatic OpenAPI schema generation."
+  },
+  {
+    "query": "Why is Granian used with Litestar?",
+    "answer": "Granian is a Rust-based HTTP server for Python ASGI applications, delivering sub-millisecond request latencies and higher throughput than Uvicorn or Hypercorn."
+  },
+  {
+    "query": "How does Litestar achieve zero-copy serialization?",
+    "answer": "Litestar integrates directly with `msgspec`, using SIMD-accelerated JSON encoding and decoding that outperforms Pydantic and standard library json modules."
+  },
+  {
+    "query": "What is the ApplicationCore pattern in Litestar?",
+    "answer": "The ApplicationCore pattern implements `InitPluginProtocol` to centralize route registration, dependency injection, CORS, logging, and lifecycle event management in a clean, decoupled structure."
+  },
+  {
+    "query": "How does dependency injection work in Litestar?",
+    "answer": "Litestar uses `Provide` callables and `NamedDependency` to resolve services, database handles, and configuration hierarchically at application, router, or controller levels."
+  },
+  {
+    "query": "How does Litestar handle server-sent events for streaming RAG?",
+    "answer": "Litestar provides `litestar.response.Stream` with `media_type=MediaType.TEXT` to stream token deltas and stage timings directly to clients using standard SSE format."
+  },
+  {
+    "query": "How are route parameters extracted in Litestar?",
+    "answer": "Parameters are defined as type-annotated function arguments or via `FromPath`, `FromQuery`, and `JSONBody` type hints, which Litestar validates at runtime."
+  },
+  {
+    "query": "What OpenAPI documentation UI does Litestar support?",
+    "answer": "Litestar supports modern OpenAPI renderers such as Scalar (`ScalarRenderPlugin`), Swagger, and Redoc, configured via `OpenAPIConfig`."
+  },
+  {
+    "query": "How does Litestar manage application lifespan events?",
+    "answer": "Litestar uses async context managers registered in `lifespan` to initialize and cleanly tear down database connections, thread pools, and cache singletons on server start and shutdown."
+  },
+  {
+    "query": "What makes Litestar suitable for local production RAG?",
+    "answer": "Its minimal memory overhead, async non-blocking core, msgspec integration, and Granian compatibility allow high-throughput query serving with zero cloud dependencies."
+  },
+  {
+    "query": "What is FastEmbed?",
+    "answer": "FastEmbed is a lightweight, CPU-optimized text embedding and reranking library built on the ONNX Runtime, offering fast tokenization and quantization without PyTorch dependencies."
+  },
+  {
+    "query": "Which embedding model is used by lattice-rag?",
+    "answer": "The primary dense embedding model is `BAAI/bge-small-en-v1.5`, generating 384-dimensional dense vectors with low latency on commodity CPUs."
+  },
+  {
+    "query": "Which cross-encoder reranker model does FastEmbed provide?",
+    "answer": "FastEmbed provides `BAAI/bge-reranker-v2-m3` via `TextCrossEncoder`, scoring query-document pairs jointly to provide high-precision ranking."
+  },
+  {
+    "query": "Why is cross-encoder reranking important in RAG?",
+    "answer": "Cross-encoders compute full cross-attention between the query and candidate documents, capturing nuanced relevance and word interactions that bi-encoder vector similarity misses."
+  },
+  {
+    "query": "How does FastEmbed avoid GPU requirements?",
+    "answer": "FastEmbed utilizes ONNX Runtime with quantized integer operations (INT8/FP16), running efficiently on standard multi-core x86 and ARM CPUs without CUDA."
+  },
+  {
+    "query": "What is the return type of FastEmbed embed calls?",
+    "answer": "FastEmbed returns an iterator of NumPy `float32` arrays representing the normalized sentence embeddings."
+  },
+  {
+    "query": "How does lattice-rag isolate FastEmbed CPU-bound inference?",
+    "answer": "Inference is dispatched to an isolated `ProcessPoolExecutor` via `run_in_pool()`, preventing CPU-heavy ONNX tasks from blocking the async event loop."
+  },
+  {
+    "query": "What is Reciprocal Rank Fusion in hybrid search?",
+    "answer": "Reciprocal Rank Fusion (RRF) combines ranked lists from dense vector search and BM25 lexical search using the formula `RRF_Score = sum(1 / (k + rank))` with standard constant `k=60`."
+  },
+  {
+    "query": "What is the memory footprint of bge-small-en-v1.5 in FastEmbed?",
+    "answer": "The quantized ONNX model for `bge-small-en-v1.5` occupies approximately 130MB of RAM, making it feasible for edge and embedded deployment."
+  },
+  {
+    "query": "Can FastEmbed handle batch inputs?",
+    "answer": "Yes, `model.embed(list_of_texts, batch_size=256)` executes vectorized batched tokenization and ONNX inference efficiently."
+  },
+  {
+    "query": "What is GLiNER?",
+    "answer": "GLiNER (Generalist and Lightweight Model for Named Entity Recognition) is a bidirectional encoder model capable of extracting arbitrary entity types using natural language labels."
+  },
+  {
+    "query": "Which GLiNER model checkpoint is used in lattice-rag?",
+    "answer": "The pipeline utilizes `FastinoLabs/gliner-2.5-decide`, an efficient checkpoint optimized for structured entity and relation extraction."
+  },
+  {
+    "query": "What entity labels are extracted during document ingestion?",
+    "answer": "Default labels include `person`, `organization`, `technology`, `concept`, `algorithm`, `database`, and `protocol`."
+  },
+  {
+    "query": "How does lattice-rag construct relation triples from GLiNER entities?",
+    "answer": "Entities co-occurring within the same sentence are linked with contextual relation predicates derived from proximity and syntactic roles, forming `(subject, predicate, object)` triples."
+  },
+  {
+    "query": "Where are extracted entities stored in LatticeDB?",
+    "answer": "Extracted entities are stored as `:Entity` nodes with `name` and `entity_type` properties, connected to `:Chunk` nodes via `[:CONTAINS]` edges and to each other via `[:RELATION]` edges."
+  },
+  {
+    "query": "How fast is GLiNER entity extraction on CPU?",
+    "answer": "GLiNER processes standard text chunks (512 characters) in 15–40 milliseconds on modern CPUs, enabling real-time ingestion without GPU acceleration."
+  },
+  {
+    "query": "How does GLiNER differ from traditional spaCy NER?",
+    "answer": "Unlike fixed-ontology models in spaCy, GLiNER uses zero-shot open-vocabulary prompt representations, allowing custom entity types to be recognized dynamically."
+  },
+  {
+    "query": "What happens if no entities are found in a chunk?",
+    "answer": "The chunk is still indexed for vector and BM25 lexical search, but no relational entity nodes or traversal edges are registered for that chunk."
+  },
+  {
+    "query": "Can GLiNER extract overlapping entities?",
+    "answer": "Yes, GLiNER supports nested and span-level entity representations by evaluating classification scores over candidate token spans."
+  },
+  {
+    "query": "How does entity extraction enhance GraphRAG traversal?",
+    "answer": "Entities serve as graph anchors; multi-hop queries traverse from initial chunk entities across `[:RELATION]` edges to uncover non-obvious cross-document context."
+  },
+  {
+    "query": "What is TypeSafe AI Jev?",
+    "answer": "TypeSafe AI Jev provides System 1 AI primitives that produce typed classifications, probabilities, and scores at low latency (70–500ms) and minimal token cost."
+  },
+  {
+    "query": "What is the Jev Choice primitive?",
+    "answer": "Jev Choice evaluates a query and application state against a defined set of categorical criteria, returning the winning choice key along with a confidence score."
+  },
+  {
+    "query": "What is the Jev Noul primitive?",
+    "answer": "Jev Noul evaluates a proposition given state and instructions, returning a calibrated probability score between 0.0 and 1.0 indicating degree of truth or relevance."
+  },
+  {
+    "query": "What is the Jev Score primitive?",
+    "answer": "Jev Score evaluates state along an ordinal or continuous scale, returning normalized numeric ratings for evaluation criteria like faithfulness or relevance."
+  },
+  {
+    "query": "How is Jev Choice used in lattice-rag routing?",
+    "answer": "Jev Choice classifies incoming prompts into five routes: `vector_exact`, `graph_relational`, `hybrid`, `chitchat`, or `massive_context` in under 200ms."
+  },
+  {
+    "query": "How is Jev Noul used in the Context Guardrail?",
+    "answer": "Jev Noul filters candidate chunks before LLM generation; only chunks with grounding relevance probability $\\ge 0.50$ are passed into the synthesis context."
+  },
+  {
+    "query": "How is Jev Noul used in Tier 1 Semantic Caching?",
+    "answer": "When a query matches a cached embedding with cosine similarity $\\ge 0.90$, Jev Noul verifies semantic equivalence; only if probability $\\ge 0.70$ is the cached answer returned."
+  },
+  {
+    "query": "What client method cleans up the TypeSafe SDK client?",
+    "answer": "The `AsyncTypeSafeClient` exposes `await client.aclose()` to cleanly release async HTTP session connections."
+  },
+  {
+    "query": "Can multiple Jev Noul evaluations be batched in a single request?",
+    "answer": "Yes, `client.system_one(state=..., questions=...)` allows multiple `Noul` questions to be evaluated concurrently in a single network round-trip."
+  },
+  {
+    "query": "What happens if TYPESAFE_API_KEY is missing?",
+    "answer": "The application fails fast at startup with a descriptive `SystemExit` or raises a clear `RuntimeError` instructing the operator to provide the required key."
+  }
+]

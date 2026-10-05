@@ -1,0 +1,70 @@
+# ===========================
+# Secrets and Environment Variables
+# ===========================
+.env
+.env.*
+!.env.example
+apikeys.md
+*.pem
+*.key
+secrets/
+
+# ===========================
+# Embedded Databases & Cache
+# ===========================
+data/
+*.db
+*.db-*
+*.latticedb
+
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ===========================
+# Node / Frontend
+# ===========================
+node_modules/
+frontend/dist/
+frontend/.vite/
+.turbo/
+
+# ===========================
+# IDE & OS
+# ===========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===========================
+# ML Model Cache
+# ===========================
+models/
+*.onnx
+*.bin
+!requirements*.txt
