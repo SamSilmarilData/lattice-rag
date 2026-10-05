@@ -84,6 +84,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
 
+      let currentEvent = 'message';
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -94,17 +95,22 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
 
         for (const line of lines) {
           const trimmedLine = line.trim();
-          if (trimmedLine.startsWith('data:')) {
+          if (trimmedLine.startsWith('event:')) {
+            currentEvent = trimmedLine.replace(/^event:\s*/, '').trim();
+          } else if (trimmedLine.startsWith('data:')) {
             const jsonStr = trimmedLine.replace(/^data:\s*/, '');
             if (!jsonStr) continue;
 
             try {
-              const event = JSON.parse(jsonStr);
-              if (event.event === 'token' && event.data?.delta) {
+              const parsed = JSON.parse(jsonStr);
+              const eventType = parsed.event || currentEvent;
+              const payload = parsed.data !== undefined ? parsed.data : parsed;
+
+              if (eventType === 'token' && payload?.delta) {
                 if (!synthesisStartTimeRef.current) {
                   synthesisStartTimeRef.current = performance.now();
                 }
-                setAnswer((prev) => prev + event.data.delta);
+                setAnswer((prev) => prev + payload.delta);
                 tokenCountRef.current += 1;
                 setTokenCount(tokenCountRef.current);
 
@@ -112,18 +118,57 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 if (elapsedSec > 0.05) {
                   setTokenVelocity(parseFloat((tokenCountRef.current / elapsedSec).toFixed(1)));
                 }
-              } else if (event.event === 'stage') {
-                if (event.data?.stage === 'triage' && event.data?.route) {
-                  setRoute(event.data.route);
+              } else if (eventType === 'stage') {
+                if (payload?.stage === 'triage' && payload?.route) {
+                  setRoute(payload.route);
                 }
-              } else if (event.event === 'done') {
-                const d = event.data;
+              } else if (eventType === 'done') {
+                const d = payload;
+                if (d.answer) setAnswer(d.answer);
                 if (d.route) setRoute(d.route);
                 if (d.cached !== undefined) setCached(d.cached);
-                if (d.latencyMs !== undefined) setLatencyMs(d.latencyMs);
-                if (d.sources) setSources(d.sources);
-                if (d.timings) setTimings(d.timings);
-                if (d.graphPath) onGraphUpdate(d.graphPath);
+                const latency = d.latencyMs ?? d.latency_ms;
+                if (latency !== undefined) setLatencyMs(latency);
+
+                if (d.sources && Array.isArray(d.sources)) {
+                  const normSources = d.sources.map((s: any, idx: number) => ({
+                    chunkId: s.chunkId ?? s.node_id ?? s.chunk_id ?? idx,
+                    documentId: s.documentId ?? s.doc_id ?? s.document_id ?? 'unknown',
+                    text: s.text ?? '',
+                    score: s.score ?? 0,
+                    position: s.position ?? idx,
+                    rerankScore: s.rerankScore ?? s.rerank_score,
+                    groundingScore: s.groundingScore ?? s.grounding_score,
+                    lowGroundingFlag: s.lowGroundingFlag ?? s.low_grounding_flag ?? false,
+                  }));
+                  setSources(normSources);
+                }
+
+                if (d.timings && Array.isArray(d.timings)) {
+                  const normTimings = d.timings.map((t: any) => ({
+                    stage: t.stage ?? 'stage',
+                    durationMs: t.durationMs ?? t.duration_ms ?? 0,
+                  }));
+                  setTimings(normTimings);
+                }
+
+                const graph = d.graphPath ?? d.graph_path;
+                if (graph) {
+                  const normGraph = {
+                    nodes: (graph.nodes || []).map((n: any, idx: number) => ({
+                      nodeId: n.nodeId ?? n.node_id ?? n.id ?? idx,
+                      name: n.name ?? '',
+                      label: n.label ?? 'Entity',
+                      properties: n.properties ?? {},
+                    })),
+                    edges: (graph.edges || []).map((e: any) => ({
+                      sourceId: e.sourceId ?? e.source_id,
+                      targetId: e.targetId ?? e.target_id,
+                      relationType: e.relationType ?? e.relation_type ?? 'RELATION',
+                    })),
+                  };
+                  onGraphUpdate(normGraph);
+                }
               }
             } catch (parseErr) {
               console.warn('Error parsing SSE event chunk:', parseErr, jsonStr);

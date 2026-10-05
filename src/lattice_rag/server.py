@@ -27,7 +27,7 @@ def main() -> None:
         interface="asgi",
         factory=True,
         workers=1,
-        threads=4,
+        runtime_threads=2,
     )
     server.serve()
 
