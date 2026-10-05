@@ -61,4 +61,22 @@ async def test_api_eval_run_endpoint(test_app, mock_eval_runner):
         mock_eval_runner.run_evaluation.assert_awaited_once_with(
             dataset_path="eval_dataset.json",
             baseline_path="eval_baseline.json",
+            use_temp_db=False,
+            limit=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_eval_run_endpoint_with_limit(test_app, mock_eval_runner):
+    """Verify POST /api/v1/eval/run?limit=5 passes limit parameter to eval runner."""
+    mock_eval_runner.run_evaluation.reset_mock()
+    async with AsyncTestClient(app=test_app) as client:
+        resp = await client.post("/api/v1/eval/run?limit=5")
+        assert resp.status_code == 201
+
+        mock_eval_runner.run_evaluation.assert_awaited_once_with(
+            dataset_path="eval_dataset.json",
+            baseline_path="eval_baseline.json",
+            use_temp_db=False,
+            limit=5,
         )

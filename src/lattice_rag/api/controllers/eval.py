@@ -24,7 +24,17 @@ class EvalController(Controller):
         eval_runner: NamedDependency[SkipValidation[EvalRunner]],
         dataset: FromQuery[str] = "eval_dataset.json",
         baseline: FromQuery[str] = "eval_baseline.json",
+        limit: FromQuery[int | None] = None,
+        use_temp_db: FromQuery[bool] = False,
     ) -> EvalRunResponse:
         """Trigger an evaluation run against the golden benchmark dataset and compare with baseline."""
-        logger.info("received_eval_run_request", extra={"dataset": dataset, "baseline": baseline})
-        return await eval_runner.run_evaluation(dataset_path=dataset, baseline_path=baseline)
+        logger.info(
+            "received_eval_run_request",
+            extra={"dataset": dataset, "baseline": baseline, "limit": limit, "use_temp_db": use_temp_db},
+        )
+        return await eval_runner.run_evaluation(
+            dataset_path=dataset,
+            baseline_path=baseline,
+            use_temp_db=use_temp_db,
+            limit=limit,
+        )

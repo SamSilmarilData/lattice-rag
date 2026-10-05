@@ -153,6 +153,9 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
 export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) => {
   const [evalData, setEvalData] = useState<EvalQueryResult[]>(INITIAL_EVAL_DATA);
   const [running, setRunning] = useState(false);
+  const [evalLimit, setEvalLimit] = useState<number>(5);
+  const [evalStatus, setEvalStatus] = useState<string | null>(null);
+  const [evalError, setEvalError] = useState<string | null>(null);
   const [benchmarkRunning, setBenchmarkRunning] = useState(false);
   const [benchmarkData, setBenchmarkData] = useState<BenchmarkRunResponse | null>(null);
   const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
@@ -169,18 +172,27 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
 
   const runLiveEval = async () => {
     setRunning(true);
+    setEvalError(null);
+    setEvalStatus(`Executing Live Evaluation Gate (${evalLimit} queries) through TypeSafe Jev & GroqCloud...`);
     try {
-      const res = await fetch('/api/v1/eval/run', {
+      const res = await fetch(`/api/v1/eval/run?limit=${evalLimit}`, {
         method: 'POST',
       });
-      if (res.ok) {
-        const data: EvalRunResponse = await res.json();
-        if (data.results && data.results.length > 0) {
-          setEvalData(data.results);
-        }
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Evaluation failed with status ${res.status}: ${errText}`);
+      }
+      const data: EvalRunResponse = await res.json();
+      if (data.results && data.results.length > 0) {
+        setEvalData(data.results);
+        setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${(data.meanFaithfulness * 100).toFixed(1)}%, Precision: ${(data.meanContextPrecision * 100).toFixed(1)}%, Relevance: ${(data.meanAnswerRelevance * 100).toFixed(1)}%)`);
+      } else {
+        setEvalStatus('Evaluation completed with empty results.');
       }
     } catch (err) {
       console.error('Failed to run live evaluation:', err);
+      setEvalError(err instanceof Error ? err.message : 'Unknown evaluation failure');
+      setEvalStatus(null);
     } finally {
       setRunning(false);
     }
@@ -227,14 +239,40 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
             <h2 className="text-base font-semibold text-gray-100">CI/CD Evaluation Matrix & Benchmark Gate</h2>
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            Golden 20-query evaluation suite verified across Faithfulness, Precision, and Sub-Second Latency SLAs.
+            Golden evaluation suite verified across Faithfulness, Precision, and Sub-Second Latency SLAs.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Query Limit Selector */}
+          <div className="flex items-center bg-background border border-border rounded-lg p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setEvalLimit(5)}
+              className={`px-2.5 py-1.5 rounded-md text-[11px] font-medium transition ${
+                evalLimit === 5
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Quick (5)
+            </button>
+            <button
+              type="button"
+              onClick={() => setEvalLimit(20)}
+              className={`px-2.5 py-1.5 rounded-md text-[11px] font-medium transition ${
+                evalLimit === 20
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Full (20)
+            </button>
+          </div>
+
           <button
             onClick={runBenchmark}
-            disabled={benchmarkRunning}
+            disabled={benchmarkRunning || running}
             className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-950/70 hover:bg-indigo-900/80 disabled:bg-gray-800 disabled:text-gray-600 text-indigo-300 border border-indigo-700/50 font-semibold text-xs rounded-lg shadow-sm transition"
           >
             <Zap className={`w-3.5 h-3.5 ${benchmarkRunning ? 'animate-pulse text-amber-400' : 'text-indigo-400'}`} />
@@ -243,14 +281,54 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
 
           <button
             onClick={runLiveEval}
-            disabled={running}
+            disabled={running || benchmarkRunning}
             className="flex items-center space-x-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-800 disabled:text-gray-600 text-slate-950 font-semibold text-xs rounded-lg shadow-sm transition"
           >
             <Play className={`w-3.5 h-3.5 ${running ? 'animate-spin' : ''}`} />
-            <span>{running ? 'Running Gate...' : 'Trigger Live Eval Gate'}</span>
+            <span>{running ? `Running Gate (${evalLimit})...` : `Trigger Live Eval Gate (${evalLimit})`}</span>
           </button>
         </div>
       </div>
+
+      {/* Eval Live Progress Alert */}
+      {running && (
+        <div className="bg-cyan-950/40 border border-cyan-800/60 rounded-xl p-3.5 text-xs text-cyan-300 flex items-center space-x-2 animate-pulse">
+          <Activity className="w-4 h-4 shrink-0 text-cyan-400 animate-spin" />
+          <span>⚡ Running Live Evaluation Gate across {evalLimit} queries via TypeSafe Jev & GroqCloud... Please wait (~5-8 seconds for quick gate).</span>
+        </div>
+      )}
+
+      {/* Eval Completion Alert */}
+      {evalStatus && !running && (
+        <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-xl p-3.5 text-xs text-emerald-300 flex items-center justify-between space-x-2">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            <span>{evalStatus}</span>
+          </div>
+          <button
+            onClick={() => setEvalStatus(null)}
+            className="text-gray-400 hover:text-gray-200 text-[11px] underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Eval Error Alert */}
+      {evalError && (
+        <div className="bg-rose-950/40 border border-rose-800/60 rounded-xl p-3.5 text-xs text-rose-300 flex items-center justify-between space-x-2">
+          <div className="flex items-center space-x-2">
+            <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+            <span>Evaluation Gate Notice: {evalError}</span>
+          </div>
+          <button
+            onClick={() => setEvalError(null)}
+            className="text-gray-400 hover:text-gray-200 text-[11px] underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Latency & SLA Performance Breakdown Card */}
       {benchmarkData && (

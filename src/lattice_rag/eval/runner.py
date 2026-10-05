@@ -38,8 +38,9 @@ class EvalRunner:
         self,
         dataset_path: str | Path = "eval_dataset.json",
         baseline_path: str | Path = "eval_baseline.json",
-        use_temp_db: bool = True,
-        max_concurrency: int = 5,
+        use_temp_db: bool = False,
+        max_concurrency: int = 2,
+        limit: int | None = None,
     ) -> EvalRunResponse:
         """Execute full evaluation run against golden benchmark dataset and compare with baseline."""
         ds_file = Path(dataset_path)
@@ -61,6 +62,9 @@ class EvalRunner:
 
         if not queries_data:
             raise ValueError(f"No queries found in dataset: {ds_file}")
+
+        if limit is not None and limit > 0:
+            queries_data = queries_data[:limit]
 
         active_orchestrator = self.orchestrator
         temp_dir_obj: tempfile.TemporaryDirectory | None = None
