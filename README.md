@@ -215,6 +215,9 @@ lattice-rag serve --host 0.0.0.0 --port 8000
 # Execute a query directly via CLI
 lattice-rag query "How does LatticeDB combine HNSW and BM25 search?"
 
+# Pre-seed the embedded knowledge graph from the golden corpus
+lattice-rag seed --dataset eval_dataset.json
+
 # Ingest a text document into the embedded knowledge graph
 lattice-rag ingest path/to/document.txt
 
@@ -224,6 +227,28 @@ lattice-rag benchmark
 # Run the 20-query CI/CD evaluation gate against baseline
 lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json
 ```
+
+---
+
+## 🎨 Embedded Visual Engineering Studio & Playground
+
+When running `lattice-rag serve`, navigate to `http://localhost:8000/` to open the built-in single-origin studio:
+
+- **Split-Screen Studio**: Left pane features query input, SSE streaming token synthesis, real-time dynamic velocity meter (`tok/s`), horizontal Gantt-style execution trace waterfall, and Jev-verified grounded sources.
+- **Interactive 2D Knowledge Graph Visualizer**: Right pane renders force-directed SVG graphs (`d3-force`) with zoom/pan, node inspection drawers, and a toggle between **Query Traversed Path** and **Full Knowledge Graph**.
+- **CI/CD Evaluation Matrix**: Interactive dashboard displaying per-query Faithfulness, Context Precision, and Relevance scores across the 20-query golden dataset, with a one-click **"Run Live Evaluation Gate"** runner and click-to-test navigation.
+- **Document Ingestion Drawer**: Live document text chunking, embedding, entity extraction, and LatticeDB linking with immediate graph visualizer refresh.
+
+---
+
+## ☁️ Zero-Cost Production Deployment
+
+`lattice-rag` can be hosted for **$0.00/month** in production without downgrading our state-of-the-art `bge-reranker-v2-m3` cross-encoder.
+
+See [`docs/deployment.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/deployment.md) for full guides covering:
+1. **Google Cloud Run (Always Free Tier - Recommended)**: Serverless container with 2GB RAM scaling to zero, consuming $0.00 within Google's monthly 360,000 GiB-seconds free tier (~225,000 queries/month free). Deploy via `./scripts/deploy_cloud_run.sh`.
+2. **Cloudflare Tunnel (`cloudflared`)**: Run locally on Apple Silicon (sub-100ms rerank) and expose globally with free HTTPS and DDoS protection via `cloudflared tunnel --url http://localhost:8000`.
+3. **Oracle Cloud Infrastructure (OCI Always Free)**: 4 ARM vCPUs + 24GB RAM persistent Ubuntu VM running 24/7 with zero cold starts.
 
 ---
 
@@ -239,9 +264,11 @@ lattice-rag serve
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `GET` | `/` | Root Embedded Visual Playground & Studio SPA (or graceful fallback). |
 | `POST` | `/api/v1/query` | Standard JSON query endpoint returning answer, sources, graph path, and latency breakdown. |
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
 | `POST` | `/api/v1/ingest` | Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB. |
+| `GET` | `/api/v1/graph/subgraph` | Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
 | `GET` | `/api/v1/cache/stats` | Telemetry on Tier 1 semantic vector cache hits and Tier 2 circuit breaker status. |
 | `POST` | `/api/v1/eval/run` | Triggers the CI/CD evaluation gate with custom dataset/baseline paths and regression tolerance. |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
@@ -254,20 +281,14 @@ lattice-rag serve
 Run the automated test suite across unit and integration suites:
 
 ```bash
-# Run all hermetic unit tests (95 passing in ~6s)
+# Run all unit tests (101 passing)
 pytest tests/unit/ -v
 
-# Run live E2E pipeline integration test (LatticeDB + FastEmbed + Groq + TypeSafe)
-pytest tests/integration/test_phase4_e2e.py -v
-
-# Run live Phase 5 Jev evaluation gate integration test
-pytest tests/integration/test_phase5_eval_live.py -v
-
-# Run full test suite (97 tests, 100% green, 0 warnings)
+# Run full test suite (101 tests, 100% green, 0 warnings)
 pytest tests/ -v
 ```
 
-All 97 tests execute cleanly with 0 warnings.
+All 101 tests execute cleanly with 0 warnings.
 
 ---
 

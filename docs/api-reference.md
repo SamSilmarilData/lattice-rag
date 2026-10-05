@@ -17,9 +17,11 @@ http://localhost:8000/schema/scalar
 
 | Method | Path | Request Body | Response Body | Description |
 |---|---|---|---|---|
+| `GET` | `/` | — | `text/html` | Root Embedded Visual Playground & Studio SPA (or fallback landing). |
 | `POST` | `/api/v1/query` | `QueryRequest` | `QueryResponse` | Synchronous RAG query endpoint. |
 | `POST` | `/api/v1/query/stream` | `QueryRequest` | `text/event-stream` | Real-time SSE token & event stream. |
 | `POST` | `/api/v1/ingest` | `IngestRequest` | `IngestResponse` | Document ingestion & graph construction. |
+| `GET` | `/api/v1/graph/subgraph` | — (Query param: `limit`) | `SubgraphDTO` | Knowledge graph snapshot (nodes & edges) for 2D visualizer. |
 | `GET` | `/api/v1/cache/stats` | — | `CacheStatsResponse` | Hit/miss metrics for Tier 1 & 2 caches. |
 | `POST` | `/api/v1/eval/run` | — (Query params) | `EvalRunResponse` | Run CI/CD evaluation gate against benchmark dataset. |
 | `GET` | `/health` | — | `HealthResponse` | System health and connectivity telemetry. |

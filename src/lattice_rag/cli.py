@@ -175,6 +175,68 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
 
 
 @main.command()
+@click.option('--dataset', default='eval_dataset.json', help='Path to dataset containing corpus')
+def seed(dataset: str) -> None:
+    """Pre-seed LatticeDB with the golden corpus documents."""
+    import json
+    import asyncio
+    from lattice_rag.api.controllers.ingest import chunk_text
+    from lattice_rag.config import get_config
+    from lattice_rag.retrieval.embeddings import EmbeddingService
+    from lattice_rag.storage.db import ChunkData, EntityData, LatticeStore
+    from lattice_rag.storage.extract import EntityExtractor
+
+    path = Path(dataset)
+    if not path.exists():
+        click.echo(f"Error: Dataset {dataset} not found.")
+        return
+
+    data = json.loads(path.read_text(encoding='utf-8'))
+    corpus = data.get("corpus", [])
+    if not corpus:
+        click.echo("No corpus documents found in dataset.")
+        return
+
+    click.echo(f"Seeding LatticeDB with {len(corpus)} corpus documents from {dataset}...")
+
+    async def _seed() -> None:
+        config = get_config()
+        store = LatticeStore(config.latticedb_path)
+        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        extractor = EntityExtractor()
+
+        for doc in corpus:
+            d_id = doc.get("document_id", "doc")
+            d_title = doc.get("title", d_id)
+            d_text = doc.get("text", "")
+            click.echo(f"  Ingesting '{d_title}' ({len(d_text)} chars)...")
+
+            text_chunks = chunk_text(d_text, 512, 64)
+            embeddings = embed_svc.embed_texts(text_chunks)
+            chunk_data = [ChunkData(text=t, embedding=e, position=i) for i, (t, e) in enumerate(zip(text_chunks, embeddings))]
+            stats = store.ingest_document(d_id, d_title, chunk_data)
+
+            for i, chunk_node_id in enumerate(stats.chunk_ids):
+                c_text = text_chunks[i]
+                entities = extractor.extract_entities(c_text)
+                if entities:
+                    triples = extractor.extract_triples(c_text, entities)
+                    ent_names = [e.name for e in entities]
+                    ent_embs = embed_svc.embed_texts(ent_names)
+                    embedded_entities = [
+                        EntityData(name=e.name, entity_type=e.entity_type, embedding=ent_embs[j])
+                        for j, e in enumerate(entities)
+                    ]
+                    store.ingest_entities(chunk_node_id, embedded_entities, triples)
+
+        click.echo("✓ LatticeDB pre-seeding complete!")
+        store.close()
+
+    asyncio.run(_seed())
+
+
+
+@main.command()
 def benchmark() -> None:
     """Run latency benchmarks on the retrieval pipeline."""
     click.echo('Running benchmarks...')

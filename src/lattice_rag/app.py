@@ -4,10 +4,10 @@ import contextlib
 from pathlib import Path
 from typing import AsyncGenerator
 
-from litestar import Litestar, MediaType, Request, Response
+from litestar import Litestar, MediaType, Request, Response, get
 from litestar.config.app import AppConfig
 from litestar.config.cors import CORSConfig
-from litestar.datastructures import ImmutableState
+from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.logging import LoggingConfig
 from litestar.openapi import OpenAPIConfig
@@ -18,6 +18,7 @@ from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetail
 from lattice_rag.api.controllers import (
     CacheController,
     EvalController,
+    GraphController,
     HealthController,
     IngestController,
     QueryController,
@@ -135,35 +136,35 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
 
 # ── Dependency Providers ──────────────────────────────────────────────
 
-def provide_store(state: ImmutableState) -> LatticeStore:
+def provide_store(state: State) -> LatticeStore:
     return state.store
 
 
-def provide_embedding_service(state: ImmutableState) -> EmbeddingService:
+def provide_embedding_service(state: State) -> EmbeddingService:
     return state.embedding_service
 
 
-def provide_extractor(state: ImmutableState) -> EntityExtractor:
+def provide_extractor(state: State) -> EntityExtractor:
     return state.extractor
 
 
-def provide_semantic_cache(state: ImmutableState) -> SemanticCache:
+def provide_semantic_cache(state: State) -> SemanticCache:
     return state.semantic_cache
 
 
-def provide_fallback_cache(state: ImmutableState) -> FallbackCache:
+def provide_fallback_cache(state: State) -> FallbackCache:
     return state.fallback_cache
 
 
-def provide_orchestrator(state: ImmutableState) -> RAGOrchestrator:
+def provide_orchestrator(state: State) -> RAGOrchestrator:
     return state.orchestrator
 
 
-def provide_config(state: ImmutableState) -> LatticeAppConfig:
+def provide_config(state: State) -> LatticeAppConfig:
     return state.config
 
 
-def provide_eval_runner(state: ImmutableState) -> EvalRunner:
+def provide_eval_runner(state: State) -> EvalRunner:
     return state.eval_runner
 
 
@@ -184,6 +185,37 @@ def secret_sanitizing_exception_handler(request: Request, exc: Exception) -> Res
     )
 
 
+@get("/", media_type=MediaType.HTML, include_in_schema=False)
+async def fallback_landing() -> Response:
+    """Graceful fallback landing page when frontend/dist is not yet built."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lattice-rag Engine</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F19; color: #F3F4F6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { background: #111827; border: 1px solid #1F2937; padding: 2.5rem; border-radius: 0.75rem; max-width: 520px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+    h1 { margin-top: 0; color: #06B6D4; font-size: 1.6rem; letter-spacing: -0.025em; }
+    p { color: #9CA3AF; line-height: 1.6; font-size: 0.95rem; }
+    a { display: inline-block; margin-top: 1.25rem; padding: 0.65rem 1.4rem; background: #06B6D4; color: #0B0F19; text-decoration: none; border-radius: 0.375rem; font-weight: 600; font-size: 0.9rem; transition: background 0.15s ease; }
+    a:hover { background: #22D3EE; }
+    code { background: #1F2937; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; color: #E5E7EB; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>lattice-rag Engine</h1>
+    <p>Zero-cloud-cost Hybrid GraphRAG ASGI server is operational.</p>
+    <p>Frontend UI is not yet built. Run <code>npm run build</code> in <code>frontend/</code> to activate the Visual Playground.</p>
+    <a href="/schema/scalar">Open API Scalar Docs</a>
+  </div>
+</body>
+</html>"""
+    return Response(content=html, media_type=MediaType.HTML)
+
+
 class ApplicationCore(InitPluginProtocol):
     """Litestar application factory plugin using ApplicationCore pattern."""
 
@@ -196,7 +228,24 @@ class ApplicationCore(InitPluginProtocol):
             CacheController,
             HealthController,
             EvalController,
+            GraphController,
         ])
+
+        # Mount frontend static files or fallback landing route
+        dist_path = Path("frontend/dist")
+        if dist_path.is_dir() and (dist_path / "index.html").exists():
+            from litestar.static_files import create_static_files_router
+
+            app_config.route_handlers.append(
+                create_static_files_router(
+                    path="/",
+                    directories=[dist_path],
+                    html_mode=True,
+                    name="frontend",
+                )
+            )
+        else:
+            app_config.route_handlers.append(fallback_landing)
 
         # Register DI providers
         app_config.dependencies.update({
@@ -219,7 +268,7 @@ class ApplicationCore(InitPluginProtocol):
         # Configure OpenAPI with Scalar render plugin
         app_config.openapi_config = OpenAPIConfig(
             title="lattice-rag API",
-            version="0.4.0",
+            version="0.6.0",
             render_plugins=[ScalarRenderPlugin()],
         )
 

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] - 2026-10-06 (Phase 6: Embedded Interactive Visual Playground & Evaluation UI)
+
+### Added
+- **Embedded Visual Engineering Playground & Studio (`frontend/`):**
+  - Built single-page React 18 + TypeScript + Vite + Tailwind CSS studio mounted into Litestar at root `/` with zero external frontend hosting dependencies.
+  - Split-screen layout uniting real-time SSE streaming answer generation on the left with an interactive 2D knowledge graph on the right.
+  - Live dynamic token velocity meter (`tok/s`) measuring synthesis throughput continuously on every SSE token chunk event alongside elapsed time and total tokens.
+  - Interactive Horizontal Gantt-style execution trace waterfall visualizing exact durations (`ms`) and percentage proportions across all 6 pipeline stages (Front-Door Triage, Stage 1 Hybrid, Stage 2 Traversal, Stage 3 Cross-Encoder Rerank, Jev Noul Guardrail, Generative Synthesis).
+  - Grounded source chunk inspector drawer displaying retrieved text chunks, positions, doc IDs, and similarity scores.
+- **Interactive 2D Knowledge Graph Visualizer (`GraphExplorer.tsx`):**
+  - Integrated `d3-force` physics simulation with SVG rendering for crisp typography, custom styled entity nodes (`Database`, `Technology`, `Algorithm`, `Protocol`, `Concept`), and directed relation edges.
+  - Added mode toggle between **"Query Traversed Path"** and **"Full Knowledge Graph"** with dynamic neighborhood highlighting and slide-out node inspector panel.
+  - Implemented `GET /api/v1/graph/subgraph?limit=50` controller endpoint and `LatticeStore.get_subgraph_snapshot()` method.
+- **CI/CD Evaluation Matrix & Benchmark Dashboard (`EvalMatrix.tsx`):**
+  - Visualized the 20-query golden benchmark suite (`eval_dataset.json`) with summary KPI cards for Mean Faithfulness, Context Precision, Answer Relevance, and CI/CD Gate Status.
+  - Integrated "Trigger Live Evaluation Gate" button calling `POST /api/v1/eval/run` with real-time runner status.
+  - Added filterable data grid by query text or pass/fail status, expandable side-by-side metric comparison, and "Test in Studio" click-to-test navigation.
+- **Document Ingestion Drawer (`IngestModal.tsx`):**
+  - Slide-out ingestion UI with 5 pre-built corpus presets (LatticeDB, FastEmbed, GLiNER, TypeSafe, Litestar), live ingestion progress, and returned chunk/entity/relation counts.
+- **Zero-Cost Deployment & Containerization:**
+  - Multi-stage `Dockerfile` (Node 22 build -> Python 3.12-slim) pre-downloading ONNX embedding/reranker models and pre-seeding LatticeDB with the golden corpus.
+  - Cloud Run deployment automation script `scripts/deploy_cloud_run.sh` configured for 2GB RAM container scaling to zero ($0.00/month for ~225,000 queries).
+  - Comprehensive zero-cost hosting guide `docs/deployment.md` comparing Google Cloud Run, Cloudflare Tunnel, and OCI Always Free.
+  - CLI `lattice-rag seed --dataset eval_dataset.json` command for pre-seeding knowledge graphs.
+- **Graceful Static Hosting in Litestar:**
+  - Configured `create_static_files_router` at `/` with `html_mode=True` when `frontend/dist` is present, with an automated fallback HTML landing page pointing to OpenAPI Scalar docs when unbuilt.
+
+---
+
 ## [0.5.0] - 2026-10-05 (Phase 5: Golden Benchmark Dataset & Automated CI/CD Evaluation Gate)
 
 ### Added

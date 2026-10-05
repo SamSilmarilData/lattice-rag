@@ -253,6 +253,7 @@ class LatticeStore:
 
         visited_nodes: dict[int, dict[str, Any]] = {}
         visited_edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[int, int, str]] = set()
 
         with self.db.read() as txn:
             frontier = list(entity_ids)
@@ -276,12 +277,15 @@ class LatticeStore:
                         if len(visited_edges) >= budget:
                             break
 
-                        rel_type = txn.get_edge_property(edge.id, "type") or edge.edge_type
-                        visited_edges.append({
-                            "source_id": edge.source_id,
-                            "target_id": edge.target_id,
-                            "relation_type": str(rel_type),
-                        })
+                        rel_type = str(txn.get_edge_property(edge.id, "type") or edge.edge_type)
+                        edge_key = (edge.source_id, edge.target_id, rel_type)
+                        if edge_key not in seen_edges:
+                            seen_edges.add(edge_key)
+                            visited_edges.append({
+                                "source_id": edge.source_id,
+                                "target_id": edge.target_id,
+                                "relation_type": rel_type,
+                            })
 
                         if edge.target_id not in visited_nodes and len(visited_nodes) < budget:
                             target_name = txn.get_property(edge.target_id, "name") or f"node_{edge.target_id}"
@@ -299,6 +303,19 @@ class LatticeStore:
             nodes=list(visited_nodes.values()),
             edges=visited_edges,
         )
+
+    def get_subgraph_snapshot(self, limit: int = 50) -> SubgraphResult:
+        """Return a snapshot of the knowledge graph up to limit entities and their relations."""
+        try:
+            entity_ids = self.db.get_nodes_by_label("Entity")
+        except Exception as e:
+            logger.debug("Failed to get Entity nodes by label: %s", e)
+            return SubgraphResult(nodes=[], edges=[])
+
+        if not entity_ids:
+            return SubgraphResult(nodes=[], edges=[])
+
+        return self.traverse_from_entities(entity_ids[:limit], max_hops=1, budget=limit)
 
     def get_entities_for_chunk(self, chunk_id: int) -> list[int]:
         """Retrieve all entity IDs linked to a given Chunk via CONTAINS edge."""

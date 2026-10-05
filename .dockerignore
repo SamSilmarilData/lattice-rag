@@ -1,0 +1,16 @@
+.env
+.venv
+.git
+.github
+.agents
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+frontend/node_modules
+frontend/dist
+data/*.db
+data/*.db-shm
+data/*.db-wal
