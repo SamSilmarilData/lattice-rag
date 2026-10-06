@@ -25,21 +25,5 @@ class GraphController(Controller):
         """Return a snapshot of the knowledge graph nodes and edges up to limit."""
         logger.info("fetching_graph_subgraph", extra={"limit": limit})
         subgraph = store.get_subgraph_snapshot(limit=limit)
-        return SubgraphDTO(
-            nodes=[
-                GraphNode(
-                    node_id=n["id"],
-                    label=n.get("label", "Entity"),
-                    name=n.get("name", f"node_{n['id']}"),
-                )
-                for n in subgraph.nodes
-            ],
-            edges=[
-                GraphEdge(
-                    source_id=e["source_id"],
-                    target_id=e["target_id"],
-                    relation_type=e["relation_type"],
-                )
-                for e in subgraph.edges
-            ],
-        )
+        return SubgraphDTO.from_subgraph(subgraph)
+

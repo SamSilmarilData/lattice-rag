@@ -67,6 +67,7 @@ class LatticeStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.vector_dimensions = vector_dimensions
+        self._entity_cache: dict[str, int] = {}
 
         # Open embedded database with vector support and WAL enabled
         self.db = Database(
@@ -80,7 +81,7 @@ class LatticeStore:
         logger.info("Initialized LatticeStore at %s (dim=%d)", self.db_path, self.vector_dimensions)
 
     def _ensure_schema(self) -> None:
-        """Create full-text search indices if not already present."""
+        """Create full-text search indices if not already present and preload entity cache."""
         try:
             if not self.db.has_node_fts_index("Chunk", "text"):
                 self.db.create_node_fts_index("Chunk", "text")
@@ -92,6 +93,26 @@ class LatticeStore:
                 self.db.create_node_fts_index("Entity", "name")
         except Exception as e:
             logger.warning("Could not create Entity name index: %s", e)
+
+        self._load_entity_cache()
+
+    def _load_entity_cache(self) -> None:
+        """Preload canonical entity name -> node_id mapping for O(1) deduplication."""
+        try:
+            entity_ids = self.db.get_nodes_by_label("Entity")
+            if not entity_ids:
+                return
+            with self.db.read() as txn:
+                for nid in entity_ids:
+                    name = txn.get_property(nid, "name")
+                    if name:
+                        self._entity_cache[str(name).strip().lower()] = nid
+        except Exception as e:
+            logger.debug("Could not preload entity cache: %s", e)
+
+    def get_canonical_entity_id(self, name: str) -> int | None:
+        """Return canonical node_id for an entity name if it exists in the graph."""
+        return self._entity_cache.get(name.strip().lower())
 
     def ingest_document(
         self,
@@ -132,25 +153,31 @@ class LatticeStore:
         entities: list[EntityData],
         relations: list[RelationData],
     ) -> IngestStats:
-        """Ingest extracted entities and relations linked to their source chunk."""
+        """Ingest extracted entities and relations linked to their source chunk with canonical deduplication."""
         entity_name_to_id: dict[str, int] = {}
+        created_relations = 0
 
         with self.db.write() as txn:
             for ent in entities:
-                ent_node = txn.create_node(
-                    labels=["Entity", ent.entity_type],
-                    properties={"name": ent.name, "entity_type": ent.entity_type},
-                )
-                if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
-                    txn.set_vector(ent_node.id, "embedding", ent.embedding)
+                norm_name = ent.name.strip().lower()
+                if norm_name in self._entity_cache:
+                    ent_id = self._entity_cache[norm_name]
+                else:
+                    ent_node = txn.create_node(
+                        labels=["Entity", ent.entity_type],
+                        properties={"name": ent.name, "entity_type": ent.entity_type},
+                    )
+                    ent_id = ent_node.id
+                    if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
+                        txn.set_vector(ent_id, "embedding", ent.embedding)
+                    self._entity_cache[norm_name] = ent_id
 
-                txn.create_edge(chunk_id, ent_node.id, "CONTAINS")
-                entity_name_to_id[ent.name] = ent_node.id
+                txn.create_edge(chunk_id, ent_id, "CONTAINS")
+                entity_name_to_id[ent.name] = ent_id
 
-            created_relations = 0
             for rel in relations:
-                source_id = entity_name_to_id.get(rel.source_name)
-                target_id = entity_name_to_id.get(rel.target_name)
+                source_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(rel.source_name.strip().lower())
+                target_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(rel.target_name.strip().lower())
                 if source_id is not None and target_id is not None:
                     txn.create_edge(
                         source_id,
@@ -215,22 +242,29 @@ class LatticeStore:
                     real_chunk_id = None
 
                 for ent in entities:
-                    if ent.name not in entity_name_to_id:
+                    norm_name = ent.name.strip().lower()
+                    if norm_name in self._entity_cache:
+                        ent_id = self._entity_cache[norm_name]
+                    elif ent.name in entity_name_to_id:
+                        ent_id = entity_name_to_id[ent.name]
+                    else:
                         ent_node = txn.create_node(
                             labels=["Entity", ent.entity_type],
                             properties={"name": ent.name, "entity_type": ent.entity_type},
                         )
+                        ent_id = ent_node.id
                         if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
-                            txn.set_vector(ent_node.id, "embedding", ent.embedding)
-                        entity_name_to_id[ent.name] = ent_node.id
+                            txn.set_vector(ent_id, "embedding", ent.embedding)
+                        self._entity_cache[norm_name] = ent_id
                         total_entities += 1
 
+                    entity_name_to_id[ent.name] = ent_id
                     if real_chunk_id is not None:
-                        txn.create_edge(real_chunk_id, entity_name_to_id[ent.name], "CONTAINS")
+                        txn.create_edge(real_chunk_id, ent_id, "CONTAINS")
 
                 for rel in relations:
-                    s_id = entity_name_to_id.get(rel.source_name)
-                    t_id = entity_name_to_id.get(rel.target_name)
+                    s_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(rel.source_name.strip().lower())
+                    t_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(rel.target_name.strip().lower())
                     if s_id is not None and t_id is not None:
                         txn.create_edge(
                             s_id,
@@ -260,12 +294,18 @@ class LatticeStore:
         elif query_embedding.dtype != np.float32:
             query_embedding = query_embedding.astype(np.float32)
 
-        raw_results = self.db.vector_search(query_embedding, k=top_k)
+        # Retrieve a broader candidate pool to filter out non-chunk nodes (e.g. Entity nodes sharing vector index)
+        fetch_k = max(top_k * 3, 20)
+        raw_results = self.db.vector_search(query_embedding, k=fetch_k)
 
         search_results: list[SearchResult] = []
         with self.db.read() as txn:
             for r in raw_results:
-                text = txn.get_property(r.node_id, "text") or ""
+                text = txn.get_property(r.node_id, "text")
+                # Filter out nodes without text (e.g. Entity nodes)
+                if not text or not str(text).strip():
+                    continue
+
                 pos = txn.get_property(r.node_id, "position")
                 doc_id = txn.get_property(r.node_id, "doc_id") or ""
                 metadata = {}
@@ -284,6 +324,8 @@ class LatticeStore:
                         metadata=metadata,
                     )
                 )
+                if len(search_results) >= top_k:
+                    break
 
         return search_results
 
@@ -292,17 +334,45 @@ class LatticeStore:
         query_text: str,
         top_k: int = 10,
     ) -> list[SearchResult]:
-        """Perform native BM25 full-text search on Chunk text."""
+        """Perform native BM25 full-text search on Chunk text with keyword recall fallback."""
+        raw_results = []
         try:
             raw_results = self.db.fts_search("Chunk", "text", query_text, limit=top_k)
         except Exception as e:
-            logger.debug("BM25 search error or no index: %s", e)
-            return []
+            logger.debug("BM25 search error: %s", e)
+
+        # If natural-language question did not match exact conjunction, fallback to keyword search
+        if not raw_results and query_text:
+            import re
+            _STOPWORDS = {
+                "what", "is", "the", "of", "and", "are", "in", "a", "to", "for",
+                "with", "from", "by", "that", "this", "how", "does", "do", "an",
+            }
+            words = [
+                w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_text)
+                if w.lower() not in _STOPWORDS and len(w) > 2
+            ]
+            accum: dict[int, float] = {}
+            for w in words:
+                try:
+                    for item in self.db.fts_search("Chunk", "text", w, limit=top_k):
+                        accum[item.node_id] = accum.get(item.node_id, 0.0) + item.score
+                except Exception:
+                    pass
+            if accum:
+                top_sorted = sorted(accum.items(), key=lambda x: x[1], reverse=True)[:top_k]
+                raw_results = [
+                    type("FtsItem", (), {"node_id": nid, "score": sc})()
+                    for nid, sc in top_sorted
+                ]
 
         search_results: list[SearchResult] = []
         with self.db.read() as txn:
             for r in raw_results:
-                text = txn.get_property(r.node_id, "text") or ""
+                text = txn.get_property(r.node_id, "text")
+                if not text or not str(text).strip():
+                    continue
+
                 pos = txn.get_property(r.node_id, "position")
                 doc_id = txn.get_property(r.node_id, "doc_id") or ""
                 metadata = {}

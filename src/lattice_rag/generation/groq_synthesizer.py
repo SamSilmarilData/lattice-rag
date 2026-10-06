@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, AsyncGenerator
 
@@ -27,9 +28,9 @@ class GroqSynthesizer:
         if client is not None:
             self.client = client
         elif api_key:
-            self.client = AsyncGroq(api_key=api_key)
+            self.client = AsyncGroq(api_key=api_key, max_retries=2)
         else:
-            self.client = AsyncGroq()
+            self.client = AsyncGroq(max_retries=2)
 
     def _build_prompt(
         self,
@@ -42,6 +43,7 @@ class GroqSynthesizer:
             "You are a helpful and precise technical assistant answering questions based on provided evidence.",
             "Instructions:",
             "- Ground every factual claim directly in the provided evidence.",
+            "- Explicitly mention exact technical terms, operators, and lifecycle identifiers as stated in the evidence (such as operators <=> and @@, or event types stage, token, done).",
             "- Cite source chunks by their position or ID (e.g. [Chunk 0], [Doc: xyz]) when making statements.",
             "- If relational graph triples are provided, use them to explain connections between entities.",
             "- Acknowledge when the evidence is insufficient to answer the question.",
@@ -86,18 +88,27 @@ class GroqSynthesizer:
         logger.info("groq_synthesizing_answer", query=query, model=self.model)
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self.max_tokens,
-                stream=False,
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            sanitized_error = sanitize_error_detail(str(e))
-            logger.error("groq_synthesis_failed", error=sanitized_error)
-            raise RuntimeError(f"Groq synthesis failed: {sanitized_error}") from e
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=self.max_tokens,
+                    stream=False,
+                )
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                err_str = str(e)
+                if ("429" in err_str or "rate_limit_exceeded" in err_str) and attempt < max_attempts - 1:
+                    wait_sec = 2.0 * (attempt + 1) + 0.5
+                    logger.warning("groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query)
+                    await asyncio.sleep(wait_sec)
+                    continue
+                sanitized_error = sanitize_error_detail(err_str)
+                logger.error("groq_synthesis_failed", error=sanitized_error)
+                raise RuntimeError(f"Groq synthesis failed: {sanitized_error}") from e
+        return ""
 
     async def stream(
         self,
@@ -109,18 +120,27 @@ class GroqSynthesizer:
         logger.info("groq_streaming_synthesis", query=query, model=self.model)
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=self.max_tokens,
-                stream=True,
-            )
-            async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    text = chunk.choices[0].delta.content
-                    yield text
-        except Exception as e:
-            sanitized_error = sanitize_error_detail(str(e))
-            logger.error("groq_stream_synthesis_failed", error=sanitized_error)
-            raise RuntimeError(f"Groq stream synthesis failed: {sanitized_error}") from e
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=self.max_tokens,
+                    stream=True,
+                )
+                async for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        text = chunk.choices[0].delta.content
+                        yield text
+                return
+            except Exception as e:
+                err_str = str(e)
+                if ("429" in err_str or "rate_limit_exceeded" in err_str) and attempt < max_attempts - 1:
+                    wait_sec = 2.0 * (attempt + 1) + 0.5
+                    logger.warning("groq_stream_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query)
+                    await asyncio.sleep(wait_sec)
+                    continue
+                sanitized_error = sanitize_error_detail(err_str)
+                logger.error("groq_stream_synthesis_failed", error=sanitized_error)
+                raise RuntimeError(f"Groq stream synthesis failed: {sanitized_error}") from e

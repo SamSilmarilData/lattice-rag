@@ -56,9 +56,9 @@ class PrecisionReranker:
         edges = getattr(graph_context, "edges", [])
         for e in edges[:max_triples]:  # Cap at max_triples to balance graph context and inference speed
             if isinstance(e, dict):
-                s_id = e.get("source_id")
-                t_id = e.get("target_id")
-                rel = e.get("relation_type", "RELATION")
+                s_id = e.get("source_id") if "source_id" in e else e.get("source")
+                t_id = e.get("target_id") if "target_id" in e else e.get("target")
+                rel = e.get("relation_type") or e.get("type", "RELATION")
                 s_name = node_name_map.get(s_id, f"Node_{s_id}")
                 t_name = node_name_map.get(t_id, f"Node_{t_id}")
                 triples.append(f"{s_name} --[{rel}]--> {t_name}")

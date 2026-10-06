@@ -102,3 +102,39 @@ def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
     subgraph = temp_store.traverse_from_entities(entity_ids=[linked_entities[0]], max_hops=2, budget=10)
     assert len(subgraph.nodes) >= 2
     assert len(subgraph.edges) >= 1
+
+
+def test_canonical_entity_deduplication(temp_store: LatticeStore):
+    """Verify that identical entities across different chunks reuse the canonical node ID."""
+    vec = np.zeros(384, dtype=np.float32)
+    chunks = [
+        ChunkData(text="Chunk 1 talks about LatticeDB.", embedding=vec, position=0),
+        ChunkData(text="Chunk 2 also mentions LatticeDB.", embedding=vec, position=1),
+    ]
+    stats = temp_store.ingest_document(doc_id="doc_canon", title="Canonical Test", chunks=chunks)
+    c1, c2 = stats.chunk_ids[0], stats.chunk_ids[1]
+
+    # Ingest LatticeDB entity for chunk 1
+    temp_store.ingest_entities(
+        chunk_id=c1,
+        entities=[EntityData(name="LatticeDB", entity_type="database", embedding=vec)],
+        relations=[],
+    )
+    ent_id_1 = temp_store.get_canonical_entity_id("LatticeDB")
+    assert ent_id_1 is not None
+
+    # Ingest LatticeDB entity again for chunk 2 (case-insensitive)
+    temp_store.ingest_entities(
+        chunk_id=c2,
+        entities=[EntityData(name="latticedb", entity_type="database", embedding=vec)],
+        relations=[],
+    )
+    ent_id_2 = temp_store.get_canonical_entity_id("latticedb")
+    # Must reuse the same node ID!
+    assert ent_id_1 == ent_id_2
+
+    # Both chunks must be connected to this single canonical entity
+    c1_ents = temp_store.get_entities_for_chunk(c1)
+    c2_ents = temp_store.get_entities_for_chunk(c2)
+    assert ent_id_1 in c1_ents
+    assert ent_id_1 in c2_ents

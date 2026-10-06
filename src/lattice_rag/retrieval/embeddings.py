@@ -18,6 +18,9 @@ class RerankResult:
     text: str
 
 
+_ONNX_CACHE: dict[tuple[str, str, int], tuple[Any, Any]] = {}
+
+
 class ONNXReranker:
     """CPU-quantized INT8 ONNX Reranker for bge-reranker-v2-m3."""
 
@@ -35,6 +38,11 @@ class ONNXReranker:
 
     def _ensure_loaded(self) -> None:
         if self._session is None or self._tokenizer is None:
+            cache_key = (self.repo_id, self.filename, self.max_length)
+            if cache_key in _ONNX_CACHE:
+                self._session, self._tokenizer = _ONNX_CACHE[cache_key]
+                return
+
             import os
             import onnxruntime as ort
             from huggingface_hub import hf_hub_download
@@ -63,6 +71,7 @@ class ONNXReranker:
             self._tokenizer.enable_truncation(max_length=self.max_length)
             # Dynamic padding to batch max length for sub-100ms CPU inference
             self._tokenizer.enable_padding()
+            _ONNX_CACHE[cache_key] = (self._session, self._tokenizer)
 
     def rerank(self, query: str, documents: list[str]) -> list[float]:
         """Scores candidate documents against query using INT8 ONNX cross-encoder."""

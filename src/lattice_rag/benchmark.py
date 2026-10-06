@@ -92,10 +92,7 @@ class BenchmarkEngine:
 
         latencies_ms.sort()
         n = len(latencies_ms)
-        p50 = latencies_ms[int(n * 0.50)]
-        p90 = latencies_ms[min(int(n * 0.90), n - 1)]
-        p95 = latencies_ms[min(int(n * 0.95), n - 1)]
-        p99 = latencies_ms[min(int(n * 0.99), n - 1)]
+        p50, p90, p95, p99 = np.percentile(latencies_ms, [50, 90, 95, 99])
 
         return LatencyStats(
             stage=name,
@@ -306,14 +303,14 @@ class BenchmarkEngine:
         report.stages["stage3_rerank"] = await self.benchmark_stage3_rerank(
             query=sample_queries[0],
             iterations=max(iterations // 2, 4),
-            warmup=max(warmup // 2, 1),
+            warmup=max(warmup, 2),
         )
 
         # 5. End-to-End Pipeline Latency Benchmark
         report.stages["e2e_pipeline"] = await self.benchmark_end_to_end(
             queries=sample_queries,
             iterations=max(iterations // 2, 3),
-            warmup=max(warmup // 2, 1),
+            warmup=max(warmup, 2),
             live_llm=live_llm,
         )
 

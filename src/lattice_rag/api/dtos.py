@@ -16,6 +16,16 @@ class SourceChunk(msgspec.Struct, rename='camel'):
     document_id: str
     position: int
 
+    @classmethod
+    def from_dict(cls, data: dict[str, object], default_index: int = 0) -> SourceChunk:
+        return cls(
+            chunk_id=int(data.get("node_id") or data.get("chunk_id") or default_index),
+            text=str(data.get("text", "")),
+            score=float(data.get("rerank_score") or data.get("score") or 0.0),
+            document_id=str(data.get("doc_id") or data.get("document_id") or "unknown"),
+            position=int(data.get("position", default_index)),
+        )
+
 class GraphNode(msgspec.Struct, rename='camel'):
     """DTO representing a graph node."""
     node_id: int
@@ -23,16 +33,58 @@ class GraphNode(msgspec.Struct, rename='camel'):
     name: str
     properties: dict[str, object] = {}
 
+    @classmethod
+    def from_dict(cls, data: dict[str, object], default_id: int = 0) -> GraphNode:
+        return cls(
+            node_id=int(data.get("node_id") or data.get("id") or default_id),
+            label=str(data.get("label", "Entity")),
+            name=str(data.get("name") or f"node_{default_id}"),
+            properties=dict(data.get("properties", {})) if isinstance(data.get("properties"), dict) else {},
+        )
+
 class GraphEdge(msgspec.Struct, rename='camel'):
     """DTO representing an edge in a graph."""
     source_id: int
     target_id: int
     relation_type: str
 
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> GraphEdge:
+        return cls(
+            source_id=int(data.get("source_id") or data.get("source") or 0),
+            target_id=int(data.get("target_id") or data.get("target") or 0),
+            relation_type=str(data.get("relation_type") or data.get("type", "RELATION")),
+        )
+
 class SubgraphDTO(msgspec.Struct, rename='camel'):
     """DTO representing a subgraph."""
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
+
+    @classmethod
+    def from_subgraph(cls, subgraph: object) -> SubgraphDTO:
+        if not subgraph:
+            return cls(nodes=[], edges=[])
+        raw_nodes = (
+            subgraph.get("nodes", [])
+            if isinstance(subgraph, dict)
+            else getattr(subgraph, "nodes", [])
+        )
+        raw_edges = (
+            subgraph.get("edges", [])
+            if isinstance(subgraph, dict)
+            else getattr(subgraph, "edges", [])
+        )
+        nodes = [
+            GraphNode.from_dict(n, default_id=i) if isinstance(n, dict) else GraphNode(node_id=i, label="Entity", name=str(n))
+            for i, n in enumerate(raw_nodes)
+        ]
+        edges = [
+            GraphEdge.from_dict(e) if isinstance(e, dict) else GraphEdge(source_id=0, target_id=0, relation_type="RELATION")
+            for e in raw_edges
+        ]
+        return cls(nodes=nodes, edges=edges)
+
 
 class StageTiming(msgspec.Struct, rename='camel'):
     """Timing information for a pipeline stage."""

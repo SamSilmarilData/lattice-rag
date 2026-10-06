@@ -60,6 +60,10 @@ class QueryRouter:
         Returns:
             RouteDecision: The chosen route and confidence score.
         """
+        if not query or not query.strip():
+            logger.debug("empty_query_routed_to_chitchat")
+            return RouteDecision(route="chitchat", confidence=1.0)
+
         logger.info("Routing query", query=query)
         response = await self._client.system_one(
             state={"query": query},
@@ -71,10 +75,20 @@ class QueryRouter:
             },
         )
 
-        choice_result = response.choices["route"]
+        choice_result = response.choices.get("route")
+        if choice_result is None:
+            logger.warning("missing_route_choice", query=query)
+            return RouteDecision(route="hybrid", confidence=0.5)
+
+        chosen_route = str(choice_result.choice).strip().lower()
+        if chosen_route not in _ROUTER_CRITERIA:
+            logger.warning("unknown_route_choice", choice=chosen_route, fallback="hybrid")
+            chosen_route = "hybrid"
+
+        confidence = float(getattr(choice_result, "confidence", 1.0))
         decision = RouteDecision(
-            route=choice_result.choice,
-            confidence=choice_result.confidence
+            route=chosen_route,
+            confidence=confidence,
         )
         logger.info("Query routed", route=decision.route, confidence=decision.confidence)
         return decision

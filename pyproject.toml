@@ -27,6 +27,8 @@ dependencies = [
     "latticedb>=0.15.0",
     "fastembed>=0.8.0",
     "gliner>=0.2.29",
+    "gliner2>=2.0.0",
+    "peft>=0.21.0",
 
     # --- Routing & Decision ---
     "typesafe-sdk>=0.7.2",

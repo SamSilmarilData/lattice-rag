@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from collections import OrderedDict
 import os
 import time
 from dataclasses import dataclass
+from typing import Any
 import numpy as np
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
@@ -40,6 +43,9 @@ class SemanticCache:
         self._embeddings_matrix: np.ndarray | None = None
         self._hits = 0
         self._misses = 0
+        self._exact_hits = 0
+        self._fuzzy_hits = 0
+        self._evictions = 0
 
         if ts_client is not None:
             self._ts_client = ts_client
@@ -58,6 +64,7 @@ class SemanticCache:
         if norm_key in self._exact_map:
             self._exact_map.move_to_end(norm_key)
             self._hits += 1
+            self._exact_hits += 1
             logger.info("cache_hit_exact", query=query_text)
             return self._exact_map[norm_key]
         return None
@@ -104,6 +111,10 @@ class SemanticCache:
                 noul_result = response.nouls.get("equivalent")
                 if noul_result is not None and noul_result.noul >= 0.70:
                     self._hits += 1
+                    self._fuzzy_hits += 1
+                    best_norm = best_entry.query_text.strip().lower()
+                    if best_norm in self._exact_map:
+                        self._exact_map.move_to_end(best_norm)
                     logger.info(
                         "cache_hit_fuzzy",
                         query=query_text,
@@ -143,6 +154,7 @@ class SemanticCache:
 
         # LRU eviction if at capacity
         if len(self._cache) >= self.max_size:
+            self._evictions += 1
             # Evict least recently used key from exact map and oldest from cache list
             oldest_key, _ = self._exact_map.popitem(last=False)
             # Find and remove matching entry in _cache
@@ -175,6 +187,21 @@ class SemanticCache:
         """Returns (hits, misses) counts."""
         return self._hits, self._misses
 
+    @property
+    def detailed_stats(self) -> dict[str, Any]:
+        """Returns comprehensive cache diagnostics."""
+        total = self._hits + self._misses
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "exact_hits": self._exact_hits,
+            "fuzzy_hits": self._fuzzy_hits,
+            "evictions": self._evictions,
+            "size": len(self._cache),
+            "max_size": self.max_size,
+            "hit_ratio": (self._hits / total) if total > 0 else 0.0,
+        }
+
     def clear(self) -> None:
         """Clears all entries."""
         self._cache.clear()
@@ -183,6 +210,9 @@ class SemanticCache:
             self._embeddings_matrix.fill(0.0)
         self._hits = 0
         self._misses = 0
+        self._exact_hits = 0
+        self._fuzzy_hits = 0
+        self._evictions = 0
         logger.info("cache_cleared")
 
     async def aclose(self) -> None:

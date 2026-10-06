@@ -11,45 +11,45 @@ from lattice_rag.security import SecretStr
 logger = structlog.get_logger(__name__)
 
 FAITHFULNESS_CRITERIA = [
-    "1: Completely unfaithful; contains significant hallucinations or contradicts the context entirely.",
-    "2: Mostly unfaithful; makes multiple unsupported factual claims with minimal context grounding.",
-    "3: Moderately faithful; core facts are grounded in context but contains minor unsupported extraneous details.",
-    "4: Mostly faithful; nearly all claims are supported by context with only trivial semantic extrapolations.",
-    "5: Completely faithful; every assertion and fact in the answer is directly and fully grounded in the context.",
+    "1: Completely unfaithful; contains significant hallucinations or contradicts `context` entirely.",
+    "2: Mostly unfaithful; makes multiple unsupported factual claims with minimal `context` grounding.",
+    "3: Moderately faithful; core facts are grounded in `context` but contains minor unsupported extraneous details.",
+    "4: Mostly faithful; nearly all claims are supported by `context` with only trivial semantic extrapolations.",
+    "5: Completely faithful; every assertion and fact in the `answer` is directly and fully grounded in the `context`.",
 ]
 
 CONTEXT_PRECISION_CRITERIA = [
-    "1: Completely irrelevant; context contains no useful facts or entities to answer the query.",
-    "2: Low precision; context contains isolated keyword mentions but misses core relational facts.",
+    "1: Completely irrelevant; `context` contains no useful facts or entities to answer the `query`.",
+    "2: Low precision; `context` contains isolated keyword mentions but misses core relational facts.",
     "3: Moderate precision; contains partial relevant facts buried among substantial tangential noise.",
-    "4: High precision; contains almost all necessary facts and relationships with minimal extraneous context.",
-    "5: Ideal precision; compact, exact factual grounding directly addressing all query requirements.",
+    "4: High precision; contains almost all necessary facts and relationships with minimal extraneous `context`.",
+    "5: Ideal precision; compact, exact factual grounding directly addressing all `query` requirements.",
 ]
 
 ANSWER_RELEVANCE_CRITERIA = [
-    "1: Completely non-responsive; fails to address the user's question.",
-    "2: Poor relevance; addresses adjacent topics while ignoring the specific question asked.",
-    "3: Partially relevant; partially answers the query but leaves key parts unresolved or wanders.",
-    "4: Highly relevant; directly and clearly answers the question with minor gaps.",
-    "5: Perfectly relevant; complete, direct, concise, and precisely tailored to the user's inquiry.",
+    "1: Completely non-responsive; fails to address the user's `query`.",
+    "2: Poor relevance; addresses adjacent topics while ignoring the specific `query` asked.",
+    "3: Partially relevant; partially answers the `query` but leaves key parts unresolved or wanders.",
+    "4: Highly relevant; directly and clearly answers the `query` with minor gaps.",
+    "5: Perfectly relevant; complete, direct, concise, and precisely tailored to the user's `query`.",
 ]
 
 CONTRADICTION_INSTRUCTIONS = (
-    "Does the generated answer make any claim, fact, number, or assertion that "
-    "directly contradicts the facts stated in the source context?"
+    "Does the generated `answer` make any claim, fact, number, or assertion that "
+    "directly contradicts the facts stated in the source `context`?"
 )
 
 _EVAL_QUESTIONS: dict[str, Any] = {
     "faithfulness": Score(
-        instructions="Rate the factual faithfulness of the answer based strictly on the provided context.",
+        instructions="Rate the factual faithfulness of the `answer` based strictly on the provided `context`.",
         criteria=FAITHFULNESS_CRITERIA,
     ),
     "context_precision": Score(
-        instructions="Rate how precisely the retrieved context contains the exact facts necessary to answer the query according to the ground truth.",
+        instructions="Rate how precisely the retrieved `context` contains the exact facts necessary to answer the `query` according to the `ground_truth`.",
         criteria=CONTEXT_PRECISION_CRITERIA,
     ),
     "answer_relevance": Score(
-        instructions="Rate how directly, completely, and appropriately the answer addresses the specific question asked in the query.",
+        instructions="Rate how directly, completely, and appropriately the `answer` addresses the specific question asked in the `query`.",
         criteria=ANSWER_RELEVANCE_CRITERIA,
     ),
     "contradiction": Noul(

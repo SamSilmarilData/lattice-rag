@@ -145,6 +145,8 @@ export const GraphExplorer: React.FC<GraphExplorerProps> = ({ traversedPath }) =
       }));
 
     const sim = forceSimulation<SimNode, SimEdge>(nodes)
+      .alphaDecay(0.035)
+      .velocityDecay(0.45)
       .force(
         'link',
         forceLink<SimNode, SimEdge>(edges)

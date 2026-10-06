@@ -189,11 +189,9 @@ class RAGOrchestrator:
     async def _generate_node(self, state: PipelineState) -> dict[str, Any]:
         """Generate answer with circuit breaker cascade: Groq -> Gemini -> Redis."""
         t0 = time.perf_counter()
-        degraded = False
 
-        try:
-            # Primary: Groq under circuit breaker
-            if hasattr(self.fallback_cache, "call_with_breaker") and callable(self.fallback_cache.call_with_breaker):
+        if hasattr(self.fallback_cache, "call_with_breaker") and callable(self.fallback_cache.call_with_breaker):
+            try:
                 res = self.fallback_cache.call_with_breaker(
                     self.groq.synthesize,
                     state.query,
@@ -204,36 +202,30 @@ class RAGOrchestrator:
                     answer = await res
                 else:
                     answer = res
-            else:
-                synth = await self.synthesizer.synthesize(
-                    state.query,
-                    state.filtered_chunks,
-                    state.graph_context,
-                    state.route,
-                )
-                answer = synth.answer
-                degraded = synth.degraded
-        except Exception as e:
-            logger.warning("Groq synthesis failed, cascading to Gemini: %s", e)
-            try:
-                answer = await self.gemini.synthesize(
-                    state.query,
-                    state.filtered_chunks,
-                    state.graph_context,
-                )
-                degraded = True
-            except Exception as e2:
-                logger.warning("Gemini fallback failed, using Redis FAQ cache: %s", e2)
-                cached = await self.fallback_cache.find_closest_fallback(state.query)
-                if cached:
-                    answer = cached
-                else:
-                    answer = (
-                        "I'm sorry, all generation services are currently unavailable. "
-                        "Please try again in a moment."
+                degraded = False
+            except Exception as e:
+                logger.warning("Primary Groq synthesis failed under breaker, cascading: %s", e)
+                try:
+                    answer = await self.gemini.synthesize(
+                        state.query,
+                        state.filtered_chunks,
+                        state.graph_context,
                     )
-                degraded = True
-
+                    degraded = True
+                except Exception as e2:
+                    logger.warning("Gemini fallback failed, using Redis FAQ: %s", e2)
+                    cached = await self.fallback_cache.find_closest_fallback(state.query)
+                    answer = cached or "I'm sorry, all generation services are currently unavailable."
+                    degraded = True
+        else:
+            synth = await self.synthesizer.synthesize(
+                query=state.query,
+                context_chunks=state.filtered_chunks,
+                graph_context=state.graph_context,
+                route=state.route,
+            )
+            answer = synth.answer
+            degraded = synth.degraded
         elapsed = (time.perf_counter() - t0) * 1000
 
         # Cache the verified synthesis in Tier 1 Semantic Vector Cache
@@ -256,7 +248,7 @@ class RAGOrchestrator:
         }
 
     async def _massive_context_node(self, state: PipelineState) -> dict[str, Any]:
-        """Handle massive context queries via Gemini."""
+        """Handle massive context queries via Gemini failover cascade."""
         t0 = time.perf_counter()
 
         result = await self.retrieval.execute(state.query, state.route)
@@ -270,26 +262,17 @@ class RAGOrchestrator:
             elif isinstance(result.graph_context, dict):
                 graph_dict = result.graph_context
 
-        try:
-            answer = await self.gemini.synthesize(
-                state.query,
-                result.final_chunks,
-                graph_dict,
-            )
-            degraded = False
-        except Exception as e:
-            logger.warning("Gemini massive context failed, using fallback FAQ: %s", e)
-            cached = await self.fallback_cache.find_closest_fallback(state.query)
-            if cached:
-                answer = cached
-            else:
-                answer = "Unable to process massive context query at this time."
-            degraded = True
-
+        synth = await self.synthesizer.synthesize(
+            query=state.query,
+            context_chunks=result.final_chunks,
+            graph_context=graph_dict,
+            route="massive_context",
+        )
         elapsed = (time.perf_counter() - t0) * 1000
+
         return {
-            "answer": answer,
-            "degraded": degraded,
+            "answer": synth.answer,
+            "degraded": synth.degraded,
             "filtered_chunks": result.final_chunks,
             "graph_context": graph_dict,
             "timings": state.timings + [{"stage": "massive_context", "duration_ms": elapsed}],

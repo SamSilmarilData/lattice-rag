@@ -40,39 +40,17 @@ class QueryController(Controller):
         state = await orchestrator.run(data.query, stream=False)
 
         # Build SourceChunk DTOs
-        sources: list[SourceChunk] = []
-        for i, c in enumerate(state.filtered_chunks):
-            sources.append(
-                SourceChunk(
-                    chunk_id=c.get("node_id", c.get("chunk_id", i)),
-                    text=c.get("text", ""),
-                    score=float(c.get("rerank_score", c.get("score", 0.0))),
-                    document_id=str(c.get("doc_id", c.get("document_id", "unknown"))),
-                    position=int(c.get("position", i)),
-                )
-            )
+        sources = [
+            SourceChunk.from_dict(c, default_index=i)
+            for i, c in enumerate(state.filtered_chunks)
+        ]
 
         # Build SubgraphDTO if graph context exists
-        graph_path: SubgraphDTO | None = None
-        if state.graph_context:
-            nodes = [
-                GraphNode(
-                    node_id=n.get("node_id", n.get("id", i)),
-                    label=n.get("label", "Entity"),
-                    name=n.get("name", ""),
-                    properties=n.get("properties", {}),
-                )
-                for i, n in enumerate(state.graph_context.get("nodes", []))
-            ]
-            edges = [
-                GraphEdge(
-                    source_id=e.get("source_id", 0),
-                    target_id=e.get("target_id", 0),
-                    relation_type=e.get("relation_type", "RELATION"),
-                )
-                for e in state.graph_context.get("edges", [])
-            ]
-            graph_path = SubgraphDTO(nodes=nodes, edges=edges)
+        graph_path = (
+            SubgraphDTO.from_subgraph(state.graph_context)
+            if state.graph_context
+            else None
+        )
 
         # Build StageTiming DTOs
         timings = [

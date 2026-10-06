@@ -1,6 +1,7 @@
 """Deep DocumentIngester module managing the end-to-end ingestion lifecycle."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 import re
@@ -106,19 +107,27 @@ class DocumentIngester:
             logger.info("ingest_empty_text", extra={"doc_id": doc_id, "title": title})
             return IngestStats(chunk_count=0, entity_count=0, relation_count=0, chunk_ids=[])
 
-        # 1. Batch embed all text chunks
-        chunk_embeddings = self.embedding_service.embed_texts(text_chunks)
+        # 1. Batch embed all text chunks off the async event loop
+        chunk_embeddings = await asyncio.to_thread(self.embedding_service.embed_texts, text_chunks)
         chunk_data_list = [
             ChunkData(text=c_text, embedding=emb, position=i, doc_id=doc_id)
             for i, (c_text, emb) in enumerate(zip(text_chunks, chunk_embeddings))
         ]
 
-        # 2. Extract entities and relations across all chunks
+        # 2. Extract entities in batch off the event loop
+        if hasattr(self.extractor, "extract_entities_batch"):
+            chunk_entities_list = await asyncio.to_thread(
+                self.extractor.extract_entities_batch, text_chunks
+            )
+        else:
+            chunk_entities_list = await asyncio.to_thread(
+                lambda: [self.extractor.extract_entities(t) for t in text_chunks]
+            )
+
         chunk_extractions: list[tuple[int, list[EntityData], list[RelationData]]] = []
         all_entity_names: set[str] = set()
 
-        for i, c_text in enumerate(text_chunks):
-            entities = self.extractor.extract_entities(c_text)
+        for i, (c_text, entities) in enumerate(zip(text_chunks, chunk_entities_list)):
             triples = self.extractor.extract_triples(c_text, entities) if entities else []
             chunk_extractions.append((i, entities, triples))
             for e in entities:
@@ -128,7 +137,9 @@ class DocumentIngester:
         entity_embedding_map: dict[str, Any] = {}
         if all_entity_names:
             unique_names_list = list(all_entity_names)
-            embedded_vectors = self.embedding_service.embed_texts(unique_names_list)
+            embedded_vectors = await asyncio.to_thread(
+                self.embedding_service.embed_texts, unique_names_list
+            )
             for name, vec in zip(unique_names_list, embedded_vectors):
                 entity_embedding_map[name] = vec
 

@@ -41,12 +41,8 @@ def serve(host: str, port: int) -> None:
     server_main()
 
 
-@main.command()
-@click.argument('text')
-@click.option('--stream', is_flag=True, default=False, help='Stream generated tokens via SSE events')
-def query(text: str, stream: bool) -> None:
-    """Run a single query through the GraphRAG pipeline."""
-    import asyncio
+async def _build_harness():
+    """Build unified CLI service harness with all dependencies wired."""
     from lattice_rag.caching.fallback_cache import FallbackCache
     from lattice_rag.caching.semantic_cache import SemanticCache
     from lattice_rag.config import get_config
@@ -60,36 +56,67 @@ def query(text: str, stream: bool) -> None:
     from lattice_rag.routing.router import QueryRouter
     from lattice_rag.storage.db import LatticeStore
 
-    async def _run() -> None:
-        config = get_config()
-        store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
-        router = QueryRouter()
-        guardrail = ContextGuardrail()
-        sem_cache = SemanticCache()
-        fb_cache = FallbackCache(config.redis_url)
-        await fb_cache.connect()
+    config = get_config()
+    store = LatticeStore(config.latticedb_path)
+    embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+    router = QueryRouter()
+    guardrail = ContextGuardrail(threshold=0.5)
+    sem_cache = SemanticCache()
+    fb_cache = FallbackCache(config.redis_url)
+    await fb_cache.connect()
 
-        groq = GroqSynthesizer(
-            api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-            model=config.groq_model,
-        )
-        gemini = GeminiFallback(
-            api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-            model=config.gemini_model,
-        )
-        cc = ChitchatHandler()
-        pipeline = RetrievalPipeline(store, embed_svc, guardrail)
-        orchestrator = RAGOrchestrator(
-            router=router,
-            semantic_cache=sem_cache,
-            fallback_cache=fb_cache,
-            retrieval_pipeline=pipeline,
-            groq=groq,
-            gemini=gemini,
-            chitchat=cc,
-            embedding_service=embed_svc,
-        )
+    groq = GroqSynthesizer(
+        api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
+        model=config.groq_model,
+    )
+    gemini = GeminiFallback(
+        api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
+        model=config.gemini_model,
+    )
+    cc = ChitchatHandler()
+    pipeline = RetrievalPipeline(store, embed_svc, guardrail)
+    orchestrator = RAGOrchestrator(
+        router=router,
+        semantic_cache=sem_cache,
+        fallback_cache=fb_cache,
+        retrieval_pipeline=pipeline,
+        groq=groq,
+        gemini=gemini,
+        chitchat=cc,
+        embedding_service=embed_svc,
+    )
+    return {
+        "config": config,
+        "store": store,
+        "embed_svc": embed_svc,
+        "router": router,
+        "guardrail": guardrail,
+        "sem_cache": sem_cache,
+        "fb_cache": fb_cache,
+        "pipeline": pipeline,
+        "orchestrator": orchestrator,
+    }
+
+
+async def _close_harness(harness: dict) -> None:
+    """Gracefully close harness connections."""
+    await harness["fb_cache"].close()
+    await harness["sem_cache"].close()
+    await harness["router"].close()
+    await harness["guardrail"].close()
+    harness["store"].close()
+
+
+@main.command()
+@click.argument('text')
+@click.option('--stream', is_flag=True, default=False, help='Stream generated tokens via SSE events')
+def query(text: str, stream: bool) -> None:
+    """Run a single query through the GraphRAG pipeline."""
+    import asyncio
+
+    async def _run() -> None:
+        h = await _build_harness()
+        orchestrator = h["orchestrator"]
 
         click.echo(f"Query: {text}\n")
         if stream:
@@ -109,13 +136,10 @@ def query(text: str, stream: bool) -> None:
             click.echo(f"Answer: {state.answer}")
             click.echo(f"Latency: {state.total_latency_ms:.1f}ms (Cached: {state.cache_hit}, Degraded: {state.degraded})")
 
-        await fb_cache.close()
-        await sem_cache.close()
-        await router.close()
-        await guardrail.close()
-        store.close()
+        await _close_harness(h)
 
     asyncio.run(_run())
+
 
 
 @main.command()
@@ -243,36 +267,12 @@ def benchmark(
             click.echo(f"Warning: Failed to load queries from {dataset}: {e}")
 
     async def _run() -> None:
-        config = get_config()
-        store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
-        sem_cache = SemanticCache()
-        fb_cache = FallbackCache(config.redis_url)
-        await fb_cache.connect()
-
-        router = QueryRouter()
-        guardrail = ContextGuardrail(threshold=0.5)
-        pipeline = RetrievalPipeline(store, embed_svc, guardrail)
-        groq = GroqSynthesizer()
-        gemini = GeminiFallback()
-        cc = ChitchatHandler()
-
-        orchestrator = RAGOrchestrator(
-            router=router,
-            semantic_cache=sem_cache,
-            fallback_cache=fb_cache,
-            retrieval_pipeline=pipeline,
-            groq=groq,
-            gemini=gemini,
-            chitchat=cc,
-            embedding_service=embed_svc,
-        )
-
+        h = await _build_harness()
         engine = BenchmarkEngine(
-            store=store,
-            embedding_service=embed_svc,
-            semantic_cache=sem_cache,
-            orchestrator=orchestrator,
+            store=h["store"],
+            embedding_service=h["embed_svc"],
+            semantic_cache=h["sem_cache"],
+            orchestrator=h["orchestrator"],
         )
 
         click.echo("Profiling pipeline stages (p50, p90, p95, p99, throughput)...")
@@ -309,11 +309,7 @@ def benchmark(
             Path(output).write_text(json.dumps(out_dict, indent=2), encoding="utf-8")
             click.echo(f"✓ Exported benchmark metrics to {output}")
 
-        await fb_cache.close()
-        await sem_cache.close()
-        await router.close()
-        await guardrail.close()
-        store.close()
+        await _close_harness(h)
 
         if sla_check:
             if not report.sub_second_sla_met or not report.tier1_cache_sla_met:
@@ -353,42 +349,13 @@ def eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
 
     async def _run() -> bool:
-        config = get_config()
-        store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
-        extractor = EntityExtractor()
-        router = QueryRouter()
-        guardrail = ContextGuardrail()
-        sem_cache = SemanticCache()
-        fb_cache = FallbackCache(config.redis_url)
-        await fb_cache.connect()
-
-        groq = GroqSynthesizer(
-            api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-            model=config.groq_model,
-        )
-        gemini = GeminiFallback(
-            api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-            model=config.gemini_model,
-        )
-        chitchat = ChitchatHandler()
-        pipeline = RetrievalPipeline(store, embed_svc, guardrail)
-        orchestrator = RAGOrchestrator(
-            router=router,
-            semantic_cache=sem_cache,
-            fallback_cache=fb_cache,
-            retrieval_pipeline=pipeline,
-            groq=groq,
-            gemini=gemini,
-            chitchat=chitchat,
-            embedding_service=embed_svc,
-        )
-        evaluator = JevEvaluator(api_key=config.typesafe_api_key)
+        h = await _build_harness()
+        evaluator = JevEvaluator(api_key=h["config"].typesafe_api_key)
         runner = EvalRunner(
-            orchestrator=orchestrator,
+            orchestrator=h["orchestrator"],
             evaluator=evaluator,
-            embedding_service=embed_svc,
-            extractor=extractor,
+            embedding_service=h["embed_svc"],
+            extractor=EntityExtractor(),
         )
 
         try:
@@ -417,11 +384,8 @@ def eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
                 return False
         finally:
             await evaluator.close()
-            await fb_cache.close()
-            await sem_cache.close()
-            await router.close()
-            await guardrail.close()
-            store.close()
+            await _close_harness(h)
+
             shutdown_pool()
 
     passed = asyncio.run(_run())

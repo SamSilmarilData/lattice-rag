@@ -65,7 +65,7 @@ class ContextGuardrail:
         questions = {}
         for i in range(len(chunks)):
             questions[f"relevant_{i}"] = Noul(
-                instructions=f"Does chunk_{i} provide necessary and directly relevant factual grounding to answer the user's query?"
+                instructions=f"Does chunk_{i} provide relevant factual grounding or context to answer the user's query?"
             )
 
         response = await self._client.system_one(
@@ -75,8 +75,10 @@ class ContextGuardrail:
 
         filtered_chunks = []
         for i, chunk in enumerate(chunks):
-            noul_result = response.nouls[f"relevant_{i}"]
-            prob = noul_result.noul
+            noul_result = response.nouls.get(f"relevant_{i}")
+            if noul_result is None:
+                continue
+            prob = float(getattr(noul_result, "noul", 0.0))
             if prob >= self.threshold:
                 logger.debug("Chunk passed", index=i, probability=prob)
                 chunk_copy = dict(chunk)

@@ -56,29 +56,33 @@ class HybridSearcher:
 
         for rank, res in enumerate(vector_results):
             node_id = res.node_id
-            if node_id not in fused_scores:
-                fused_scores[node_id] = 0.0
+            fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
+            if node_id not in node_map:
                 node_map[node_id] = res
-            fused_scores[node_id] += 1.0 / (k + rank)
 
         for rank, res in enumerate(bm25_results):
             node_id = res.node_id
-            if node_id not in fused_scores:
-                fused_scores[node_id] = 0.0
+            fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
+            if node_id not in node_map:
                 node_map[node_id] = res
-            fused_scores[node_id] += 1.0 / (k + rank)
 
         # Select top_k by fused score using O(M log K) heap
         import heapq
 
         top_nodes = heapq.nlargest(top_k, fused_scores.items(), key=lambda x: x[1])
 
-        # Build final top_k deduplicated results
+        # Build final top_k deduplicated results with updated score
         final_results: list[SearchResult] = []
         for node_id, score in top_nodes:
-            res = node_map[node_id]
-            res.score = score
-            final_results.append(res)
+            src = node_map[node_id]
+            final_results.append(
+                SearchResult(
+                    node_id=src.node_id,
+                    score=score,
+                    text=src.text,
+                    metadata=dict(src.metadata) if src.metadata else {},
+                )
+            )
 
         logger.debug(
             "hybrid_search_completed",
@@ -88,3 +92,4 @@ class HybridSearcher:
             fused_hits=len(final_results),
         )
         return final_results
+

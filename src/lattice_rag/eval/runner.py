@@ -123,7 +123,7 @@ class EvalRunner:
             async def _eval_single(item: dict[str, Any], idx: int) -> EvalQueryResult:
                 async with semaphore:
                     if idx > 0 and len(queries_data) > 5:
-                        await asyncio.sleep(0.75)
+                        await asyncio.sleep(1.8)
 
                     query = item["query"]
                     ground_truth = item.get("ground_truth", "")
@@ -214,3 +214,42 @@ class EvalRunner:
             regression_delta=round(min_delta, 4),
             results=list(results),
         )
+
+    @staticmethod
+    def format_markdown_report(report: EvalRunResponse) -> str:
+        """Format an evaluation run response into a clean Markdown audit summary."""
+        status_badge = "✅ PASSED" if report.passed_gate else "❌ REGRESSION DETECTED"
+        lines = [
+            f"# Evaluation Gate Audit Report: {status_badge}",
+            "",
+            f"- **Total Queries**: {report.total_queries}",
+            f"- **Mean Faithfulness**: {report.mean_faithfulness:.4f}",
+            f"- **Mean Context Precision**: {report.mean_context_precision:.4f}",
+            f"- **Mean Answer Relevance**: {report.mean_answer_relevance:.4f}",
+            f"- **Regression Delta**: {report.regression_delta:+.4f}",
+            f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
+            "",
+            "## Query Breakdown",
+            "",
+            "| Query | Faithfulness | Precision | Relevance | Passed |",
+            "| :--- | :---: | :---: | :---: | :---: |",
+        ]
+        for res in report.results:
+            q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
+            passed_emoji = "✅" if res.passed else "❌"
+            lines.append(
+                f"| {q_short} | {res.faithfulness:.3f} | {res.context_precision:.3f} | {res.answer_relevance:.3f} | {passed_emoji} |"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def export_report_json(report: EvalRunResponse, output_path: str | Path = "eval_run_report.json") -> Path:
+        """Export evaluation report to JSON file."""
+        import msgspec
+
+        out = Path(output_path)
+        payload = msgspec.json.encode(report)
+        out.write_bytes(payload)
+        logger.info("eval_report_exported", path=str(out))
+        return out
+

@@ -30,7 +30,9 @@ class AppConfig:
 
     def __post_init__(self) -> None:
         """Validate config after initialization."""
-        pass
+        if not (1 <= self.port <= 65535):
+            raise ValueError(f"Invalid port: {self.port}. Must be between 1 and 65535.")
+
 
 
 def load_config() -> AppConfig:
