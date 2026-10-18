@@ -1,9 +1,11 @@
 """Deep ResilientSynthesizer module encapsulating LLM circuit breaking and failover cascades."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from typing import Any
 
 import pybreaker
 
@@ -15,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class SynthesisResult:
     """Represents the output of the generation subsystem."""
+
     answer: str
     degraded: bool
     provider: str
@@ -48,8 +51,8 @@ class ResilientSynthesizer:
     async def synthesize(
         self,
         query: str,
-        context_chunks: list[dict],
-        graph_context: dict | None = None,
+        context_chunks: list[dict[str, Any]],
+        graph_context: dict[str, Any] | None = None,
         route: str = "hybrid",
     ) -> SynthesisResult:
         """Synthesize answer with automatic cascading failover: Groq -> Gemini -> Redis FAQ."""
@@ -59,16 +62,23 @@ class ResilientSynthesizer:
                 answer = await self.gemini.synthesize(query, context_chunks, graph_context)
                 return SynthesisResult(answer=answer, degraded=False, provider="gemini")
             except Exception as e:
-                logger.warning("Gemini massive context synthesis failed: %s", sanitize_error_detail(str(e)))
+                logger.warning(
+                    "Gemini massive context synthesis failed: %s", sanitize_error_detail(str(e))
+                )
                 fallback = await self._get_offline_fallback(query)
-                return SynthesisResult(answer=fallback, degraded=True, provider="redis_faq" if self.fallback_cache else "offline")
+                return SynthesisResult(
+                    answer=fallback,
+                    degraded=True,
+                    provider="redis_faq" if self.fallback_cache else "offline",
+                )
 
         # Standard routes: Primary Groq under circuit breaker
         if self.groq is not None:
             try:
                 # Execute Groq synthesis through circuit breaker
-                async def _call_groq():
-                    return await self.groq.synthesize(query, context_chunks, graph_context)
+                async def _call_groq() -> str:
+                    assert self.groq is not None
+                    return str(await self.groq.synthesize(query, context_chunks, graph_context))
 
                 if self.breaker.current_state == "open":
                     raise pybreaker.CircuitBreakerError("Synthesis circuit breaker is OPEN")
@@ -76,7 +86,10 @@ class ResilientSynthesizer:
                 answer = await _call_groq()
                 return SynthesisResult(answer=answer, degraded=False, provider="groq")
             except Exception as e:
-                logger.warning("Primary Groq synthesis failed, cascading to Gemini: %s", sanitize_error_detail(str(e)))
+                logger.warning(
+                    "Primary Groq synthesis failed, cascading to Gemini: %s",
+                    sanitize_error_detail(str(e)),
+                )
 
         # Cascade 1: Gemini Fallback
         if self.gemini is not None:
@@ -84,7 +97,10 @@ class ResilientSynthesizer:
                 answer = await self.gemini.synthesize(query, context_chunks, graph_context)
                 return SynthesisResult(answer=answer, degraded=True, provider="gemini")
             except Exception as e2:
-                logger.warning("Gemini fallback synthesis failed, cascading to Redis FAQ: %s", sanitize_error_detail(str(e2)))
+                logger.warning(
+                    "Gemini fallback synthesis failed, cascading to Redis FAQ: %s",
+                    sanitize_error_detail(str(e2)),
+                )
 
         # Cascade 2: Offline Redis FAQ Fallback
         fallback = await self._get_offline_fallback(query)
@@ -97,8 +113,8 @@ class ResilientSynthesizer:
     async def stream(
         self,
         query: str,
-        context_chunks: list[dict],
-        graph_context: dict | None = None,
+        context_chunks: list[dict[str, Any]],
+        graph_context: dict[str, Any] | None = None,
         route: str = "hybrid",
     ) -> AsyncGenerator[str, None]:
         """Stream response tokens with transparent failover cascading."""
@@ -109,20 +125,22 @@ class ResilientSynthesizer:
                     yield tok
                 return
             except Exception as e:
-                logger.warning("Gemini massive context stream failed: %s", sanitize_error_detail(str(e)))
+                logger.warning(
+                    "Gemini massive context stream failed: %s", sanitize_error_detail(str(e))
+                )
                 yield await self._get_offline_fallback(query)
                 return
 
         # Standard routes: Primary Groq streaming
-        groq_failed = False
         if self.groq is not None and self.breaker.current_state != "open":
             try:
                 async for tok in self.groq.stream(query, context_chunks, graph_context):
                     yield tok
                 return
             except Exception as e:
-                logger.warning("Groq stream failed, falling back to Gemini: %s", sanitize_error_detail(str(e)))
-                groq_failed = True
+                logger.warning(
+                    "Groq stream failed, falling back to Gemini: %s", sanitize_error_detail(str(e))
+                )
 
         # Cascade 1: Gemini streaming
         if self.gemini is not None:
@@ -131,18 +149,23 @@ class ResilientSynthesizer:
                     yield tok
                 return
             except Exception as e2:
-                logger.warning("Gemini stream failed, falling back to Redis FAQ: %s", sanitize_error_detail(str(e2)))
+                logger.warning(
+                    "Gemini stream failed, falling back to Redis FAQ: %s",
+                    sanitize_error_detail(str(e2)),
+                )
 
         # Cascade 2: Offline Redis FAQ
         yield await self._get_offline_fallback(query)
 
     async def _get_offline_fallback(self, query: str) -> str:
         """Lookup pre-computed FAQ fallback or return clean offline message."""
-        if self.fallback_cache is not None and hasattr(self.fallback_cache, "find_closest_fallback"):
+        if self.fallback_cache is not None and hasattr(
+            self.fallback_cache, "find_closest_fallback"
+        ):
             try:
                 cached = await self.fallback_cache.find_closest_fallback(query)
                 if cached:
-                    return cached
+                    return str(cached)
             except Exception as e:
                 logger.error("Failed to query fallback cache: %s", sanitize_error_detail(str(e)))
 

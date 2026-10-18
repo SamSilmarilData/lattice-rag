@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import msgspec
 from litestar import Controller, post
@@ -10,8 +10,6 @@ from litestar.params import JSONBody, SkipValidation
 from litestar.response import ServerSentEvent, ServerSentEventMessage
 
 from lattice_rag.api.dtos import (
-    GraphEdge,
-    GraphNode,
     QueryRequest,
     QueryResponse,
     SourceChunk,
@@ -41,16 +39,11 @@ class QueryController(Controller):
 
         # Build SourceChunk DTOs
         sources = [
-            SourceChunk.from_dict(c, default_index=i)
-            for i, c in enumerate(state.filtered_chunks)
+            SourceChunk.from_dict(c, default_index=i) for i, c in enumerate(state.filtered_chunks)
         ]
 
         # Build SubgraphDTO if graph context exists
-        graph_path = (
-            SubgraphDTO.from_subgraph(state.graph_context)
-            if state.graph_context
-            else None
-        )
+        graph_path = SubgraphDTO.from_subgraph(state.graph_context) if state.graph_context else None
 
         # Build StageTiming DTOs
         timings = [

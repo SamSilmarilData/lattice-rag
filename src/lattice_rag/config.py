@@ -1,7 +1,8 @@
-import os
 import functools
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 from lattice_rag.security import SecretStr
@@ -16,23 +17,23 @@ class AppConfig:
     Application configuration dataclass.
     Frozen so configuration is immutable after initialization.
     """
+
     typesafe_api_key: SecretStr
     groq_api_key: SecretStr
     gemini_api_key: SecretStr
     redis_url: str = "embedded"
-    latticedb_path: Path = Path('data/lattice_rag.db')
-    host: str = '0.0.0.0'
+    latticedb_path: Path = Path("data/lattice_rag.db")
+    host: str = "0.0.0.0"
     port: int = 8000
-    embed_model: str = 'BAAI/bge-small-en-v1.5'
-    reranker_model: str = 'BAAI/bge-reranker-v2-m3'
-    groq_model: str = 'qwen/qwen3.8-27b'
-    gemini_model: str = 'gemini-3.8-flash'
+    embed_model: str = "BAAI/bge-small-en-v1.5"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    groq_model: str = "qwen/qwen3.8-27b"
+    gemini_model: str = "gemini-3.8-flash"
 
     def __post_init__(self) -> None:
         """Validate config after initialization."""
         if not (1 <= self.port <= 65535):
             raise ValueError(f"Invalid port: {self.port}. Must be between 1 and 65535.")
-
 
 
 def load_config() -> AppConfig:

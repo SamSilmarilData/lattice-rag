@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any
 
 import structlog
 
@@ -25,11 +25,11 @@ class PrecisionReranker:
     async def rerank(
         self,
         query: str,
-        chunks: list[dict],
+        chunks: list[dict[str, Any]],
         graph_context: SubgraphResult,
         top_k: int = 5,
         max_triples: int = 15,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Rerank chunks based on query and linearized graph context.
 
         Args:
@@ -54,7 +54,9 @@ class PrecisionReranker:
 
         triples: list[str] = []
         edges = getattr(graph_context, "edges", [])
-        for e in edges[:max_triples]:  # Cap at max_triples to balance graph context and inference speed
+        for e in edges[
+            :max_triples
+        ]:  # Cap at max_triples to balance graph context and inference speed
             if isinstance(e, dict):
                 s_id = e.get("source_id") if "source_id" in e else e.get("source")
                 t_id = e.get("target_id") if "target_id" in e else e.get("target")
@@ -84,7 +86,7 @@ class PrecisionReranker:
         )
 
         # Map scores back to original chunk dictionaries
-        final_results: list[dict] = []
+        final_results: list[dict[str, Any]] = []
         for res in rerank_results:
             chunk_data = dict(chunks[res.index])
             chunk_data["rerank_score"] = res.score

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import structlog
 from groq import AsyncGroq
@@ -64,7 +65,10 @@ class GroqSynthesizer:
             parts.append("")
             parts.append("Knowledge Graph Context:")
             edges = graph_context.get("edges", [])
-            nodes = {n.get("node_id", n.get("id")): n.get("name", "") for n in graph_context.get("nodes", [])}
+            nodes = {
+                n.get("node_id", n.get("id")): n.get("name", "")
+                for n in graph_context.get("nodes", [])
+            }
             if edges:
                 for edge in edges:
                     src = nodes.get(edge.get("source_id"), edge.get("source_name", "Unknown"))
@@ -100,9 +104,13 @@ class GroqSynthesizer:
                 return response.choices[0].message.content or ""
             except Exception as e:
                 err_str = str(e)
-                if ("429" in err_str or "rate_limit_exceeded" in err_str) and attempt < max_attempts - 1:
+                if (
+                    "429" in err_str or "rate_limit_exceeded" in err_str
+                ) and attempt < max_attempts - 1:
                     wait_sec = 2.0 * (attempt + 1) + 0.5
-                    logger.warning("groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query)
+                    logger.warning(
+                        "groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query
+                    )
                     await asyncio.sleep(wait_sec)
                     continue
                 sanitized_error = sanitize_error_detail(err_str)
@@ -136,9 +144,16 @@ class GroqSynthesizer:
                 return
             except Exception as e:
                 err_str = str(e)
-                if ("429" in err_str or "rate_limit_exceeded" in err_str) and attempt < max_attempts - 1:
+                if (
+                    "429" in err_str or "rate_limit_exceeded" in err_str
+                ) and attempt < max_attempts - 1:
                     wait_sec = 2.0 * (attempt + 1) + 0.5
-                    logger.warning("groq_stream_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query)
+                    logger.warning(
+                        "groq_stream_rate_limit_retry",
+                        attempt=attempt + 1,
+                        wait_sec=wait_sec,
+                        query=query,
+                    )
                     await asyncio.sleep(wait_sec)
                     continue
                 sanitized_error = sanitize_error_detail(err_str)

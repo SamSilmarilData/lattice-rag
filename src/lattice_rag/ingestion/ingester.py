@@ -1,11 +1,12 @@
 """Deep DocumentIngester module managing the end-to-end ingestion lifecycle."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 import re
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any
 
 from lattice_rag.storage.db import ChunkData, EntityData, IngestStats, RelationData
 
@@ -111,7 +112,7 @@ class DocumentIngester:
         chunk_embeddings = await asyncio.to_thread(self.embedding_service.embed_texts, text_chunks)
         chunk_data_list = [
             ChunkData(text=c_text, embedding=emb, position=i, doc_id=doc_id)
-            for i, (c_text, emb) in enumerate(zip(text_chunks, chunk_embeddings))
+            for i, (c_text, emb) in enumerate(zip(text_chunks, chunk_embeddings, strict=False))
         ]
 
         # 2. Extract entities in batch off the event loop
@@ -127,7 +128,7 @@ class DocumentIngester:
         chunk_extractions: list[tuple[int, list[EntityData], list[RelationData]]] = []
         all_entity_names: set[str] = set()
 
-        for i, (c_text, entities) in enumerate(zip(text_chunks, chunk_entities_list)):
+        for i, (c_text, entities) in enumerate(zip(text_chunks, chunk_entities_list, strict=False)):
             triples = self.extractor.extract_triples(c_text, entities) if entities else []
             chunk_extractions.append((i, entities, triples))
             for e in entities:
@@ -140,7 +141,7 @@ class DocumentIngester:
             embedded_vectors = await asyncio.to_thread(
                 self.embedding_service.embed_texts, unique_names_list
             )
-            for name, vec in zip(unique_names_list, embedded_vectors):
+            for name, vec in zip(unique_names_list, embedded_vectors, strict=False):
                 entity_embedding_map[name] = vec
 
         # Prepare embedded entities

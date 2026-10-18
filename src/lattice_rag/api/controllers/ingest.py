@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from litestar import Controller, post
 from litestar.di import NamedDependency
@@ -36,7 +35,9 @@ class IngestController(Controller):
         semantic_cache: NamedDependency[SkipValidation[SemanticCache | None]] = None,
     ) -> IngestResponse:
         """Ingest a document, chunk it, embed, extract entities, and store in LatticeDB."""
-        logger.info("received_ingest_request", extra={"doc_id": data.document_id, "title": data.title})
+        logger.info(
+            "received_ingest_request", extra={"doc_id": data.document_id, "title": data.title}
+        )
 
         active_ingester = ingester
         if active_ingester is None:
@@ -48,7 +49,9 @@ class IngestController(Controller):
                     cache=semantic_cache,
                 )
             else:
-                raise RuntimeError("DocumentIngester or its underlying storage dependencies must be provided.")
+                raise RuntimeError(
+                    "DocumentIngester or its underlying storage dependencies must be provided."
+                )
 
         stats = await active_ingester.ingest(
             doc_id=data.document_id,

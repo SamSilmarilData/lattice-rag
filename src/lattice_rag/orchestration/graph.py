@@ -1,12 +1,15 @@
 """LangGraph StateGraph assembling the full RAG pipeline."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from lattice_rag.orchestration.state import PipelineState
 
@@ -56,6 +59,7 @@ class RAGOrchestrator:
         self.chitchat = chitchat
         self.embedding_service = embedding_service
         from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer
+
         self.synthesizer = ResilientSynthesizer(
             groq=self.groq,
             gemini=self.gemini,
@@ -65,7 +69,9 @@ class RAGOrchestrator:
 
     # ── Graph Construction ──────────────────────────────────────────────
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(
+        self,
+    ) -> CompiledStateGraph[PipelineState, None, PipelineState, PipelineState]:
         """Wire the LangGraph StateGraph nodes and edges."""
         graph = StateGraph(PipelineState)
 
@@ -190,7 +196,9 @@ class RAGOrchestrator:
         """Generate answer with circuit breaker cascade: Groq -> Gemini -> Redis."""
         t0 = time.perf_counter()
 
-        if hasattr(self.fallback_cache, "call_with_breaker") and callable(self.fallback_cache.call_with_breaker):
+        if hasattr(self.fallback_cache, "call_with_breaker") and callable(
+            self.fallback_cache.call_with_breaker
+        ):
             try:
                 res = self.fallback_cache.call_with_breaker(
                     self.groq.synthesize,
@@ -215,7 +223,9 @@ class RAGOrchestrator:
                 except Exception as e2:
                     logger.warning("Gemini fallback failed, using Redis FAQ: %s", e2)
                     cached = await self.fallback_cache.find_closest_fallback(state.query)
-                    answer = cached or "I'm sorry, all generation services are currently unavailable."
+                    answer = (
+                        cached or "I'm sorry, all generation services are currently unavailable."
+                    )
                     degraded = True
         else:
             synth = await self.synthesizer.synthesize(
@@ -311,7 +321,9 @@ class RAGOrchestrator:
         result = await self._graph.ainvoke(initial_state)
 
         if isinstance(result, dict):
-            final = PipelineState(**{k: v for k, v in result.items() if k in PipelineState.__dataclass_fields__})
+            final = PipelineState(
+                **{k: v for k, v in result.items() if k in PipelineState.__dataclass_fields__}
+            )
         else:
             final = result
 
@@ -419,7 +431,9 @@ class RAGOrchestrator:
 
         graph_dict = None
         if ret_result.graph_context:
-            if hasattr(ret_result.graph_context, "nodes") and hasattr(ret_result.graph_context, "edges"):
+            if hasattr(ret_result.graph_context, "nodes") and hasattr(
+                ret_result.graph_context, "edges"
+            ):
                 graph_dict = {
                     "nodes": ret_result.graph_context.nodes,
                     "edges": ret_result.graph_context.edges,
@@ -428,7 +442,10 @@ class RAGOrchestrator:
                 graph_dict = ret_result.graph_context
 
         # 3. Generation Stage
-        yield {"event": "stage", "data": {"stage": "generation", "chunks_count": len(ret_result.final_chunks)}}
+        yield {
+            "event": "stage",
+            "data": {"stage": "generation", "chunks_count": len(ret_result.final_chunks)},
+        }
         t_gen = time.perf_counter()
         full_tokens: list[str] = []
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, List
+from typing import Any
 
 import structlog
 
@@ -92,4 +92,3 @@ class HybridSearcher:
             fused_hits=len(final_results),
         )
         return final_results
-

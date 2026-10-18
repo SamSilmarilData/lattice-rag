@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any
+
 import structlog
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
@@ -12,7 +14,7 @@ from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.storage.db import ChunkData, LatticeStore
+from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
 
 logger = structlog.get_logger(__name__)
@@ -67,7 +69,7 @@ class EvalRunner:
             queries_data = queries_data[:limit]
 
         active_orchestrator = self.orchestrator
-        temp_dir_obj: tempfile.TemporaryDirectory | None = None
+        temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
         temp_store: LatticeStore | None = None
 
         try:
@@ -81,6 +83,7 @@ class EvalRunner:
                 extractor = self.extractor or EntityExtractor()
 
                 from lattice_rag.ingestion.ingester import DocumentIngester
+
                 ingester = DocumentIngester(
                     store=temp_store,
                     embedding_service=embed_svc,
@@ -150,16 +153,12 @@ class EvalRunner:
         finally:
             # Clean up ephemeral resources
             if temp_store is not None:
-                try:
+                with contextlib.suppress(Exception):
                     temp_store.close()
-                except Exception:
-                    pass
 
             if temp_dir_obj is not None:
-                try:
+                with contextlib.suppress(Exception):
                     temp_dir_obj.cleanup()
-                except Exception:
-                    pass
 
         # Calculate mean scores
         total = len(results)
@@ -243,7 +242,9 @@ class EvalRunner:
         return "\n".join(lines)
 
     @staticmethod
-    def export_report_json(report: EvalRunResponse, output_path: str | Path = "eval_run_report.json") -> Path:
+    def export_report_json(
+        report: EvalRunResponse, output_path: str | Path = "eval_run_report.json"
+    ) -> Path:
         """Export evaluation report to JSON file."""
         import msgspec
 
@@ -252,4 +253,3 @@ class EvalRunner:
         out.write_bytes(payload)
         logger.info("eval_report_exported", path=str(out))
         return out
-

@@ -47,4 +47,4 @@ We eliminate the network boundary between the application and the database. The 
 
 # **8\. CI/CD Evaluation Gate**
 
-* **Triage & Quality Gate:** Jev uses the Score primitive to run a high-speed, low-cost evaluation pass in GitHub Actions. DeepEval invokes an LLM-as-a-judge for edge cases. Pull requests automatically fail if the regression delta for Faithfulness or Context Precision drops below the main branch baseline (e.g., Score\_PR \>= Score\_main \- 0.03).Golden Dataset: A strictly version-controlled eval\_dataset.json containing 20 complex multi-hop queries with ground-truth answers.
+* **Triage & Quality Gate:** TypeSafe AI Jev uses the Score primitive to run a high-speed, zero-generative-cost continuous evaluation pass in GitHub Actions, paired with the Noul primitive for hard-zero contradiction vetoes. Pull requests automatically fail if the regression delta for Faithfulness or Context Precision drops below the main branch baseline (e.g., Score_PR >= Score_main - 0.03) or falls below the 0.50 floor. Golden Dataset: A strictly version-controlled eval_dataset.json containing 20 complex multi-hop queries with ground-truth answers.

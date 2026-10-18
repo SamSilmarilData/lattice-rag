@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import structlog
 from google import genai
@@ -62,7 +63,10 @@ class GeminiFallback:
             parts.append("")
             parts.append("Knowledge Graph Context:")
             edges = graph_context.get("edges", [])
-            nodes = {n.get("node_id", n.get("id")): n.get("name", "") for n in graph_context.get("nodes", [])}
+            nodes = {
+                n.get("node_id", n.get("id")): n.get("name", "")
+                for n in graph_context.get("nodes", [])
+            }
             if edges:
                 for edge in edges:
                     src = nodes.get(edge.get("source_id"), edge.get("source_name", "Unknown"))

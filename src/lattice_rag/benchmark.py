@@ -4,8 +4,9 @@ import asyncio
 import logging
 import statistics
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 import numpy as np
 
@@ -128,7 +129,7 @@ class BenchmarkEngine:
         # Seed entry
         cache.put(query, query_emb, {"answer": "LatticeDB is an embedded database."})
 
-        async def _probe():
+        async def _probe() -> Any:
             return await cache.get(query, query_emb)
 
         return await self.benchmark_callable(
@@ -148,7 +149,7 @@ class BenchmarkEngine:
         searcher = HybridSearcher(self.store, self.embed_svc)
         q_idx = 0
 
-        async def _search():
+        async def _search() -> Any:
             nonlocal q_idx
             q = queries[q_idx % len(queries)]
             q_idx += 1
@@ -173,7 +174,7 @@ class BenchmarkEngine:
             snapshot = self.store.get_subgraph_snapshot(5)
             anchor_ids = [n["id"] for n in snapshot.nodes[:3]] or [1]
 
-        async def _traverse():
+        async def _traverse() -> Any:
             return await traverser.traverse(anchor_ids, route="graph_relational", budget=25)
 
         return await self.benchmark_callable(
@@ -200,7 +201,7 @@ class BenchmarkEngine:
         ] or [{"node_id": 1, "text": "Sample text for reranking", "score": 0.5, "metadata": {}}]
         graph_ctx = self.store.get_subgraph_snapshot(10)
 
-        async def _rerank():
+        async def _rerank() -> Any:
             return await reranker.rerank(query, chunks_dicts, graph_ctx, top_k=3, max_triples=5)
 
         return await self.benchmark_callable(
@@ -218,16 +219,20 @@ class BenchmarkEngine:
         live_llm: bool = False,
     ) -> LatencyStats:
         """Measure End-to-End pipeline execution latency."""
-        if not self.orchestrator:
+        orch = self.orchestrator
+        if not orch:
             # Create a lightweight in-process pipeline measurement using deep HybridRetriever
             retriever = HybridRetriever(self.store, self.embed_svc)
 
             q_idx = 0
-            async def _pipeline():
+
+            async def _pipeline() -> Any:
                 nonlocal q_idx
                 q = queries[q_idx % len(queries)]
                 q_idx += 1
-                await retriever.retrieve(q, route="hybrid", apply_guardrail=False, top_k=3, max_triples=5)
+                await retriever.retrieve(
+                    q, route="hybrid", apply_guardrail=False, top_k=3, max_triples=5
+                )
                 return True
 
             return await self.benchmark_callable(
@@ -238,20 +243,23 @@ class BenchmarkEngine:
             )
 
         q_idx = 0
-        async def _e2e():
+
+        async def _e2e() -> Any:
             nonlocal q_idx
             q = queries[q_idx % len(queries)]
             q_idx += 1
             if live_llm:
-                return await self.orchestrator.run(q)
+                return await orch.run(q)
             else:
                 # Use in-process retrieval pipeline path directly without external LLM network hop
-                ret_pipeline = getattr(
-                    self.orchestrator,
+                ret_pipeline: Any = getattr(
+                    orch,
                     "retrieval_pipeline",
-                    getattr(self.orchestrator, "retrieval", None),
+                    getattr(orch, "retrieval", None),
                 )
-                return await ret_pipeline.execute(q, route="hybrid", apply_guardrail=False)
+                if ret_pipeline is not None and hasattr(ret_pipeline, "execute"):
+                    return await ret_pipeline.execute(q, route="hybrid", apply_guardrail=False)
+                return await orch.run(q)
 
         return await self.benchmark_callable(
             name="End-to-End Pipeline (Full StateGraph)",
@@ -329,9 +337,9 @@ class BenchmarkEngine:
     def format_ascii_table(report: BenchmarkReport) -> str:
         """Render a clean, aligned ANSI/ASCII table of benchmark percentiles and SLAs."""
         header = (
-            f"+--------------------------------------------------+--------+--------+--------+--------+--------+--------+\n"
-            f"| Pipeline Stage                                   | p50    | p90    | p95    | p99    | Mean   | QPS    |\n"
-            f"+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
+            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+\n"
+            "| Pipeline Stage                                   | p50    | p90    | p95    | p99    | Mean   | QPS    |\n"
+            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
         )
         lines = [header]
 
@@ -343,7 +351,7 @@ class BenchmarkEngine:
             lines.append(line)
 
         lines.append(
-            f"+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
+            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
         )
 
         sla_e2e = "[PASSED]" if report.sub_second_sla_met else "[FAILED]"

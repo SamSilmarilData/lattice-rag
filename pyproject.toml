@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "lattice-rag"
-version = "1.0.0"
+version = "1.2.0"
 description = "In-process Hybrid GraphRAG engine built on LatticeDB, Litestar/Granian, and CPU-quantized SLMs."
 readme = "README.md"
 license = "MIT"
@@ -64,9 +64,6 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
 ]
-eval = [
-    "deepeval>=4.2.0",
-]
 
 [project.scripts]
 lattice-rag = "lattice_rag.cli:main"
@@ -92,10 +89,23 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM", "TCH"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "SIM"]
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "gliner.*",
+    "gliner2.*",
+    "onnxruntime.*",
+    "fastembed.*",
+    "fakeredis.*",
+    "pybreaker.*",
+    "granian.*",
+]
+ignore_missing_imports = true

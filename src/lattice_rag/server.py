@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+
 from granian import Granian
+from granian.constants import Interfaces
 
 from lattice_rag.config import get_config
 
@@ -24,7 +26,7 @@ def main() -> None:
         "lattice_rag.app:create_app",
         address=host,
         port=port,
-        interface="asgi",
+        interface=Interfaces.ASGI,
         factory=True,
         workers=1,
         runtime_threads=2,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 from litestar import Controller, post
 from litestar.di import NamedDependency
 from litestar.params import SkipValidation

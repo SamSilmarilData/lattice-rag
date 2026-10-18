@@ -1,4 +1,5 @@
 """LatticeDB in-process property-graph and vector storage engine."""
+
 from __future__ import annotations
 
 import logging
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 class ChunkData(msgspec.Struct, rename="camel"):
     """Represents a text chunk to be stored in LatticeDB with its embedding."""
+
     text: str
     embedding: np.ndarray
     position: int
@@ -22,6 +24,7 @@ class ChunkData(msgspec.Struct, rename="camel"):
 
 class EntityData(msgspec.Struct, rename="camel"):
     """Represents an extracted entity node."""
+
     name: str
     entity_type: str
     embedding: np.ndarray | None = None
@@ -29,6 +32,7 @@ class EntityData(msgspec.Struct, rename="camel"):
 
 class RelationData(msgspec.Struct, rename="camel"):
     """Represents a directional relationship between two entities."""
+
     source_name: str
     target_name: str
     relation_type: str
@@ -36,6 +40,7 @@ class RelationData(msgspec.Struct, rename="camel"):
 
 class SearchResult(msgspec.Struct, rename="camel"):
     """Represents a search result from vector or BM25 search."""
+
     node_id: int
     score: float
     text: str
@@ -44,12 +49,14 @@ class SearchResult(msgspec.Struct, rename="camel"):
 
 class SubgraphResult(msgspec.Struct, rename="camel"):
     """Represents a subgraph of traversed nodes and edges."""
+
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
 
 class IngestStats(msgspec.Struct, rename="camel"):
     """Statistics returned after document ingestion."""
+
     chunk_count: int
     entity_count: int
     relation_count: int
@@ -145,7 +152,9 @@ class LatticeStore:
 
             txn.commit()
 
-        return IngestStats(chunk_count=len(chunks), entity_count=0, relation_count=0, chunk_ids=chunk_ids)
+        return IngestStats(
+            chunk_count=len(chunks), entity_count=0, relation_count=0, chunk_ids=chunk_ids
+        )
 
     def ingest_entities(
         self,
@@ -176,8 +185,12 @@ class LatticeStore:
                 entity_name_to_id[ent.name] = ent_id
 
             for rel in relations:
-                source_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(rel.source_name.strip().lower())
-                target_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(rel.target_name.strip().lower())
+                source_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(
+                    rel.source_name.strip().lower()
+                )
+                target_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(
+                    rel.target_name.strip().lower()
+                )
                 if source_id is not None and target_id is not None:
                     txn.create_edge(
                         source_id,
@@ -253,7 +266,10 @@ class LatticeStore:
                             properties={"name": ent.name, "entity_type": ent.entity_type},
                         )
                         ent_id = ent_node.id
-                        if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
+                        if (
+                            ent.embedding is not None
+                            and len(ent.embedding) == self.vector_dimensions
+                        ):
                             txn.set_vector(ent_id, "embedding", ent.embedding)
                         self._entity_cache[norm_name] = ent_id
                         total_entities += 1
@@ -263,8 +279,12 @@ class LatticeStore:
                         txn.create_edge(real_chunk_id, ent_id, "CONTAINS")
 
                 for rel in relations:
-                    s_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(rel.source_name.strip().lower())
-                    t_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(rel.target_name.strip().lower())
+                    s_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(
+                        rel.source_name.strip().lower()
+                    )
+                    t_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(
+                        rel.target_name.strip().lower()
+                    )
                     if s_id is not None and t_id is not None:
                         txn.create_edge(
                             s_id,
@@ -344,13 +364,32 @@ class LatticeStore:
         # If natural-language question did not match exact conjunction, fallback to keyword search
         if not raw_results and query_text:
             import re
-            _STOPWORDS = {
-                "what", "is", "the", "of", "and", "are", "in", "a", "to", "for",
-                "with", "from", "by", "that", "this", "how", "does", "do", "an",
+
+            stopwords = {
+                "what",
+                "is",
+                "the",
+                "of",
+                "and",
+                "are",
+                "in",
+                "a",
+                "to",
+                "for",
+                "with",
+                "from",
+                "by",
+                "that",
+                "this",
+                "how",
+                "does",
+                "do",
+                "an",
             }
             words = [
-                w for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_text)
-                if w.lower() not in _STOPWORDS and len(w) > 2
+                w
+                for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_text)
+                if w.lower() not in stopwords and len(w) > 2
             ]
             accum: dict[int, float] = {}
             for w in words:
@@ -362,8 +401,7 @@ class LatticeStore:
             if accum:
                 top_sorted = sorted(accum.items(), key=lambda x: x[1], reverse=True)[:top_k]
                 raw_results = [
-                    type("FtsItem", (), {"node_id": nid, "score": sc})()
-                    for nid, sc in top_sorted
+                    type("FtsItem", (), {"node_id": nid, "score": sc})() for nid, sc in top_sorted
                 ]
 
         search_results: list[SearchResult] = []
@@ -408,7 +446,7 @@ class LatticeStore:
 
         with self.db.read() as txn:
             frontier = list(entity_ids)
-            for hop in range(max_hops):
+            for _hop in range(max_hops):
                 if not frontier or len(visited_nodes) >= budget:
                     break
 
@@ -432,15 +470,21 @@ class LatticeStore:
                         edge_key = (edge.source_id, edge.target_id, rel_type)
                         if edge_key not in seen_edges:
                             seen_edges.add(edge_key)
-                            visited_edges.append({
-                                "source_id": edge.source_id,
-                                "target_id": edge.target_id,
-                                "relation_type": rel_type,
-                            })
+                            visited_edges.append(
+                                {
+                                    "source_id": edge.source_id,
+                                    "target_id": edge.target_id,
+                                    "relation_type": rel_type,
+                                }
+                            )
 
                         if edge.target_id not in visited_nodes and len(visited_nodes) < budget:
-                            target_name = txn.get_property(edge.target_id, "name") or f"node_{edge.target_id}"
-                            target_type = txn.get_property(edge.target_id, "entity_type") or "Entity"
+                            target_name = (
+                                txn.get_property(edge.target_id, "name") or f"node_{edge.target_id}"
+                            )
+                            target_type = (
+                                txn.get_property(edge.target_id, "entity_type") or "Entity"
+                            )
                             visited_nodes[edge.target_id] = {
                                 "id": edge.target_id,
                                 "name": str(target_name),

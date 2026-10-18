@@ -103,3 +103,27 @@ async def test_guardrail_aclose_and_close():
 
     await guardrail.close()
     assert mock_client.aclose.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_guardrail_system_one_error_graceful_fallback():
+    """Verify guardrail catches system_one exceptions and gracefully preserves chunks."""
+    mock_client = AsyncMock()
+    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+
+    guardrail = ContextGuardrail(threshold=0.50, ts_client=mock_client)
+    chunks = [
+        {"node_id": 1, "text": "Chunk text 1", "rerank_score": 0.88},
+        {"node_id": 2, "text": "Chunk text 2", "score": 0.75},
+    ]
+
+    filtered = await guardrail.filter_chunks("Any query", chunks)
+
+    assert len(filtered) == 2
+    assert filtered[0]["node_id"] == 1
+    assert filtered[0]["grounding_score"] == 0.88
+    assert filtered[0]["low_grounding_flag"] is False
+    assert filtered[1]["node_id"] == 2
+    assert filtered[1]["grounding_score"] == 0.75
+    assert guardrail.low_grounding_flag is False
+

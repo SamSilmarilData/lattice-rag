@@ -16,6 +16,7 @@ data/
 *.db
 *.db-*
 *.latticedb
+*.ses
 
 # ===========================
 # Python

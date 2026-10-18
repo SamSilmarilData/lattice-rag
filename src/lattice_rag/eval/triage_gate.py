@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
@@ -109,10 +110,7 @@ class JevEvaluator:
         # Format context chunks
         context_parts: list[str] = []
         for i, c in enumerate(retrieved_chunks):
-            if isinstance(c, dict):
-                text = c.get("text", "")
-            else:
-                text = str(c)
+            text = c.get("text", "") if isinstance(c, dict) else str(c)
             if text:
                 context_parts.append(f"[{i + 1}] {text}")
 
@@ -149,7 +147,9 @@ class JevEvaluator:
             faith_score = 0.0
             vetoed = True
 
-        passed = (faith_score >= 0.70) and (prec_score >= 0.65) and (rel_score >= 0.70) and not vetoed
+        passed = (
+            (faith_score >= 0.70) and (prec_score >= 0.65) and (rel_score >= 0.70) and not vetoed
+        )
 
         logger.info(
             "jev_evaluation_completed",

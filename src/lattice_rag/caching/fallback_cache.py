@@ -2,9 +2,10 @@ import datetime
 import difflib
 import hashlib
 import json
-from pathlib import Path
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pybreaker
 import structlog
@@ -14,11 +15,40 @@ logger = structlog.get_logger(__name__)
 
 REDIS_HASH_KEY = "cache:fallback:queries"
 _TOKEN_REGEX = re.compile(r"\w+")
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "in", "on", "at", "of",
-    "for", "to", "from", "what", "how", "why", "does", "do", "did", "can",
-    "explain", "tell", "me", "about", "show", "describe", "with", "and", "or",
-})
+_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "in",
+        "on",
+        "at",
+        "of",
+        "for",
+        "to",
+        "from",
+        "what",
+        "how",
+        "why",
+        "does",
+        "do",
+        "did",
+        "can",
+        "explain",
+        "tell",
+        "me",
+        "about",
+        "show",
+        "describe",
+        "with",
+        "and",
+        "or",
+    }
+)
 
 
 class FallbackCache:
@@ -69,7 +99,7 @@ class FallbackCache:
         timeout = datetime.timedelta(seconds=self.breaker.reset_timeout)
         opened_at = self.breaker._state_storage.opened_at
         if self.breaker.current_state == "open":
-            if opened_at and datetime.datetime.now(datetime.timezone.utc) < opened_at + timeout:
+            if opened_at and datetime.datetime.now(datetime.UTC) < opened_at + timeout:
                 raise pybreaker.CircuitBreakerError("Circuit breaker is OPEN")
             self.breaker.half_open()
 
@@ -80,14 +110,14 @@ class FallbackCache:
             result = await coro_fn(*args, **kwargs)
             self.breaker._state_storage.reset_counter()
             self.breaker.state.on_success()
-            for listener in self.breaker.listeners:
-                listener.success(self.breaker)
+            for succ_listener in self.breaker.listeners:
+                succ_listener.success(self.breaker)
             return result
         except BaseException as e:
             if self.breaker.is_system_error(e):
                 self.breaker._inc_counter()
-                for listener in self.breaker.listeners:
-                    listener.failure(self.breaker, e)
+                for fail_listener in self.breaker.listeners:
+                    fail_listener.failure(self.breaker, e)
                 self.breaker.state.on_failure(e)
             raise
 
@@ -96,24 +126,24 @@ class FallbackCache:
         await self._ensure_connected()
         assert self.redis is not None
 
-        val = await self.redis.hget(REDIS_HASH_KEY, query_hash)  # type: ignore
-        if val is not None:
+        raw_val = await self.redis.hget(REDIS_HASH_KEY, query_hash)
+        if raw_val is not None:
             logger.debug("fallback_hit_direct", key=query_hash)
-            return val
+            return raw_val.decode("utf-8") if isinstance(raw_val, bytes) else str(raw_val)
 
         # Try sha256 hash of normalized input
         sha = hashlib.sha256(query_hash.strip().lower().encode("utf-8")).hexdigest()
-        val = await self.redis.hget(REDIS_HASH_KEY, sha)  # type: ignore
-        if val is not None:
+        raw_val = await self.redis.hget(REDIS_HASH_KEY, sha)
+        if raw_val is not None:
             logger.debug("fallback_hit_sha", key=sha)
-            return val
+            return raw_val.decode("utf-8") if isinstance(raw_val, bytes) else str(raw_val)
 
         # Try raw normalized text
         norm = query_hash.strip().lower()
-        val = await self.redis.hget(REDIS_HASH_KEY, norm)  # type: ignore
-        if val is not None:
+        raw_val = await self.redis.hget(REDIS_HASH_KEY, norm)
+        if raw_val is not None:
             logger.debug("fallback_hit_norm", key=norm)
-            return val
+            return raw_val.decode("utf-8") if isinstance(raw_val, bytes) else str(raw_val)
 
         return None
 
@@ -123,7 +153,8 @@ class FallbackCache:
         if not self._cached_queries:
             # Populate query list from redis keys if empty
             assert self.redis is not None
-            all_keys = await self.redis.hkeys(REDIS_HASH_KEY)  # type: ignore
+            raw_keys = await self.redis.hkeys(REDIS_HASH_KEY)
+            all_keys = [k.decode("utf-8") if isinstance(k, bytes) else str(k) for k in raw_keys]
             # Filter keys that are human-readable (not 64-char sha256 hashes)
             self._cached_queries = [k for k in all_keys if len(k) != 64]
 
@@ -155,11 +186,12 @@ class FallbackCache:
                     best_candidate = candidate
 
             if best_candidate is not None and best_score >= 0.3:
-                logger.info("token_overlap_matched", query=query, matched=best_candidate, score=best_score)
+                logger.info(
+                    "token_overlap_matched", query=query, matched=best_candidate, score=best_score
+                )
                 return await self.get_fallback(best_candidate)
 
         return None
-
 
     async def seed_fallback(self, queries: dict[str, str]) -> None:
         """Seeds the Redis hash with pre-computed query->answer pairs."""
@@ -225,7 +257,7 @@ class FallbackCache:
         await self._ensure_connected()
         if not self.redis:
             return 0
-        total_keys = await self.redis.hlen(REDIS_HASH_KEY)  # type: ignore
+        total_keys = await self.redis.hlen(REDIS_HASH_KEY)
         # Since each query is stored under both sha256 and normalized string,
         # return the number of distinct queries or total keys // 2
         return total_keys // 2 if total_keys > 0 else 0
@@ -233,7 +265,7 @@ class FallbackCache:
     async def aclose(self) -> None:
         """Closes Redis connection."""
         if self.redis is not None:
-            await self.redis.aclose()  # type: ignore
+            await self.redis.aclose()
             self.redis = None
             logger.info("redis_closed")
 

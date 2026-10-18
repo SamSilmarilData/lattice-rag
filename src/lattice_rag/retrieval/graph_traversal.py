@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, List
 
 import structlog
 
-from lattice_rag.storage.db import SubgraphResult
+from lattice_rag.storage.db import LatticeStore, SubgraphResult
 
 logger = structlog.get_logger(__name__)
 
@@ -13,7 +12,7 @@ logger = structlog.get_logger(__name__)
 class GraphTraverser:
     """Stage 2: Dynamic 1-to-2 hop Cypher / pointer graph traversal."""
 
-    def __init__(self, store: Any):
+    def __init__(self, store: LatticeStore):
         """Initialize GraphTraverser.
 
         Args:

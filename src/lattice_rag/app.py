@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, cast
 
 from litestar import Litestar, MediaType, Request, Response, get
 from litestar.config.app import AppConfig
@@ -26,15 +27,15 @@ from lattice_rag.api.controllers import (
 )
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
-from lattice_rag.eval import EvalRunner, JevEvaluator
-from lattice_rag.config import get_config
 from lattice_rag.config import AppConfig as LatticeAppConfig
+from lattice_rag.config import get_config
+from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.generation.chitchat import ChitchatHandler
 from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.orchestration.pool import shutdown_pool
-from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import ContextGuardrail
@@ -147,45 +148,49 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
 
 # ── Dependency Providers ──────────────────────────────────────────────
 
+
 def provide_store(state: State) -> LatticeStore:
-    return state.store
+    return cast(LatticeStore, state.store)
 
 
 def provide_embedding_service(state: State) -> EmbeddingService:
-    return state.embedding_service
+    return cast(EmbeddingService, state.embedding_service)
 
 
 def provide_extractor(state: State) -> EntityExtractor:
-    return state.extractor
+    return cast(EntityExtractor, state.extractor)
 
 
 def provide_semantic_cache(state: State) -> SemanticCache:
-    return state.semantic_cache
+    return cast(SemanticCache, state.semantic_cache)
 
 
 def provide_fallback_cache(state: State) -> FallbackCache:
-    return state.fallback_cache
+    return cast(FallbackCache, state.fallback_cache)
 
 
 def provide_orchestrator(state: State) -> RAGOrchestrator:
-    return state.orchestrator
+    return cast(RAGOrchestrator, state.orchestrator)
 
 
 def provide_config(state: State) -> LatticeAppConfig:
-    return state.config
+    return cast(LatticeAppConfig, state.config)
 
 
 def provide_ingester(state: State) -> DocumentIngester:
-    return state.ingester
+    return cast(DocumentIngester, state.ingester)
 
 
 def provide_eval_runner(state: State) -> EvalRunner:
-    return state.eval_runner
+    return cast(EvalRunner, state.eval_runner)
 
 
 # ── RFC 9457 Secret-Sanitizing Error Handler ──────────────────────────
 
-def secret_sanitizing_exception_handler(request: Request, exc: Exception) -> Response:
+
+def secret_sanitizing_exception_handler(
+    request: Request[Any, Any, Any], exc: Exception
+) -> Response[Any]:
     """Strip all auth credentials, tokens, and sensitive headers from error details."""
     sanitized_detail = sanitize_error_detail(str(exc))
     return Response(
@@ -201,7 +206,7 @@ def secret_sanitizing_exception_handler(request: Request, exc: Exception) -> Res
 
 
 @get("/", media_type=MediaType.HTML, include_in_schema=False)
-async def fallback_landing() -> Response:
+async def fallback_landing() -> Response[Any]:
     """Graceful fallback landing page when frontend/dist is not yet built."""
     html = """<!DOCTYPE html>
 <html lang="en">
@@ -237,15 +242,17 @@ class ApplicationCore(InitPluginProtocol):
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
         """Register controllers, configure CORS, OpenAPI, DI, and error handling."""
         # Register controllers
-        app_config.route_handlers.extend([
-            BenchmarkController,
-            QueryController,
-            IngestController,
-            CacheController,
-            HealthController,
-            EvalController,
-            GraphController,
-        ])
+        app_config.route_handlers.extend(
+            [
+                BenchmarkController,
+                QueryController,
+                IngestController,
+                CacheController,
+                HealthController,
+                EvalController,
+                GraphController,
+            ]
+        )
 
         # Mount frontend static files or fallback landing route
         dist_path = Path("frontend/dist")
@@ -264,17 +271,19 @@ class ApplicationCore(InitPluginProtocol):
             app_config.route_handlers.append(fallback_landing)
 
         # Register DI providers
-        app_config.dependencies.update({
-            "store": Provide(provide_store, sync_to_thread=False),
-            "embedding_service": Provide(provide_embedding_service, sync_to_thread=False),
-            "extractor": Provide(provide_extractor, sync_to_thread=False),
-            "semantic_cache": Provide(provide_semantic_cache, sync_to_thread=False),
-            "fallback_cache": Provide(provide_fallback_cache, sync_to_thread=False),
-            "ingester": Provide(provide_ingester, sync_to_thread=False),
-            "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
-            "config": Provide(provide_config, sync_to_thread=False),
-            "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),
-        })
+        app_config.dependencies.update(
+            {
+                "store": Provide(provide_store, sync_to_thread=False),
+                "embedding_service": Provide(provide_embedding_service, sync_to_thread=False),
+                "extractor": Provide(provide_extractor, sync_to_thread=False),
+                "semantic_cache": Provide(provide_semantic_cache, sync_to_thread=False),
+                "fallback_cache": Provide(provide_fallback_cache, sync_to_thread=False),
+                "ingester": Provide(provide_ingester, sync_to_thread=False),
+                "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
+                "config": Provide(provide_config, sync_to_thread=False),
+                "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),
+            }
+        )
 
         # Register RFC 9457 error handler
         app_config.exception_handlers[Exception] = secret_sanitizing_exception_handler

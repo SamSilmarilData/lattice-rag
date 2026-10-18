@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+
 from litestar import Controller, get
 from litestar.di import NamedDependency
 from litestar.params import FromQuery, SkipValidation
 
-from lattice_rag.api.dtos import GraphEdge, GraphNode, SubgraphDTO
+from lattice_rag.api.dtos import SubgraphDTO
 from lattice_rag.storage.db import LatticeStore
 
 logger = logging.getLogger(__name__)
@@ -26,4 +27,3 @@ class GraphController(Controller):
         logger.info("fetching_graph_subgraph", extra={"limit": limit})
         subgraph = store.get_subgraph_snapshot(limit=limit)
         return SubgraphDTO.from_subgraph(subgraph)
-

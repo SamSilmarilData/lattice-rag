@@ -57,3 +57,18 @@ async def test_router_aclose_and_close():
     # close() is an alias for aclose()
     await router.close()
     assert mock_client.aclose.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_router_system_one_error_falls_back_to_hybrid():
+    """Verify router catches system_one exceptions and gracefully returns hybrid decision."""
+    mock_client = AsyncMock()
+    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+
+    router = QueryRouter(ts_client=mock_client)
+    decision = await router.route_query("Explain vector indexing")
+
+    assert isinstance(decision, RouteDecision)
+    assert decision.route == "hybrid"
+    assert decision.confidence == 0.5
+

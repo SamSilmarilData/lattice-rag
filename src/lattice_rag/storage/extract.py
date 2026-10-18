@@ -1,4 +1,5 @@
 """Entity and relation triple extraction using GLiNER2.5-Decide on CPU."""
+
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,6 @@ import re
 from typing import Any
 
 from lattice_rag.storage.db import EntityData, RelationData
-
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +24,14 @@ class EntityExtractor:
     def __init__(self, model_name: str = "fastino/GLiNER2.5-Decide") -> None:
         # Normalize legacy or typoed repo names to the official HuggingFace repository
         clean_name = model_name
-        if clean_name in ("FastinoLabs/gliner-2.5-decide", "fastino/gliner2.5-decide", "gliner2.5-decide"):
+        if clean_name in (
+            "FastinoLabs/gliner-2.5-decide",
+            "fastino/gliner2.5-decide",
+            "gliner2.5-decide",
+        ):
             clean_name = "fastino/GLiNER2.5-Decide"
         self.model_name = clean_name
-        self._model = None
+        self._model: Any = None
         self._is_gliner2: bool = False
 
     def _ensure_model(self) -> None:
@@ -44,6 +48,7 @@ class EntityExtractor:
         if "fastino" in self.model_name.lower() or "gliner2" in self.model_name.lower():
             try:
                 from gliner2 import AutoExtractor  # noqa: PLC0415
+
                 self._model = AutoExtractor.from_pretrained(self.model_name)
                 self._is_gliner2 = True
                 _MODEL_CACHE[self.model_name] = (self._model, self._is_gliner2)
@@ -58,6 +63,7 @@ class EntityExtractor:
 
         # 2. Try classic GLiNER loader
         from gliner import GLiNER  # noqa: PLC0415
+
         try:
             self._model = GLiNER.from_pretrained(self.model_name)
             self._is_gliner2 = False
@@ -103,7 +109,9 @@ class EntityExtractor:
             try:
                 batch_preds = self._model.batch_extract_entities(texts, labels)
             except Exception as e:
-                logger.warning("batch_extract_entities failed in gliner2 (%s), falling back to itemized", e)
+                logger.warning(
+                    "batch_extract_entities failed in gliner2 (%s), falling back to itemized", e
+                )
                 batch_preds = [self._model.extract_entities(t, labels) for t in texts]
 
             for item in batch_preds:
@@ -117,11 +125,16 @@ class EntityExtractor:
                             if not name or name in seen:
                                 continue
                             seen.add(name)
-                            entities.append(EntityData(name=name, entity_type=entity_type, embedding=None))
+                            entities.append(
+                                EntityData(name=name, entity_type=entity_type, embedding=None)
+                            )
                 results.append(entities)
         else:
             # Classic GLiNER
-            is_mock = hasattr(self._model, "_mock_return_value") or self._model.__class__.__name__ == "MagicMock"
+            is_mock = (
+                hasattr(self._model, "_mock_return_value")
+                or self._model.__class__.__name__ == "MagicMock"
+            )
             if not is_mock and hasattr(self._model, "batch_predict_entities"):
                 try:
                     batch_preds = self._model.batch_predict_entities(texts, labels=labels)
@@ -138,7 +151,9 @@ class EntityExtractor:
                     if not name or name in seen:
                         continue
                     seen.add(name)
-                    entities.append(EntityData(name=name, entity_type=p.get("label", "entity"), embedding=None))
+                    entities.append(
+                        EntityData(name=name, entity_type=p.get("label", "entity"), embedding=None)
+                    )
                 results.append(entities)
 
         return results
@@ -179,11 +194,7 @@ class EntityExtractor:
             for i, ent1 in enumerate(present):
                 for ent2 in present[i + 1 :]:
                     # Build descriptive typed relationship
-                    rel_type = (
-                        f"CO_OCCURS_IN_"
-                        f"{ent1.entity_type.upper()}_"
-                        f"{ent2.entity_type.upper()}"
-                    )
+                    rel_type = f"CO_OCCURS_IN_{ent1.entity_type.upper()}_{ent2.entity_type.upper()}"
                     triple_key = (ent1.name, ent2.name, rel_type)
                     if triple_key not in seen_triples:
                         seen_triples.add(triple_key)

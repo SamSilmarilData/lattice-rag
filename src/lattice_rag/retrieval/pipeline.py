@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.graph_traversal import GraphTraverser
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class RetrievalResult:
     """Final result of the 3-stage hybrid retrieval pipeline + guardrail."""
 
-    final_chunks: list[dict]
+    final_chunks: list[dict[str, Any]]
     graph_context: SubgraphResult
     timings: dict[str, float] = field(default_factory=dict)
     low_grounding: bool = False
@@ -122,25 +122,32 @@ class RetrievalPipeline:
         # ── Guardrail: Context Relevance Filtering ───────────────────────────
         if apply_guardrail and self.guardrail is not None:
             t0 = time.perf_counter()
-            filtered = self.guardrail.filter_chunks(query, stage3_results)
-            if hasattr(filtered, "__await__"):
-                filtered_chunks = await filtered
-            else:
-                filtered_chunks = filtered
-            duration_ms = (time.perf_counter() - t0) * 1000.0
-            timings["guardrail_filter"] = duration_ms
+            try:
+                filtered = self.guardrail.filter_chunks(query, stage3_results)
+                if hasattr(filtered, "__await__"):
+                    filtered_chunks = await filtered
+                else:
+                    filtered_chunks = filtered
+                duration_ms = (time.perf_counter() - t0) * 1000.0
+                timings["guardrail_filter"] = duration_ms
 
-            has_flag = getattr(self.guardrail, "low_grounding_flag", False)
-            if (
-                not filtered_chunks
-                or has_flag is True
-                or any(
-                    isinstance(c, dict) and c.get("low_grounding_flag")
-                    for c in filtered_chunks
+                has_flag = getattr(self.guardrail, "low_grounding_flag", False)
+                if (
+                    not filtered_chunks
+                    or has_flag is True
+                    or any(
+                        isinstance(c, dict) and c.get("low_grounding_flag") for c in filtered_chunks
+                    )
+                ):
+                    low_grounding = True
+                final_chunks = filtered_chunks
+            except Exception as e:
+                logger.warning(
+                    "guardrail_filter_unexpected_error_fallback: query=%s error=%s",
+                    query,
+                    str(e),
                 )
-            ):
-                low_grounding = True
-            final_chunks = filtered_chunks
+                final_chunks = stage3_results
 
         return RetrievalResult(
             final_chunks=final_chunks,

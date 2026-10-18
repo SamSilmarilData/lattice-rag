@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 
@@ -33,8 +33,8 @@ class ONNXReranker:
         self.repo_id = repo_id
         self.filename = filename
         self.max_length = max_length
-        self._session = None
-        self._tokenizer = None
+        self._session: Any = None
+        self._tokenizer: Any = None
 
     def _ensure_loaded(self) -> None:
         if self._session is None or self._tokenizer is None:
@@ -44,6 +44,7 @@ class ONNXReranker:
                 return
 
             import os
+
             import onnxruntime as ort
             from huggingface_hub import hf_hub_download
             from tokenizers import Tokenizer
@@ -93,7 +94,7 @@ class ONNXReranker:
             {"input_ids": input_ids, "attention_mask": attention_mask},
         )
         # Squeeze output logits into 1D float scores
-        return outputs[0].flatten().astype(float).tolist()
+        return [float(x) for x in outputs[0].flatten()]
 
 
 class EmbeddingService:
@@ -167,12 +168,10 @@ class EmbeddingService:
         """
         res = self.embedder.embed([query])
         if hasattr(res, "__next__") or hasattr(res, "__iter__"):
-            return next(iter(res))
-        return res[0]
+            return np.asarray(next(iter(res)))
+        return np.asarray(res[0])
 
-    def rerank(
-        self, query: str, documents: list[str], top_k: int = 5
-    ) -> list[RerankResult]:
+    def rerank(self, query: str, documents: list[str], top_k: int = 5) -> list[RerankResult]:
         """Rerank documents against a query using the cross-encoder.
 
         Args:
@@ -204,9 +203,7 @@ class EmbeddingService:
                 score = float(item)
                 idx = i
 
-            results.append(
-                RerankResult(index=idx, score=score, text=documents[idx])
-            )
+            results.append(RerankResult(index=idx, score=score, text=documents[idx]))
 
         # Sort by score descending
         results.sort(key=lambda x: x.score, reverse=True)

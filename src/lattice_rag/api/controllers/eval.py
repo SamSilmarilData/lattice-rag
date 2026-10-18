@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from litestar import Controller, post
 from litestar.di import NamedDependency
@@ -30,7 +29,12 @@ class EvalController(Controller):
         """Trigger an evaluation run against the golden benchmark dataset and compare with baseline."""
         logger.info(
             "received_eval_run_request",
-            extra={"dataset": dataset, "baseline": baseline, "limit": limit, "use_temp_db": use_temp_db},
+            extra={
+                "dataset": dataset,
+                "baseline": baseline,
+                "limit": limit,
+                "use_temp_db": use_temp_db,
+            },
         )
         return await eval_runner.run_evaluation(
             dataset_path=dataset,

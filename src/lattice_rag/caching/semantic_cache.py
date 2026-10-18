@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections import OrderedDict
 import os
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
+
 import numpy as np
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
@@ -16,7 +17,7 @@ logger = structlog.get_logger(__name__)
 class CacheEntry:
     query_text: str
     query_embedding: np.ndarray
-    response: dict
+    response: dict[str, Any]
     created_at: float
 
 
@@ -39,13 +40,14 @@ class SemanticCache:
         self.max_size = max_size
         self.vector_dimensions = vector_dimensions
         self._cache: list[CacheEntry] = []
-        self._exact_map: OrderedDict[str, dict] = OrderedDict()
+        self._exact_map: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._embeddings_matrix: np.ndarray | None = None
         self._hits = 0
         self._misses = 0
         self._exact_hits = 0
         self._fuzzy_hits = 0
         self._evictions = 0
+        self._ts_client: AsyncTypeSafeClient | None = None
 
         if ts_client is not None:
             self._ts_client = ts_client
@@ -58,7 +60,7 @@ class SemanticCache:
         """Return the number of cached items."""
         return len(self._cache)
 
-    def get_exact(self, query_text: str) -> dict | None:
+    def get_exact(self, query_text: str) -> dict[str, Any] | None:
         """O(1) exact-match shortcut bypassing embedding and Jev Noul verification."""
         norm_key = query_text.strip().lower()
         if norm_key in self._exact_map:
@@ -69,9 +71,9 @@ class SemanticCache:
             return self._exact_map[norm_key]
         return None
 
-    async def get(self, query_text: str, query_embedding: np.ndarray) -> dict | None:
+    async def get(self, query_text: str, query_embedding: np.ndarray) -> dict[str, Any] | None:
         """Search cache for semantic match using vectorized BLAS dot product and Jev Noul."""
-        if not self._cache:
+        if not self._cache or self._embeddings_matrix is None:
             self._misses += 1
             return None
 
@@ -136,13 +138,17 @@ class SemanticCache:
         self._misses += 1
         return None
 
-    def put(self, query_text: str, query_embedding: np.ndarray, response: dict) -> None:
+    def put(self, query_text: str, query_embedding: np.ndarray, response: dict[str, Any]) -> None:
         """Store a new entry with normalized vector and bounded LRU eviction."""
         norm_key = query_text.strip().lower()
 
         # Compute normalized unit vector for fast BLAS dot product
         norm_val = float(np.linalg.norm(query_embedding))
-        norm_vec = (query_embedding / norm_val).astype(np.float32) if norm_val > 0.0 else query_embedding.astype(np.float32)
+        norm_vec = (
+            (query_embedding / norm_val).astype(np.float32)
+            if norm_val > 0.0
+            else query_embedding.astype(np.float32)
+        )
 
         # Initialize or adjust embeddings matrix to match vector dimension
         vec_dim = len(norm_vec)
@@ -159,7 +165,11 @@ class SemanticCache:
             oldest_key, _ = self._exact_map.popitem(last=False)
             # Find and remove matching entry in _cache
             idx_to_remove = next(
-                (i for i, entry in enumerate(self._cache) if entry.query_text.strip().lower() == oldest_key),
+                (
+                    i
+                    for i, entry in enumerate(self._cache)
+                    if entry.query_text.strip().lower() == oldest_key
+                ),
                 0,
             )
             self._cache.pop(idx_to_remove)
@@ -224,4 +234,3 @@ class SemanticCache:
     async def close(self) -> None:
         """Alias for aclose."""
         await self.aclose()
-

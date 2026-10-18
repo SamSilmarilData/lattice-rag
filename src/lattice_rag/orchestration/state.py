@@ -1,4 +1,5 @@
 """LangGraph state definition for the RAG agent loop."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
