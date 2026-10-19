@@ -1,7 +1,9 @@
 """Unit tests for static asset mounting and fallback landing route in Litestar."""
+
 from __future__ import annotations
 
 from pathlib import Path
+
 import pytest
 from litestar.testing import AsyncTestClient
 
@@ -31,8 +33,24 @@ async def test_fallback_landing_page(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_static_spa_serving():
-    # frontend/dist exists and is mounted at root
+async def test_static_spa_serving(monkeypatch, tmp_path):
+    """Verify static SPA router serves index.html when frontend/dist is present."""
+    mock_dist = tmp_path / "mock_dist"
+    mock_dist.mkdir()
+    (mock_dist / "index.html").write_text(
+        "<!DOCTYPE html><html><body>Hybrid GraphRAG Studio</body></html>",
+        encoding="utf-8",
+    )
+
+    orig_path = Path
+
+    def fake_path(p, *args, **kwargs):
+        if str(p) == "frontend/dist":
+            return mock_dist
+        return orig_path(p, *args, **kwargs)
+
+    monkeypatch.setattr("lattice_rag.app.Path", fake_path)
+
     app = create_app()
     async with AsyncTestClient(app) as client:
         response = await client.get("/")
