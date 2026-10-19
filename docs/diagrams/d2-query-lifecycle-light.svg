@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 430" role="img" aria-labelledby="d2-light-title d2-light-desc" id="d2-query-lifecycle-light-root">
+        <title id="d2-light-title">Lattice RAG Query Execution Lifecycle Sequence (Light Mode)</title>
+        <desc id="d2-light-desc">Time-ordered sequence showing Client, Litestar API, TypeSafe AI Jev, LatticeDB Engine, and Groq Synthesizer across concurrent triage, Cypher traversal, reranking, guardrail, and SSE streaming in light mode.</desc>
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #d2-query-lifecycle-light-root { --color-paper:        #f8fafc;
+      --color-paper-2:      #f1f5f9;
+      --color-ink:          #090d16;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.08);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(9, 13, 22, 0.12);
+      --color-rule-solid:   #cbd5e1;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace; }
+      #d2-query-lifecycle-light-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #d2-query-lifecycle-light-root .diagram-container { width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 1rem 0; }</style>
+          <marker id="d2-query-lifecycle-light-d2-l-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#475569" />
+          </marker>
+          <marker id="d2-query-lifecycle-light-d2-l-arrow-accent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#0e7490" />
+          </marker>
+          <marker id="d2-query-lifecycle-light-d2-l-arrow-link" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#4338ca" />
+          </marker>
+        </defs>
+
+        <!-- Canvas Background -->
+        <rect x="0" y="0" width="1040" height="430" fill="#ffffff" />
+
+        <!-- ========================================== -->
+        <!-- LIFELINE TRACKS (Drawn before message arrows) -->
+        <!-- ========================================== -->
+
+        <!-- Track 1: Client (x=100) -->
+        <line x1="100" y1="88" x2="100" y2="370" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <!-- Track 2: Litestar Gateway (x=300) -->
+        <line x1="300" y1="88" x2="300" y2="370" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <!-- Track 3: TypeSafe Jev (x=510) -->
+        <line x1="510" y1="88" x2="510" y2="370" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <!-- Track 4: LatticeDB Store (x=730) -->
+        <line x1="730" y1="88" x2="730" y2="370" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+        <!-- Track 5: Groq Synthesizer (x=940) -->
+        <line x1="940" y1="88" x2="940" y2="370" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4" />
+
+        <!-- ========================================== -->
+        <!-- ACTIVATION BARS                            -->
+        <!-- ========================================== -->
+        <!-- Client Activation -->
+        <rect x="94" y="106" width="12" height="252" rx="3" fill="#f8fafc" stroke="#64748b" stroke-width="1" />
+        <!-- Litestar Activation -->
+        <rect x="294" y="112" width="12" height="240" rx="3" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <!-- TypeSafe Jev Activation (Triage) -->
+        <rect x="504" y="132" width="12" height="46" rx="3" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.12" />
+        <!-- LatticeDB Activation (Traversal) -->
+        <rect x="724" y="196" width="12" height="52" rx="3" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.12" />
+        <!-- TypeSafe Jev Activation (Guardrail) -->
+        <rect x="504" y="262" width="12" height="38" rx="3" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.12" />
+        <!-- GroqCloud Activation (Streaming) -->
+        <rect x="934" y="312" width="12" height="36" rx="3" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+
+        <!-- ========================================== -->
+        <!-- STAGE PHASE BANDS                          -->
+        <!-- ========================================== -->
+        <!-- Stage 1 Band -->
+        <rect x="40" y="128" width="960" height="2" fill="#4338ca" fill-opacity="0.15" />
+        <rect x="46" y="121" width="120" height="15" rx="2" fill="#ffffff" />
+        <text x="50" y="132" font-family="'Geist Mono', monospace" font-size="7.5" fill="#4338ca" letter-spacing="0.12em">01 // FRONT-DOOR TRIAGE</text>
+
+        <!-- Stage 2 Band -->
+        <rect x="40" y="190" width="960" height="2" fill="#0e7490" fill-opacity="0.15" />
+        <rect x="46" y="183" width="154" height="15" rx="2" fill="#ffffff" />
+        <text x="50" y="194" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490" letter-spacing="0.12em">02 // 2-HOP CYPHER &amp; RECALL</text>
+
+        <!-- Stage 3 Band -->
+        <rect x="40" y="254" width="960" height="2" fill="#047857" fill-opacity="0.15" />
+        <rect x="46" y="247" width="160" height="15" rx="2" fill="#ffffff" />
+        <text x="50" y="258" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857" letter-spacing="0.12em">03 // RERANK &amp; NOUL GUARDRAIL</text>
+
+        <!-- Stage 4 Band -->
+        <rect x="40" y="306" width="960" height="2" fill="#475569" fill-opacity="0.15" />
+        <rect x="46" y="299" width="144" height="15" rx="2" fill="#ffffff" />
+        <text x="50" y="310" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569" letter-spacing="0.12em">04 // STREAMING SYNTHESIS</text>
+
+        <!-- ========================================== -->
+        <!-- MESSAGES & CALL ARROWS                     -->
+        <!-- ========================================== -->
+
+        <!-- M1: Client -> Litestar (Query) -->
+        <line x1="106" y1="116" x2="294" y2="116" stroke="#475569" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
+        <rect x="156" y="108" width="88" height="14" fill="#ffffff" />
+        <text x="200" y="119" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#090d16">POST /api/v1/query</text>
+
+        <!-- M2: Litestar -> Jev (Choice Router) -->
+        <line x1="306" y1="146" x2="504" y2="146" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-link)" />
+        <rect x="360" y="138" width="90" height="14" fill="#ffffff" />
+        <text x="405" y="149" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">Jev Choice (70ms)</text>
+
+        <!-- M3: Jev -> Litestar (Route Result) -->
+        <line x1="504" y1="170" x2="306" y2="170" stroke="#4338ca" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-link)" />
+        <rect x="360" y="162" width="90" height="14" fill="#ffffff" />
+        <text x="405" y="173" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">Route: 'hybrid'</text>
+
+        <!-- M4: Litestar -> LatticeDB (Vector + Cypher Traversal) -->
+        <line x1="306" y1="210" x2="724" y2="210" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
+        <rect x="466" y="202" width="116" height="14" fill="#ffffff" />
+        <text x="524" y="213" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">HNSW + Cypher (2-Hop)</text>
+
+        <!-- M5: LatticeDB -> Litestar (Subgraph Triples + Chunks) -->
+        <line x1="724" y1="236" x2="306" y2="236" stroke="#0e7490" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
+        <rect x="470" y="228" width="108" height="14" fill="#ffffff" />
+        <text x="524" y="239" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">Top 10 Chunks + Nodes</text>
+
+        <!-- M6: Litestar -> Jev (Noul Noise Pruning) -->
+        <line x1="306" y1="272" x2="504" y2="272" stroke="#047857" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
+        <rect x="364" y="264" width="82" height="14" fill="#ffffff" />
+        <text x="405" y="275" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">Jev Noul Guardrail</text>
+
+        <!-- M7: Jev -> Litestar (Pruned Context) -->
+        <line x1="504" y1="292" x2="306" y2="292" stroke="#047857" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
+        <rect x="362" y="284" width="86" height="14" fill="#ffffff" />
+        <text x="405" y="295" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">Pruned Top 5 (0 Noise)</text>
+
+        <!-- M8: Litestar -> GroqCloud (Stream Synthesis) -->
+        <line x1="306" y1="324" x2="934" y2="324" stroke="#475569" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
+        <rect x="570" y="316" width="100" height="14" fill="#ffffff" />
+        <text x="620" y="327" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#090d16">Stream Llama 3.3</text>
+
+        <!-- M9: GroqCloud -> Client (SSE Real-Time Stream) -->
+        <line x1="934" y1="346" x2="106" y2="346" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
+        <rect x="470" y="338" width="112" height="14" fill="#ffffff" />
+        <text x="526" y="349" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">SSE 200+ tok/s Stream</text>
+
+        <!-- ========================================== -->
+        <!-- LIFELINE HEADERS                           -->
+        <!-- ========================================== -->
+
+        <!-- Head 1: Client -->
+        <rect x="40" y="52" width="120" height="36" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="1" />
+        <text x="100" y="68" text-anchor="middle" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#090d16">Client</text>
+        <text x="100" y="80" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">UI / REST Caller</text>
+
+        <!-- Head 2: Litestar Gateway -->
+        <rect x="236" y="52" width="128" height="36" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <text x="300" y="68" text-anchor="middle" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#090d16">Litestar 2.24</text>
+        <text x="300" y="80" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">Granian Rust ASGI</text>
+
+        <!-- Head 3: TypeSafe Jev (FOCAL 1) -->
+        <rect x="436" y="52" width="148" height="36" rx="6" fill="#0e7490" stroke="#0e7490" stroke-width="1.2" fill-opacity="0.08" />
+        <text x="510" y="68" text-anchor="middle" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#0e7490">TypeSafe AI Jev</text>
+        <text x="510" y="80" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">Choice / Noul SLM</text>
+
+        <!-- Head 4: LatticeDB Store (FOCAL 2) -->
+        <rect x="656" y="52" width="148" height="36" rx="6" fill="#0e7490" stroke="#0e7490" stroke-width="1.2" fill-opacity="0.08" />
+        <text x="730" y="68" text-anchor="middle" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#0e7490">LatticeDB Store</text>
+        <text x="730" y="80" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">HNSW + Cypher Graph</text>
+
+        <!-- Head 5: Groq Synthesizer -->
+        <rect x="876" y="52" width="128" height="36" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <text x="940" y="68" text-anchor="middle" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#090d16">Groq Synthesizer</text>
+        <text x="940" y="80" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">Llama 3.3 @ 200 t/s</text>
+
+        <!-- ========================================== -->
+        <!-- LEGEND STRIP (Horizontal bottom strip)      -->
+        <!-- ========================================== -->
+        <line x1="40" y1="390" x2="1000" y2="390" stroke="#cbd5e1" stroke-width="1" />
+
+        <rect x="40" y="402" width="12" height="12" rx="3" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.12" />
+        <text x="60" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">FOCAL HUB</text>
+        <text x="122" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">TypeSafe Jev &amp; LatticeDB Core</text>
+
+        <line x1="330" y1="408" x2="354" y2="408" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-link)" />
+        <text x="364" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">PROTOCOL LINK</text>
+        <text x="444" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">System 1 Choice Route</text>
+
+        <line x1="610" y1="408" x2="634" y2="408" stroke="#047857" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
+        <text x="644" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">GUARDRAIL</text>
+        <text x="704" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Noul Noise Pruning Pass</text>
+
+        <line x1="860" y1="408" x2="884" y2="408" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
+        <text x="894" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">STREAM</text>
+        <text x="940" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">SSE Real-Time</text>
+
+      </svg>

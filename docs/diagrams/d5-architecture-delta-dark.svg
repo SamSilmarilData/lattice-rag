@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 430" role="img" aria-labelledby="d5-dark-title d5-dark-desc" id="d5-architecture-delta-dark-root">
+        <title id="d5-dark-title">In-Process vs Distributed Cloud GraphRAG Architecture Delta</title>
+        <desc id="d5-dark-desc">Synchronized Before and After architecture delta showing elimination of Pinecone, Neo4j JVM, and Cohere APIs into a single-binary in-process LatticeDB container with changes ledger.</desc>
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #d5-architecture-delta-dark-root { --color-paper:        #0b0f19;
+      --color-paper-2:      #111827;
+      --color-ink:          #f1f5f9;
+      --color-muted:        #94a3b8;
+      --color-soft:         #cbd5e1;
+      --color-accent:       #22d3ee;
+      --color-accent-tint:  rgba(34, 211, 238, 0.12);
+      --color-link:         #818cf8;
+      --color-rule:         rgba(34, 211, 238, 0.20);
+      --color-rule-solid:   #1f2937;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace; }
+      #d5-architecture-delta-dark-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #d5-architecture-delta-dark-root .diagram-container { width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 8px;
+      background: #080c14;
+      padding: 1rem 0; }</style>
+          <marker id="d5-architecture-delta-dark-d5-arrow-red" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#f43f5e" />
+          </marker>
+          <marker id="d5-architecture-delta-dark-d5-arrow-accent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#22d3ee" />
+          </marker>
+        </defs>
+
+        <!-- Canvas Background -->
+        <rect x="0" y="0" width="1080" height="430" fill="#080c14" />
+
+        <!-- ========================================== -->
+        <!-- PANEL LEFT: BEFORE (Cloud Sprawl)          -->
+        <!-- ========================================== -->
+        <rect x="40" y="48" width="480" height="260" rx="8" fill="#0b0f19" stroke="#334155" stroke-width="1" />
+        <rect x="40" y="48" width="480" height="30" rx="8" fill="#f43f5e" fill-opacity="0.12" />
+        <text x="56" y="68" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#fb7185">BEFORE: Traditional Cloud GraphRAG Stack</text>
+        <rect x="410" y="55" width="96" height="16" rx="3" fill="#f43f5e" stroke="#f43f5e" stroke-width="0.8" fill-opacity="0.2" />
+        <text x="458" y="66" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#fb7185">$150–$800+/MO</text>
+
+        <!-- App Box -->
+        <rect x="60" y="100" width="120" height="170" rx="6" fill="#111827" stroke="#334155" stroke-width="1" />
+        <text x="120" y="125" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#f1f5f9">App Server</text>
+        <text x="120" y="140" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#94a3b8">FastAPI / Uvicorn</text>
+        <text x="120" y="195" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#fb7185">4-6 Network Hops</text>
+        <text x="120" y="210" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#fb7185">1,800–3,500ms</text>
+
+        <!-- Remote Services with Red Cross-out Badges -->
+        <!-- Cloud 1: Pinecone / Weaviate -->
+        <rect x="290" y="96" width="210" height="46" rx="6" fill="#111827" stroke="#475569" stroke-width="1" stroke-dasharray="3,3" />
+        <rect x="298" y="104" width="60" height="13" rx="2" fill="#f43f5e" fill-opacity="0.2" />
+        <text x="302" y="114" font-family="'Geist Mono', monospace" font-size="7" fill="#fb7185">REMOVED</text>
+        <text x="298" y="130" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#cbd5e1">Pinecone / Qdrant Cloud</text>
+        <text x="445" y="130" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">30-100ms</text>
+
+        <!-- Cloud 2: Neo4j Aura JVM -->
+        <rect x="290" y="152" width="210" height="46" rx="6" fill="#111827" stroke="#475569" stroke-width="1" stroke-dasharray="3,3" />
+        <rect x="298" y="160" width="60" height="13" rx="2" fill="#f43f5e" fill-opacity="0.2" />
+        <text x="302" y="170" font-family="'Geist Mono', monospace" font-size="7" fill="#fb7185">REMOVED</text>
+        <text x="298" y="186" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#cbd5e1">Neo4j Aura JVM Cluster</text>
+        <text x="440" y="186" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">50-150ms</text>
+
+        <!-- Cloud 3: Cohere Rerank API -->
+        <rect x="290" y="208" width="210" height="46" rx="6" fill="#111827" stroke="#475569" stroke-width="1" stroke-dasharray="3,3" />
+        <rect x="298" y="216" width="60" height="13" rx="2" fill="#f43f5e" fill-opacity="0.2" />
+        <text x="302" y="226" font-family="'Geist Mono', monospace" font-size="7" fill="#fb7185">REMOVED</text>
+        <text x="298" y="242" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#cbd5e1">Cohere Rerank API</text>
+        <text x="435" y="242" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">200-400ms</text>
+
+        <!-- Connecting HTTPS Hops -->
+        <line x1="180" y1="119" x2="290" y2="119" stroke="#f43f5e" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#d5-architecture-delta-dark-d5-arrow-red)" />
+        <line x1="180" y1="175" x2="290" y2="175" stroke="#f43f5e" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#d5-architecture-delta-dark-d5-arrow-red)" />
+        <line x1="180" y1="231" x2="290" y2="231" stroke="#f43f5e" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#d5-architecture-delta-dark-d5-arrow-red)" />
+
+        <!-- ========================================== -->
+        <!-- PANEL RIGHT: AFTER (Single-Binary In-Process) -->
+        <!-- ========================================== -->
+        <rect x="560" y="48" width="480" height="260" rx="8" fill="#0b0f19" stroke="#22d3ee" stroke-width="1.2" />
+        <rect x="560" y="48" width="480" height="30" rx="8" fill="#22d3ee" fill-opacity="0.15" />
+        <text x="576" y="68" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#22d3ee">AFTER: Lattice RAG Single-Binary In-Process</text>
+        <rect x="940" y="55" width="86" height="16" rx="3" fill="#34d399" stroke="#34d399" stroke-width="0.8" fill-opacity="0.2" />
+        <text x="983" y="66" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" font-weight="600" fill="#34d399">$0.00/MONTH</text>
+
+        <!-- Inner Unified Container Box -->
+        <rect x="580" y="96" width="440" height="196" rx="6" fill="#111827" stroke="#334155" stroke-width="1" />
+        <rect x="590" y="104" width="110" height="15" rx="2" fill="#22d3ee" fill-opacity="0.18" />
+        <text x="594" y="115" font-family="'Geist Mono', monospace" font-size="7.5" fill="#22d3ee" letter-spacing="0.1em">SINGLE PROCESS MEMORY</text>
+        <text x="965" y="115" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#34d399">0 External Hops</text>
+
+        <!-- Component 1: Litestar + Granian -->
+        <rect x="600" y="130" width="195" height="42" rx="4" fill="#0b0f19" stroke="#334155" stroke-width="1" />
+        <text x="612" y="148" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#f1f5f9">Litestar + Granian</text>
+        <text x="612" y="161" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">Rust ASGI + msgspec DTOs</text>
+
+        <!-- Component 2: Semantic Cache -->
+        <rect x="815" y="130" width="190" height="42" rx="4" fill="#0b0f19" stroke="#334155" stroke-width="1" />
+        <text x="827" y="148" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#f1f5f9">Tier 1 Cache</text>
+        <text x="827" y="161" font-family="'Geist Mono', monospace" font-size="7.5" fill="#34d399">In-Memory Sim &lt;20ms</text>
+
+        <!-- Component 3: LatticeDB (Focal Accent) -->
+        <rect x="600" y="184" width="195" height="46" rx="4" fill="#22d3ee" stroke="#22d3ee" stroke-width="1" fill-opacity="0.15" />
+        <text x="612" y="202" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#ffffff">LatticeDB 0.15+</text>
+        <text x="612" y="217" font-family="'Geist Mono', monospace" font-size="7.5" fill="#22d3ee">HNSW &lt;=&gt; + Cypher Traversal</text>
+
+        <!-- Component 4: FastEmbed CPU ML Pool -->
+        <rect x="815" y="184" width="190" height="46" rx="4" fill="#0b0f19" stroke="#334155" stroke-width="1" />
+        <text x="827" y="202" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#f1f5f9">FastEmbed + Cross-Encoder</text>
+        <text x="827" y="217" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">CPU INT8 ONNX Rerank</text>
+
+        <!-- Direct C Pointer Interconnect -->
+        <line x1="697" y1="172" x2="697" y2="184" stroke="#22d3ee" stroke-width="1.2" marker-end="url(#d5-architecture-delta-dark-d5-arrow-accent)" />
+        <line x1="795" y1="207" x2="815" y2="207" stroke="#22d3ee" stroke-width="1.2" marker-end="url(#d5-architecture-delta-dark-d5-arrow-accent)" />
+
+        <rect x="600" y="242" width="405" height="40" rx="4" fill="#080c14" stroke="#1f2937" stroke-width="0.8" />
+        <text x="612" y="258" font-family="'Inter', sans-serif" font-size="9" font-weight="600" fill="#34d399">End-to-End Latency: 545.4ms (p95)</text>
+        <text x="612" y="272" font-family="'Geist Mono', monospace" font-size="7.5" fill="#94a3b8">Sub-second multi-hop SLA compliant | 340MB RSS stable footprint</text>
+
+        <!-- ========================================== -->
+        <!-- BOTTOM: CHANGES LEDGER                     -->
+        <!-- ========================================== -->
+        <rect x="40" y="324" width="1000" height="85" rx="6" fill="#111827" stroke="#334155" stroke-width="1" />
+        <rect x="40" y="324" width="1000" height="24" rx="6" fill="#94a3b8" fill-opacity="0.12" />
+        <text x="56" y="340" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#f1f5f9">ARCHITECTURE CHANGES LEDGER</text>
+        <text x="960" y="340" text-anchor="end" font-family="'Geist Mono', monospace" font-size="8" fill="#22d3ee">100% CLOUD COST REDUCTION</text>
+
+        <!-- Ledger Items -->
+        <text x="56" y="364" font-family="'Geist Mono', monospace" font-size="8" fill="#fb7185">[REMOVED]</text>
+        <text x="120" y="364" font-family="'Inter', sans-serif" font-size="8.5" fill="#f1f5f9">3 external database SaaS subscriptions (Pinecone vector, Neo4j JVM cluster, Cohere Rerank API)</text>
+
+        <text x="56" y="380" font-family="'Geist Mono', monospace" font-size="8" fill="#fb7185">[ELIMINATED]</text>
+        <text x="135" y="380" font-family="'Inter', sans-serif" font-size="8.5" fill="#f1f5f9">4–6 external HTTPS roundtrips over public internet (slashing 1,200ms+ in network transit latency)</text>
+
+        <text x="56" y="396" font-family="'Geist Mono', monospace" font-size="8" fill="#34d399">[UNIFIED]</text>
+        <text x="120" y="396" font-family="'Inter', sans-serif" font-size="8.5" fill="#f1f5f9">Single SQLite-compatible file holding property graph, HNSW index, BM25 inverted index, and text</text>
+
+      </svg>

@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg role="img" viewBox="0 0 1000 480" width="1000" height="480" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d7-light-title d7-light-desc" id="d7-security-boundary-light-root">
+        <title id="d7-light-title">Multi-Layer Zero-Trust Security Boundary Diagram</title>
+        <desc id="d7-light-desc">Layer stack showing the four defense-in-depth tiers: Filesystem Ingress, Git Repository Boundary, Process Runtime Memory Shielding, and API RFC 9457 Error Egress.</desc>
+
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #d7-security-boundary-light-root { --color-paper:        #f8fafc;
+      --color-paper-2:      #ffffff;
+      --color-ink:          #0f172a;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.10);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(14, 116, 144, 0.20);
+      --color-rule-solid:   #e2e8f0;
+      --color-emerald:      #047857;
+      --color-emerald-tint: rgba(4, 120, 87, 0.10);
+      --color-coral:        #be123c;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace; }
+      #d7-security-boundary-light-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #d7-security-boundary-light-root .lead { color: var(--color-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      max-width: 800px;
+      margin-bottom: 1.75rem; }
+      #d7-security-boundary-light-root .diagram-card { background: var(--color-paper-2);
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08); }
+      #d7-security-boundary-light-root .card-footer { display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--color-rule-solid);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--color-muted); }
+      #d7-security-boundary-light-root .card-footer a { color: var(--color-accent);
+      text-decoration: none; }</style>
+          <filter id="d7-security-boundary-light-d7-light-shadow" x="-5%" y="-5%" width="110%" height="115%">
+            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+          </filter>
+        </defs>
+
+        <!-- DIRECTION INDICATOR (LEFT MARGIN) -->
+        <g id="d7-light-direction">
+          <text x="62" y="66" fill="#475569" font-size="8.5" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.14em">EXTERNAL</text>
+          <line x1="78" y1="80" x2="78" y2="380" stroke="#e2e8f0" stroke-width="1.5"/>
+          <line x1="78" y1="80" x2="78" y2="372" stroke="#0e7490" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <path d="M 74 372 L 78 380 L 82 372 Z" fill="#0e7490"/>
+          <text x="64" y="398" fill="#0e7490" font-size="8.5" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.14em">PROTECTED</text>
+          
+          <!-- Rotated axis label -->
+          <text x="-230" y="44" fill="#64748b" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em" transform="rotate(-90)">DEFENSE IN DEPTH</text>
+        </g>
+
+        <!-- STACK CONTAINER SILHOUETTE -->
+        <line x1="120" y1="60" x2="940" y2="60" stroke="#e2e8f0" stroke-width="1"/>
+        <line x1="120" y1="384" x2="940" y2="384" stroke="#e2e8f0" stroke-width="1"/>
+
+        <!-- ========================================== -->
+        <!-- LAYER 1: FILESYSTEM INGRESS & PROVISIONING -->
+        <!-- ========================================== -->
+        <g id="d7-light-l1">
+          <rect x="120" y="60" width="820" height="80" fill="#ffffff"/>
+          <line x1="120" y1="140" x2="940" y2="140" stroke="#e2e8f0" stroke-width="1"/>
+
+          <!-- Index Pill -->
+          <rect x="140" y="78" width="60" height="22" rx="4" fill="#f1f5f9"/>
+          <text x="170" y="93" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="700" text-anchor="middle">LAYER 01</text>
+          <text x="140" y="122" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5">INGRESS</text>
+
+          <!-- Title & Subtitle -->
+          <text x="230" y="93" fill="#0f172a" font-family="'Inter', sans-serif" font-size="14.5" font-weight="600">Filesystem Ingress &amp; Credential Migration</text>
+          <text x="230" y="117" fill="#475569" font-family="'Inter', sans-serif" font-size="11.5">lattice-rag setup-keys • Plaintext shredder • POSIX chmod 0600 on .env</text>
+
+          <!-- Right Status Tag -->
+          <rect x="760" y="78" width="160" height="24" rx="4" fill="#047857" stroke="#047857" stroke-width="1" fill-opacity="0.10" stroke-opacity="0.3"/>
+          <text x="840" y="94" fill="#047857" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">OWNER CHMOD 0600</text>
+          <text x="920" y="122" fill="#64748b" font-family="'Geist Mono', monospace" font-size="9" text-anchor="end">unlinks apikeys.md</text>
+        </g>
+
+        <!-- ========================================== -->
+        <!-- LAYER 2: GIT & REPOSITORY ISOLATION        -->
+        <!-- ========================================== -->
+        <g id="d7-light-l2">
+          <rect x="120" y="140" width="820" height="80" fill="#f8fafc"/>
+          <line x1="120" y1="220" x2="940" y2="220" stroke="#e2e8f0" stroke-width="1"/>
+
+          <!-- Index Pill -->
+          <rect x="140" y="158" width="60" height="22" rx="4" fill="#e2e8f0"/>
+          <text x="170" y="173" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="700" text-anchor="middle">LAYER 02</text>
+          <text x="140" y="202" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5">REPOSITORY</text>
+
+          <!-- Title & Subtitle -->
+          <text x="230" y="173" fill="#0f172a" font-family="'Inter', sans-serif" font-size="14.5" font-weight="600">Git Protection Boundary &amp; Secret Isolation</text>
+          <text x="230" y="197" fill="#475569" font-family="'Inter', sans-serif" font-size="11.5">.gitignore hard-blocks .env, *.key, *.db • Sanitized .env.example placeholder</text>
+
+          <!-- Right Status Tag -->
+          <rect x="760" y="158" width="160" height="24" rx="4" fill="#4338ca" stroke="#4338ca" stroke-width="1" fill-opacity="0.10" stroke-opacity="0.3"/>
+          <text x="840" y="174" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">0% LEAKAGE TO GIT</text>
+          <text x="920" y="202" fill="#64748b" font-family="'Geist Mono', monospace" font-size="9" text-anchor="end">template only in VCS</text>
+        </g>
+
+        <!-- =================================================== -->
+        <!-- LAYER 3: PROCESS MEMORY & MASKING (FOCAL LAYER)     -->
+        <!-- =================================================== -->
+        <g id="d7-light-l3" filter="url(#d7-security-boundary-light-d7-light-shadow)">
+          <rect x="120" y="220" width="820" height="84" fill="#0e7490" fill-opacity="0.08"/>
+          <rect x="120" y="220" width="820" height="84" fill="none" stroke="#0e7490" stroke-width="2"/>
+
+          <!-- Index Pill -->
+          <rect x="140" y="238" width="60" height="22" rx="4" fill="#0e7490" fill-opacity="0.15"/>
+          <text x="170" y="253" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="700" text-anchor="middle">LAYER 03</text>
+          <text x="140" y="284" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="600">RUNTIME [FOCAL]</text>
+
+          <!-- Title & Subtitle -->
+          <text x="230" y="254" fill="#0f172a" font-family="'Inter', sans-serif" font-size="15" font-weight="600">Process Memory &amp; Type-Level Secret Masking</text>
+          <text x="230" y="278" fill="#475569" font-family="'Inter', sans-serif" font-size="11.5">SecretStr masks __repr__/__str__ • RedactingFilter regex log scrub • DTO exclusion</text>
+
+          <!-- Right Status Tag -->
+          <rect x="760" y="238" width="160" height="24" rx="4" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.15"/>
+          <text x="840" y="254" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9" font-weight="700" text-anchor="middle">sk-****cdef MASKED</text>
+          <text x="920" y="284" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9" text-anchor="end">zero RAM dump exposure</text>
+        </g>
+
+        <!-- ========================================== -->
+        <!-- LAYER 4: API EGRESS & RFC 9457 SHIELDING   -->
+        <!-- ========================================== -->
+        <g id="d7-light-l4">
+          <rect x="120" y="304" width="820" height="80" fill="#ffffff"/>
+
+          <!-- Index Pill -->
+          <rect x="140" y="322" width="60" height="22" rx="4" fill="#f1f5f9"/>
+          <text x="170" y="337" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="700" text-anchor="middle">LAYER 04</text>
+          <text x="140" y="366" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5">API EGRESS</text>
+
+          <!-- Title & Subtitle -->
+          <text x="230" y="337" fill="#0f172a" font-family="'Inter', sans-serif" font-size="14.5" font-weight="600">RFC 9457 Error Shielding &amp; Header Stripping</text>
+          <text x="230" y="361" fill="#475569" font-family="'Inter', sans-serif" font-size="11.5">Problem Details • Strips Authorization headers • Suppresses file tracepaths</text>
+
+          <!-- Right Status Tag -->
+          <rect x="760" y="322" width="160" height="24" rx="4" fill="#047857" stroke="#047857" stroke-width="1" fill-opacity="0.10" stroke-opacity="0.3"/>
+          <text x="840" y="338" fill="#047857" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">RFC 9457 SHIELDED</text>
+          <text x="920" y="366" fill="#64748b" font-family="'Geist Mono', monospace" font-size="9" text-anchor="end">sanitized 4xx/5xx</text>
+        </g>
+
+        <!-- FOOTER CAPTION CALLOUT -->
+        <g id="d7-light-footer-caption" transform="translate(120, 415)">
+          <text x="0" y="14" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="600" letter-spacing="0.14em">SECURITY GUARANTEE •</text>
+          <text x="160" y="14" fill="#475569" font-family="'Inter', sans-serif" font-size="11.5">All API keys and tokens are shredded from plaintext storage, masked in memory (sk-****cdef), scrubbed from loggers, and excluded from client error responses.</text>
+        </g>
+      </svg>

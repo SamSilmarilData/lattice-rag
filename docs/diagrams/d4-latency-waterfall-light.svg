@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 390" role="img" aria-labelledby="d4-light-title d4-light-desc" id="d4-latency-waterfall-light-root">
+        <title id="d4-light-title">Lattice RAG Sub-Second Latency Waterfall Diagram (Light Mode)</title>
+        <desc id="d4-light-desc">Stepped waterfall diagram displaying p95 latencies across Front-Door Triage, Stage 1 HNSW recall, Stage 2 Cypher traversal, and Stage 3 Cross-Encoder reranking totaling 545.4ms under the 1,000ms SLA ceiling in light mode.</desc>
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #d4-latency-waterfall-light-root { --color-paper:        #f8fafc;
+      --color-paper-2:      #f1f5f9;
+      --color-ink:          #090d16;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.08);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(9, 13, 22, 0.12);
+      --color-rule-solid:   #cbd5e1;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace; }
+      #d4-latency-waterfall-light-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #d4-latency-waterfall-light-root .diagram-container { width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 1rem 0; }</style>
+          <marker id="d4-latency-waterfall-light-d4-l-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#475569" />
+          </marker>
+          <marker id="d4-latency-waterfall-light-d4-l-arrow-accent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#0e7490" />
+          </marker>
+        </defs>
+
+        <!-- Canvas Background -->
+        <rect x="0" y="0" width="1080" height="390" fill="#ffffff" />
+
+        <!-- ========================================== -->
+        <!-- GRID BASELINES & SLA CEILING               -->
+        <!-- ========================================== -->
+
+        <!-- 1,000ms SLA Target Line (y=80) -->
+        <line x1="80" y1="80" x2="860" y2="80" stroke="#be123c" stroke-width="1.2" stroke-dasharray="6,4" />
+        <rect x="80" y="68" width="168" height="15" rx="2" fill="#ffffff" />
+        <text x="84" y="79" font-family="'Geist Mono', monospace" font-size="7.5" fill="#be123c" letter-spacing="0.1em">SLA CEILING: 1,000ms</text>
+
+        <!-- 500ms Grid Line (y=175) -->
+        <line x1="80" y1="175" x2="860" y2="175" stroke="#e2e8f0" stroke-width="0.8" stroke-dasharray="4,4" />
+        <text x="64" y="178" font-family="'Geist Mono', monospace" font-size="8" fill="#94a3b8" text-anchor="end">500ms</text>
+
+        <!-- 250ms Grid Line (y=222) -->
+        <line x1="80" y1="222" x2="860" y2="222" stroke="#e2e8f0" stroke-width="0.8" stroke-dasharray="4,4" />
+        <text x="64" y="225" font-family="'Geist Mono', monospace" font-size="8" fill="#94a3b8" text-anchor="end">250ms</text>
+
+        <!-- 0ms Baseline (y=270) -->
+        <line x1="80" y1="270" x2="860" y2="270" stroke="#cbd5e1" stroke-width="1.2" />
+        <text x="64" y="273" font-family="'Geist Mono', monospace" font-size="8" fill="#475569" text-anchor="end">0ms</text>
+
+        <!-- Headroom Bracket (from 545.4ms at y=166 up to 1000ms at y=80) -->
+        <line x1="770" y1="84" x2="770" y2="162" stroke="#047857" stroke-width="1.2" marker-start="url(#d4-latency-waterfall-light-d4-l-arrow)" marker-end="url(#d4-latency-waterfall-light-d4-l-arrow)" />
+        <rect x="778" y="116" width="100" height="24" rx="4" fill="#ffffff" stroke="#047857" stroke-width="1" />
+        <text x="828" y="128" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857">+454.6ms HEADROOM</text>
+        <text x="828" y="137" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7" fill="#475569">45.5% Safety Margin</text>
+
+        <!-- ========================================== -->
+        <!-- WATERFALL BARS                             -->
+        <!-- ========================================== -->
+
+        <!-- Bar 1: Front-Door Triage (+1.2ms) -->
+        <rect x="100" y="267" width="90" height="3" rx="1.5" fill="#4338ca" />
+        <text x="145" y="258" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">+1.2ms</text>
+        <text x="145" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Triage</text>
+        <text x="145" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">Cache Check</text>
+
+        <!-- Step bridge line 1 -> 2 -->
+        <line x1="190" y1="267" x2="220" y2="267" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2,2" />
+
+        <!-- Bar 2: Stage 1 HNSW+BM25 (+8.5ms) -->
+        <rect x="220" y="265" width="90" height="3" rx="1.5" fill="#047857" />
+        <text x="265" y="256" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">+8.5ms</text>
+        <text x="265" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Stage 1</text>
+        <text x="265" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">HNSW + BM25</text>
+
+        <!-- Step bridge line 2 -> 3 -->
+        <line x1="310" y1="265" x2="340" y2="265" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2,2" />
+
+        <!-- Bar 3: Stage 2 Cypher Traversal (+0.8ms) -->
+        <rect x="340" y="264" width="90" height="2" rx="1" fill="#047857" />
+        <text x="385" y="255" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">+0.8ms</text>
+        <text x="385" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Stage 2</text>
+        <text x="385" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">2-Hop Cypher</text>
+
+        <!-- Step bridge line 3 -> 4 -->
+        <line x1="430" y1="264" x2="460" y2="264" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2,2" />
+
+        <!-- Bar 4: Stage 3 Cross-Encoder Precision Rerank (+523.7ms) - FOCAL ACCENT -->
+        <rect x="460" y="166" width="90" height="98" rx="4" fill="#0e7490" stroke="#0e7490" stroke-width="1.2" fill-opacity="0.10" />
+        <text x="505" y="156" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="600" fill="#0e7490">+523.7ms</text>
+        <text x="505" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Stage 3</text>
+        <text x="505" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">bge-reranker v2</text>
+
+        <!-- Step bridge line 4 -> 5 -->
+        <line x1="550" y1="166" x2="580" y2="166" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2,2" />
+
+        <!-- Bar 5: Assembly Overhead (+11.2ms) -->
+        <rect x="580" y="164" width="90" height="3" rx="1.5" fill="#475569" />
+        <text x="625" y="155" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">+11.2ms</text>
+        <text x="625" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Overhead</text>
+        <text x="625" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">StateGraph</text>
+
+        <!-- Total Cumulative Pillar: 545.4ms -->
+        <rect x="700" y="164" width="60" height="106" rx="4" fill="#f8fafc" stroke="#047857" stroke-width="1.2" />
+        <text x="730" y="154" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" fill="#047857">545.4ms</text>
+        <text x="730" y="286" text-anchor="middle" font-family="'Inter', sans-serif" font-size="10" font-weight="600" fill="#090d16">Total E2E</text>
+        <text x="730" y="299" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857">p95 Multi-Hop</text>
+
+        <!-- ========================================== -->
+        <!-- INSET SUMMARY CARD: TIER 1 CACHE SLA       -->
+        <!-- ========================================== -->
+        <rect x="890" y="70" width="150" height="175" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+        <rect x="890" y="70" width="150" height="26" rx="6" fill="#0e7490" fill-opacity="0.12" />
+        <text x="965" y="87" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" font-weight="600" fill="#0e7490">DUAL-SLA SUMMARY</text>
+
+        <!-- Item 1: Multi-Hop SLA -->
+        <text x="902" y="112" font-family="'Inter', sans-serif" font-size="9" font-weight="600" fill="#090d16">Multi-Hop SLA:</text>
+        <text x="902" y="125" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">545.4ms &lt; 1000ms</text>
+        <text x="902" y="137" font-family="'Geist Mono', monospace" font-size="7" fill="#475569">Status: [PASSED]</text>
+
+        <line x1="902" y1="146" x2="1028" y2="146" stroke="#e2e8f0" stroke-width="1" />
+
+        <!-- Item 2: Cache SLA -->
+        <text x="902" y="162" font-family="'Inter', sans-serif" font-size="9" font-weight="600" fill="#090d16">Tier 1 Cache SLA:</text>
+        <text x="902" y="175" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">1.2ms &lt; 25ms</text>
+        <text x="902" y="187" font-family="'Geist Mono', monospace" font-size="7" fill="#475569">Throughput: 4,076 QPS</text>
+
+        <line x1="902" y1="196" x2="1028" y2="196" stroke="#e2e8f0" stroke-width="1" />
+
+        <!-- Item 3: Overall -->
+        <rect x="902" y="206" width="126" height="24" rx="3" fill="#047857" stroke="#047857" stroke-width="0.8" fill-opacity="0.10" />
+        <text x="965" y="222" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" font-weight="600" fill="#047857">100% SLA COMPLIANT</text>
+
+        <!-- ========================================== -->
+        <!-- LEGEND STRIP (Horizontal bottom strip)      -->
+        <!-- ========================================== -->
+        <line x1="40" y1="340" x2="1040" y2="340" stroke="#cbd5e1" stroke-width="1" />
+
+        <rect x="40" y="352" width="12" height="12" rx="3" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.15" />
+        <text x="60" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">FOCAL COMPONENT</text>
+        <text x="144" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">CPU Cross-Encoder Rerank (bge-v2-m3)</text>
+
+        <rect x="390" y="352" width="12" height="12" rx="3" fill="#047857" />
+        <text x="410" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">SUB-MS STAGES</text>
+        <text x="488" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">HNSW Recall &amp; Cypher Graph Traversal</text>
+
+        <line x1="710" y1="358" x2="734" y2="358" stroke="#be123c" stroke-width="1.2" stroke-dasharray="4,3" />
+        <text x="744" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#be123c">SLA CEILING</text>
+        <text x="806" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">1,000ms Hard Performance Floor</text>
+
+      </svg>

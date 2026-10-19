@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg role="img" viewBox="0 0 1020 340" width="1020" height="340" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d8-light-title d8-light-desc" id="d8-core-lifespan-light-root">
+        <title id="d8-light-title">ApplicationCore Lifespan &amp; State Machine Diagram</title>
+        <desc id="d8-light-desc">Lifecycle phase map tracking Bootstrap, Warmup, Healthy Serving, Draining, and Teardown stages of the Lattice RAG application core.</desc>
+
+        <defs>
+      <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
+      #d8-core-lifespan-light-root { --color-paper:        #f8fafc;
+      --color-paper-2:      #ffffff;
+      --color-ink:          #0f172a;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.10);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(14, 116, 144, 0.20);
+      --color-rule-solid:   #e2e8f0;
+      --color-emerald:      #047857;
+      --color-emerald-tint: rgba(4, 120, 87, 0.10);
+      --color-amber:        #b45309;
+      --color-amber-tint:   rgba(180, 83, 9, 0.10);
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace; }
+      #d8-core-lifespan-light-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #d8-core-lifespan-light-root .lead { color: var(--color-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      max-width: 820px;
+      margin-bottom: 1.75rem; }
+      #d8-core-lifespan-light-root .diagram-card { background: var(--color-paper-2);
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08); }
+      #d8-core-lifespan-light-root .card-footer { display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--color-rule-solid);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--color-muted); }
+      #d8-core-lifespan-light-root .card-footer a { color: var(--color-accent);
+      text-decoration: none; }</style>
+          <marker id="d8-core-lifespan-light-d8-light-arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M 1 1 L 7 4 L 1 7 Z" fill="#475569"/>
+          </marker>
+          <marker id="d8-core-lifespan-light-d8-light-arr-accent" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M 1 1 L 7 4 L 1 7 Z" fill="#0e7490"/>
+          </marker>
+          <marker id="d8-core-lifespan-light-d8-light-arr-amber" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M 1 1 L 7 4 L 1 7 Z" fill="#b45309"/>
+          </marker>
+
+          <filter id="d8-core-lifespan-light-d8-light-shadow" x="-5%" y="-5%" width="110%" height="115%">
+            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+          </filter>
+        </defs>
+
+        <!-- TOP PHASE TIMELINE BAR -->
+        <g id="d8-light-timeline" opacity="0.6">
+          <line x1="25" y1="40" x2="995" y2="40" stroke="#e2e8f0" stroke-width="1.5"/>
+          <circle cx="110" cy="40" r="4" fill="#4338ca"/>
+          <circle cx="310" cy="40" r="4" fill="#4338ca"/>
+          <circle cx="510" cy="40" r="5" fill="#0e7490"/>
+          <circle cx="710" cy="40" r="4" fill="#b45309"/>
+          <circle cx="910" cy="40" r="4" fill="#047857"/>
+        </g>
+
+        <!-- ========================================== -->
+        <!-- CONNECTORS (DRAWN BEFORE NODES FOR DEPTH) -->
+        <!-- ========================================== -->
+        <g id="d8-light-connectors">
+          <!-- 1. BOOTSTRAP -> WARMUP -->
+          <line x1="195" y1="175" x2="221" y2="175" stroke="#475569" stroke-width="2" marker-end="url(#d8-core-lifespan-light-d8-light-arr)"/>
+          
+          <!-- 2. WARMUP -> HEALTHY -->
+          <line x1="395" y1="175" x2="421" y2="175" stroke="#0e7490" stroke-width="2" marker-end="url(#d8-core-lifespan-light-d8-light-arr-accent)"/>
+
+          <!-- 3. HEALTHY -> DRAINING -->
+          <line x1="595" y1="175" x2="621" y2="175" stroke="#b45309" stroke-width="2" marker-end="url(#d8-core-lifespan-light-d8-light-arr-amber)"/>
+
+          <!-- 4. DRAINING -> TEARDOWN -->
+          <line x1="795" y1="175" x2="821" y2="175" stroke="#475569" stroke-width="2" marker-end="url(#d8-core-lifespan-light-d8-light-arr)"/>
+        </g>
+
+        <!-- ========================================== -->
+        <!-- 5 LIFECYCLE PHASE NODES                    -->
+        <!-- ========================================== -->
+
+        <!-- PHASE 1: BOOTSTRAP -->
+        <g id="d8-light-node-1" filter="url(#d8-core-lifespan-light-d8-light-shadow)">
+          <rect x="25" y="65" width="170" height="235" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="37" y="77" width="55" height="18" rx="4" fill="#f1f5f9"/>
+          <text x="64" y="90" fill="#475569" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">PHASE 01</text>
+          
+          <text x="37" y="116" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">BOOTSTRAP</text>
+          <text x="37" y="132" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9.5">~5ms • Entry</text>
+
+          <line x1="37" y1="144" x2="183" y2="144" stroke="#e2e8f0" stroke-width="1"/>
+
+          <text x="37" y="164" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">• Load Settings</text>
+          <text x="37" y="184" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Decrypt SecretStr</text>
+          <text x="37" y="204" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• POSIX chmod check</text>
+          <text x="37" y="224" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Validate API keys</text>
+
+          <rect x="37" y="260" width="146" height="24" rx="4" fill="#4338ca" fill-opacity="0.10"/>
+          <text x="110" y="276" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">CONFIG_READY</text>
+        </g>
+
+        <!-- PHASE 2: WARMUP -->
+        <g id="d8-light-node-2" filter="url(#d8-core-lifespan-light-d8-light-shadow)">
+          <rect x="225" y="65" width="170" height="235" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="237" y="77" width="55" height="18" rx="4" fill="#f1f5f9"/>
+          <text x="264" y="90" fill="#475569" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">PHASE 02</text>
+          
+          <text x="237" y="116" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">WARMUP</text>
+          <text x="237" y="132" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9.5">~800ms • Init</text>
+
+          <line x1="237" y1="144" x2="383" y2="144" stroke="#e2e8f0" stroke-width="1"/>
+
+          <text x="237" y="164" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">• Open LatticeStore</text>
+          <text x="237" y="184" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Verify HNSW/BM25</text>
+          <text x="237" y="204" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Preload ONNX tok</text>
+          <text x="237" y="224" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Spawn CPU Pool</text>
+
+          <rect x="237" y="260" width="146" height="24" rx="4" fill="#4338ca" fill-opacity="0.10"/>
+          <text x="310" y="276" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">STORE_WARMED</text>
+        </g>
+
+        <!-- PHASE 3: HEALTHY (SERVING - FOCAL ACCENT) -->
+        <g id="d8-light-node-3" filter="url(#d8-core-lifespan-light-d8-light-shadow)">
+          <rect x="425" y="65" width="170" height="235" rx="8" fill="#ffffff" stroke="#0e7490" stroke-width="2"/>
+          <rect x="437" y="77" width="55" height="18" rx="4" fill="#0e7490" fill-opacity="0.15"/>
+          <text x="464" y="90" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">PHASE 03</text>
+          
+          <text x="437" y="116" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">HEALTHY</text>
+          <text x="437" y="132" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9.5">Serving • Port 8000</text>
+
+          <line x1="437" y1="144" x2="583" y2="144" stroke="#e2e8f0" stroke-width="1"/>
+
+          <text x="437" y="164" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">• Granian Rust ASGI</text>
+          <text x="437" y="184" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• /health Probe: 200</text>
+          <text x="437" y="204" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Sub-sec RAG Flow</text>
+          <text x="437" y="224" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Tier 1 Vector Cache</text>
+
+          <rect x="437" y="260" width="146" height="24" rx="4" fill="#0e7490" stroke="#0e7490" stroke-width="1" fill-opacity="0.15"/>
+          <text x="510" y="276" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9" font-weight="700" text-anchor="middle">SERVING_ACTIVE</text>
+        </g>
+
+        <!-- PHASE 4: DRAINING -->
+        <g id="d8-light-node-4" filter="url(#d8-core-lifespan-light-d8-light-shadow)">
+          <rect x="625" y="65" width="170" height="235" rx="8" fill="#ffffff" stroke="#b45309" stroke-width="1.5"/>
+          <rect x="637" y="77" width="55" height="18" rx="4" fill="#b45309" fill-opacity="0.12"/>
+          <text x="664" y="90" fill="#b45309" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">PHASE 04</text>
+          
+          <text x="637" y="116" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">DRAINING</text>
+          <text x="637" y="132" fill="#b45309" font-family="'Geist Mono', monospace" font-size="9.5">SIGTERM Received</text>
+
+          <line x1="637" y1="144" x2="783" y2="144" stroke="#e2e8f0" stroke-width="1"/>
+
+          <text x="637" y="164" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">• Ingress Sealed</text>
+          <text x="637" y="184" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Complete in-flight</text>
+          <text x="637" y="204" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Drain SSE streams</text>
+          <text x="637" y="224" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Max timeout: 10s</text>
+
+          <rect x="637" y="260" width="146" height="24" rx="4" fill="#b45309" fill-opacity="0.12"/>
+          <text x="710" y="276" fill="#b45309" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">DRAIN_INFLIGHT</text>
+        </g>
+
+        <!-- PHASE 5: TEARDOWN -->
+        <g id="d8-light-node-5" filter="url(#d8-core-lifespan-light-d8-light-shadow)">
+          <rect x="825" y="65" width="170" height="235" rx="8" fill="#ffffff" stroke="#047857" stroke-width="1.5"/>
+          <rect x="837" y="77" width="55" height="18" rx="4" fill="#047857" fill-opacity="0.12"/>
+          <text x="864" y="90" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">PHASE 05</text>
+          
+          <text x="837" y="116" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">TEARDOWN</text>
+          <text x="837" y="132" fill="#047857" font-family="'Geist Mono', monospace" font-size="9.5">Clean Exit • Code 0</text>
+
+          <line x1="837" y1="144" x2="983" y2="144" stroke="#e2e8f0" stroke-width="1"/>
+
+          <text x="837" y="164" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">• Flush WAL log</text>
+          <text x="837" y="184" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Close LatticeDB</text>
+          <text x="837" y="204" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Disconnect Redis</text>
+          <text x="837" y="224" fill="#475569" font-family="'Inter', sans-serif" font-size="10">• Close HTTP Pools</text>
+
+          <rect x="837" y="260" width="146" height="24" rx="4" fill="#047857" fill-opacity="0.12"/>
+          <text x="910" y="276" fill="#047857" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" text-anchor="middle">TERMINATED_OK</text>
+        </g>
+      </svg>

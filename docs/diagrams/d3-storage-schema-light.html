@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lattice RAG — LatticeDB Storage Schema (Light)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:        #f8fafc;
+      --color-paper-2:      #f1f5f9;
+      --color-ink:          #090d16;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.08);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(9, 13, 22, 0.12);
+      --color-rule-solid:   #cbd5e1;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame {
+      max-width: 1140px;
+      width: 100%;
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.6rem, 2.4vw + 0.75rem, 2.2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    .diagram-container {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 1rem 0;
+    }
+
+    svg {
+      width: 100%;
+      min-width: 1080px;
+      display: block;
+    }
+
+    @media print {
+      body { padding: 0; background: #ffffff; }
+      svg { min-width: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="eyebrow">STORAGE &amp; SCHEMA // IN-PROCESS LATTICEDB</div>
+    <h1>Hierarchical Graph &amp; Dual-Index Data Model</h1>
+    <div class="diagram-container">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 380" role="img" aria-labelledby="d3-light-title d3-light-desc">
+        <title id="d3-light-title">LatticeDB Hierarchical Graph and Dual-Index Data Model (Light Mode)</title>
+        <desc id="d3-light-desc">Entity-relationship diagram showing Document, Chunk, and Entity models connected to unified HNSW vector and BM25 full-text indices with multi-hop Cypher traversal edges in light mode.</desc>
+        <defs>
+          <marker id="d3-l-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#475569" />
+          </marker>
+          <marker id="d3-l-arrow-accent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#0e7490" />
+          </marker>
+          <marker id="d3-l-arrow-link" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#4338ca" />
+          </marker>
+        </defs>
+
+        <!-- Canvas Background -->
+        <rect x="0" y="0" width="1080" height="380" fill="#ffffff" />
+
+        <!-- ========================================== -->
+        <!-- CONNECTORS (Drawn first to sit behind nodes) -->
+        <!-- ========================================== -->
+
+        <!-- E1: Document -> Chunk (HAS_CHUNK) -->
+        <line x1="250" y1="120" x2="310" y2="120" stroke="#475569" stroke-width="1.2" marker-end="url(#d3-l-arrow)" />
+        <rect x="254" y="112" width="50" height="15" fill="#ffffff" />
+        <text x="279" y="123" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#475569">HAS_CHUNK</text>
+
+        <!-- E2: Chunk -> Entity (CONTAINS grounding) -->
+        <line x1="560" y1="120" x2="620" y2="120" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d3-l-arrow-accent)" />
+        <rect x="568" y="112" width="44" height="15" fill="#ffffff" />
+        <text x="590" y="123" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">CONTAINS</text>
+
+        <!-- E3: Entity -> Entity (Self-loop RELATION 1-2 hop Cypher) -->
+        <path d="M 750 60 L 750 44 A 8 8 0 0 1 758 36 L 802 36 A 8 8 0 0 1 810 44 L 810 60" fill="none" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d3-l-arrow-accent)" />
+        <rect x="758" y="28" width="52" height="15" fill="#ffffff" />
+        <text x="784" y="39" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">RELATION (2-Hop)</text>
+
+        <!-- E4: Chunk -> IndexCatalog (Downwards r=8 elbow) -->
+        <path d="M 435 220 L 435 244 A 8 8 0 0 0 443 252 L 490 252" fill="none" stroke="#4338ca" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d3-l-arrow-link)" />
+        <rect x="440" y="244" width="44" height="15" fill="#ffffff" />
+        <text x="462" y="255" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7" fill="#4338ca">INDEXES</text>
+
+        <!-- E5: Entity -> IndexCatalog (Downwards r=8 elbow) -->
+        <path d="M 740 220 L 740 244 A 8 8 0 0 1 732 252 L 690 252" fill="none" stroke="#4338ca" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d3-l-arrow-link)" />
+        <rect x="696" y="244" width="34" height="15" fill="#ffffff" />
+        <text x="713" y="255" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="7" fill="#4338ca">HNSW</text>
+
+        <!-- ========================================== -->
+        <!-- ENTITY 1: :Document                        -->
+        <!-- ========================================== -->
+        <rect x="40" y="60" width="210" height="160" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <rect x="40" y="60" width="210" height="32" rx="6" fill="rgba(9,13,22,0.06)" />
+        <text x="52" y="80" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">:Document</text>
+        <text x="190" y="80" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">NODE</text>
+        <line x1="40" y1="92" x2="250" y2="92" stroke="#cbd5e1" stroke-width="1" />
+
+        <!-- Fields -->
+        <text x="52" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">doc_id</text>
+        <text x="140" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">string</text>
+        <text x="210" y="112" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857">PK</text>
+
+        <text x="52" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">title</text>
+        <text x="140" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">string</text>
+
+        <text x="52" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">source_uri</text>
+        <text x="140" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">string</text>
+
+        <text x="52" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">chunk_count</text>
+        <text x="140" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">int</text>
+
+        <text x="52" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">created_at</text>
+        <text x="140" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">timestamp</text>
+
+        <!-- ========================================== -->
+        <!-- ENTITY 2: :Chunk                           -->
+        <!-- ========================================== -->
+        <rect x="310" y="60" width="250" height="160" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <rect x="310" y="60" width="250" height="32" rx="6" fill="rgba(9,13,22,0.06)" />
+        <text x="322" y="80" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">:Chunk</text>
+        <text x="500" y="80" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">TEXT NODE</text>
+        <line x1="310" y1="92" x2="560" y2="92" stroke="#cbd5e1" stroke-width="1" />
+
+        <!-- Fields -->
+        <text x="322" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">id</text>
+        <text x="420" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">int</text>
+        <text x="520" y="112" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857">PK</text>
+
+        <text x="322" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">doc_id</text>
+        <text x="420" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">string</text>
+        <text x="520" y="134" font-family="'Geist Mono', monospace" font-size="7.5" fill="#4338ca">FK</text>
+
+        <text x="322" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">text</text>
+        <text x="420" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">string</text>
+        <text x="488" y="156" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">BM25 @@</text>
+
+        <text x="322" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">position</text>
+        <text x="420" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">int</text>
+
+        <text x="322" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#090d16">embedding</text>
+        <text x="420" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#475569">vec[384]</text>
+        <text x="488" y="200" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">HNSW &lt;=&gt;</text>
+
+        <!-- ========================================== -->
+        <!-- ENTITY 3: :Entity (FOCAL ACCENT)          -->
+        <!-- ========================================== -->
+        <rect x="620" y="60" width="240" height="160" rx="6" fill="rgba(14,116,144,0.08)" stroke="#0e7490" stroke-width="1.2" />
+        <rect x="620" y="60" width="240" height="32" rx="6" fill="rgba(14,116,144,0.18)" />
+        <text x="632" y="80" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#0e7490">:Entity</text>
+        <text x="770" y="80" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">GRAPH NODE</text>
+        <line x1="620" y1="92" x2="860" y2="92" stroke="#0e7490" stroke-width="1" />
+
+        <!-- Fields -->
+        <text x="632" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">id</text>
+        <text x="730" y="112" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">int</text>
+        <text x="815" y="112" font-family="'Geist Mono', monospace" font-size="7.5" fill="#047857">PK</text>
+
+        <text x="632" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">name</text>
+        <text x="730" y="134" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">string</text>
+        <text x="795" y="134" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">FTS INDEX</text>
+
+        <text x="632" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">entity_type</text>
+        <text x="730" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">string</text>
+        <text x="800" y="156" font-family="'Geist Mono', monospace" font-size="7.5" fill="#4338ca">TAXONOMY</text>
+
+        <text x="632" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">embedding</text>
+        <text x="730" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">vec[384]</text>
+        <text x="795" y="178" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">HNSW &lt;=&gt;</text>
+
+        <text x="632" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">mention_count</text>
+        <text x="730" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">int</text>
+
+        <!-- ========================================== -->
+        <!-- ENTITY 4: :IndexCatalog (Virtual Catalog)  -->
+        <!-- ========================================== -->
+        <rect x="490" y="232" width="200" height="90" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+        <rect x="490" y="232" width="200" height="26" rx="6" fill="rgba(67,56,202,0.10)" />
+        <text x="502" y="249" font-family="'Inter', sans-serif" font-size="11" font-weight="600" fill="#4338ca">:IndexCatalog</text>
+        <text x="625" y="249" font-family="'Geist Mono', monospace" font-size="7.5" fill="#4338ca">IN-PROCESS</text>
+        <line x1="490" y1="258" x2="690" y2="258" stroke="#cbd5e1" stroke-width="1" />
+
+        <text x="502" y="274" font-family="'Geist Mono', monospace" font-size="8" fill="#090d16">HNSW Index</text>
+        <text x="580" y="274" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">&lt;=&gt; Cosine L2 (sub-ms)</text>
+
+        <text x="502" y="292" font-family="'Geist Mono', monospace" font-size="8" fill="#090d16">BM25 Index</text>
+        <text x="580" y="292" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">@@ Full-Text Inverted</text>
+
+        <text x="502" y="310" font-family="'Geist Mono', monospace" font-size="8" fill="#090d16">Cypher Engine</text>
+        <text x="580" y="310" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">Direct C Pointers</text>
+
+        <!-- ========================================== -->
+        <!-- LEGEND STRIP (Horizontal bottom strip)      -->
+        <!-- ========================================== -->
+        <line x1="40" y1="340" x2="1040" y2="340" stroke="#cbd5e1" stroke-width="1" />
+
+        <rect x="40" y="352" width="12" height="12" rx="3" fill="rgba(14,116,144,0.12)" stroke="#0e7490" stroke-width="1" />
+        <text x="60" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">FOCAL ENTITY</text>
+        <text x="132" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">LatticeDB Knowledge Graph Node</text>
+
+        <line x1="340" y1="358" x2="364" y2="358" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d3-l-arrow-accent)" />
+        <text x="374" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">CYPHER RELATION</text>
+        <text x="466" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Multi-Hop Dynamic Edge</text>
+
+        <line x1="640" y1="358" x2="664" y2="358" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d3-l-arrow-link)" />
+        <text x="674" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">DUAL-INDEX</text>
+        <text x="740" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Unified HNSW &lt;=&gt; and BM25 @@</text>
+
+        <line x1="910" y1="358" x2="934" y2="358" stroke="#475569" stroke-width="1.2" marker-end="url(#d3-l-arrow)" />
+        <text x="944" y="361" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">HIERARCHY</text>
+        <text x="1000" y="361" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">1:N Chunking</text>
+
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

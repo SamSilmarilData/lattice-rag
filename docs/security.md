@@ -6,25 +6,13 @@
 
 ## 1. Multi-Layer Security Boundary
 
-```mermaid
-flowchart LR
-    UserInput([User / apikeys.md]) --> SetupScript["lattice-rag setup-keys"]
-    SetupScript --> DotEnv[Secure .env chmod 600]
-    SetupScript --> Shred[Delete apikeys.md]
-    
-    subgraph GitBoundary [Git Protection Boundary]
-        GitIgnore[.gitignore: Block .env, apikeys.md, *.key, *.db]
-        EnvExample[.env.example: Blank Placeholders]
-    end
-    
-    subgraph RuntimeMemory [Process & Runtime Memory Boundary]
-        DotEnv --> ConfigLoader[lattice_rag.config: load_config]
-        ConfigLoader --> SecretStrType[SecretStr: Mask in __repr__ and __str__]
-        SecretStrType --> LogFilter[RedactingFilter: Scrub logging output]
-        SecretStrType --> ErrorSanitizer[RFC 9457 Sanitizer: Strip headers]
-        SecretStrType --> DTOBoundary[DTO Exclusion: Never serialize keys]
-    end
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d7-security-boundary-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d7-security-boundary-light.svg">
+  <img alt="Multi-Layer Zero-Trust Security Boundary" src="diagrams/d7-security-boundary-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d7-security-boundary-dark.html">Dark Specimen</a> | <a href="diagrams/d7-security-boundary-light.html">Light Specimen</a></sub>
 
 ---
 

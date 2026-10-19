@@ -23,6 +23,14 @@ Traditional GraphRAG architectures suffer from severe cloud latency inflation an
 
 The following empirical metrics were captured under real-world multi-hop graph retrieval workloads on an Apple Silicon M-series host (8 cores, unified memory) on a seeded database of 34 nodes and 41 relations:
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d4-latency-waterfall-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d4-latency-waterfall-light.svg">
+  <img alt="End-to-End Latency Waterfall Breakdown" src="diagrams/d4-latency-waterfall-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d4-latency-waterfall-dark.html">Dark Specimen</a> | <a href="diagrams/d4-latency-waterfall-light.html">Light Specimen</a></sub>
+
 ```
 +--------------------------------------------------+--------+--------+--------+--------+--------+--------+
 | Pipeline Stage                                   | p50    | p90    | p95    | p99    | Mean   | QPS    |
@@ -73,6 +81,14 @@ The following empirical metrics were captured under real-world multi-hop graph r
 ---
 
 ## 4. In-Process vs Cloud-Hosted Vector/Graph Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d5-architecture-delta-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d5-architecture-delta-light.svg">
+  <img alt="In-Process vs Cloud-Hosted Vector/Graph Architecture Comparison" src="diagrams/d5-architecture-delta-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d5-architecture-delta-dark.html">Dark Specimen</a> | <a href="diagrams/d5-architecture-delta-light.html">Light Specimen</a></sub>
 
 | Dimension | `lattice-rag` (In-Process) | Traditional Cloud GraphRAG Stack |
 |---|---|---|

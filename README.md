@@ -20,46 +20,13 @@ Traditional GraphRAG architectures suffer from heavy JVM database footprints (Ne
 
 `lattice-rag` eliminates these bottlenecks through an **entirely in-process, single-binary architecture**:
 
-```mermaid
-flowchart TD
-    UserQuery([User Query / Ingestion]) --> LitestarServer[Litestar 2.24 + Granian Rust ASGI]
-    
-    subgraph FrontDoorTriage [Concurrent Front-Door Triage]
-        LitestarServer --> Gather[asyncio.gather]
-        Gather --> CacheCheck[Tier 1: Semantic Vector Cache]
-        Gather --> JevRouter[TypeSafe AI Jev: Choice Primitive Router]
-    end
-    
-    CacheCheck -- "Match >= 0.90 & Jev Noul Verified" --> InstantReturn[Instant Return < 20ms]
-    
-    JevRouter -- "'chitchat'" --> StaticResponse[Instant Static Response]
-    JevRouter -- "'massive_context'" --> GeminiFlag[Flag Gemini 2.5 Flash]
-    JevRouter -- "'vector_exact' | 'graph_relational' | 'hybrid'" --> LangGraphLoop[LangGraph Agentic StateGraph]
-    
-    subgraph ProcessPoolIsolation [ProcessPoolExecutor CPU Isolation]
-        FastEmbedEmbed[FastEmbed: ONNX Dense/Sparse Embeddings]
-        GLiNERWorker[GLiNER2.5-Decide: Local Triple Extraction]
-        CrossEncoder[FastEmbed: BGE-Reranker-v2-m3 Cross-Encoder]
-    end
-    
-    LangGraphLoop --> Stage1[Stage 1: LatticeDB HNSW Vector + BM25 Recall]
-    Stage1 --> Stage2[Stage 2: LatticeDB Cypher 1-2 Hop Traversal max 25 nodes]
-    Stage2 --> Stage3[Stage 3: Cross-Encoder Precision Reranking]
-    
-    Stage3 --> Guardrail[TypeSafe AI Jev: Noul Guardrail Noise Pruning]
-    
-    Guardrail --> CircuitBreaker{pybreaker Circuit Breaker}
-    CircuitBreaker -- "Normal" --> GroqLLM[GroqCloud: Llama 3.3 / DeepSeek-R1 @ 200+ tok/s]
-    CircuitBreaker -- "Groq Outage / 429" --> GeminiFallback[Cascade 1: Gemini 2.5 Flash]
-    GeminiFallback -- "Gemini Outage / Timeout" --> RedisFallback[Cascade 2: Tier 2 Redis Hash Top 50 FAQ]
-    GeminiFlag --> GeminiLLM[Google AI Studio: Gemini 2.5 Flash]
-    
-    GroqLLM --> SSEStream[Litestar SSE Stream / JSON Response]
-    GeminiFallback --> SSEStream
-    RedisFallback --> SSEStream
-    GeminiLLM --> SSEStream
-    StaticResponse --> SSEStream
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/d1-architecture-hero-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/diagrams/d1-architecture-hero-light.svg">
+  <img alt="Lattice RAG In-Process Architecture" src="docs/diagrams/d1-architecture-hero-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="docs/diagrams/d1-architecture-hero-dark.html">Dark Specimen</a> | <a href="docs/diagrams/d1-architecture-hero-light.html">Light Specimen</a></sub>
 
 ---
 

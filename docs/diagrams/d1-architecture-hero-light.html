@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lattice RAG — Zero-Cost Architecture (Light)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:        #f8fafc;
+      --color-paper-2:      #f1f5f9;
+      --color-ink:          #090d16;
+      --color-muted:        #475569;
+      --color-soft:         #64748b;
+      --color-accent:       #0e7490;
+      --color-accent-tint:  rgba(14, 116, 144, 0.08);
+      --color-link:         #4338ca;
+      --color-rule:         rgba(9, 13, 22, 0.12);
+      --color-rule-solid:   #cbd5e1;
+      --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
+      --font-serif:         'Instrument Serif', 'Noto Serif', serif;
+      --font-mono:          'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame {
+      max-width: 1140px;
+      width: 100%;
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.6rem, 2.4vw + 0.75rem, 2.2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    .diagram-container {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--color-rule-solid);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 1rem 0;
+    }
+
+    svg {
+      width: 100%;
+      min-width: 1100px;
+      display: block;
+    }
+
+    @media print {
+      body { padding: 0; background: #ffffff; }
+      svg { min-width: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="eyebrow">ZERO-CLOUD-COST PRODUCTION RAG</div>
+    <h1>In-Process Single-Binary Architecture</h1>
+    <div class="diagram-container">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 350" role="img" aria-labelledby="d1-light-title d1-light-desc">
+        <title id="d1-light-title">Lattice RAG Zero-Cost Single-Binary Architecture (Light Mode)</title>
+        <desc id="d1-light-desc">High-level architecture showing Litestar Granian Rust ASGI, TypeSafe AI Jev router, LatticeDB in-process graph engine, FastEmbed ONNX workers, and GroqCloud streaming output in high-contrast light mode.</desc>
+        <defs>
+          <marker id="d1-l-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#475569" />
+          </marker>
+          <marker id="d1-l-arrow-accent" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#0e7490" />
+          </marker>
+          <marker id="d1-l-arrow-link" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 1 2 L 8 5 L 1 8 Z" fill="#4338ca" />
+          </marker>
+        </defs>
+
+        <!-- Canvas Background -->
+        <rect x="0" y="0" width="1100" height="350" fill="#ffffff" />
+
+        <!-- ========================================== -->
+        <!-- CONNECTORS (Drawn first to sit behind nodes) -->
+        <!-- ========================================== -->
+
+        <!-- C1: Client -> Litestar -->
+        <line x1="188" y1="154" x2="240" y2="154" stroke="#475569" stroke-width="1" marker-end="url(#d1-l-arrow)" />
+        <rect x="198" y="146" width="32" height="16" fill="#ffffff" />
+        <text x="214" y="157" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#475569" letter-spacing="0.06em">INGRESS</text>
+
+        <!-- C2: Litestar -> Jev Router (r=8 elbow) -->
+        <path d="M 396 138 L 412 138 A 8 8 0 0 0 420 130 L 420 98 A 8 8 0 0 1 428 90 L 448 90" fill="none" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d1-l-arrow-link)" />
+        <rect x="402" y="106" width="36" height="16" fill="#ffffff" />
+        <text x="420" y="117" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca" letter-spacing="0.06em">ROUTE</text>
+
+        <!-- C3: Litestar -> Semantic Cache (r=8 elbow) -->
+        <path d="M 396 170 L 412 170 A 8 8 0 0 1 420 178 L 420 210 A 8 8 0 0 0 428 218 L 448 218" fill="none" stroke="#475569" stroke-width="1" marker-end="url(#d1-l-arrow)" />
+        <rect x="400" y="186" width="40" height="16" fill="#ffffff" />
+        <text x="420" y="197" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#475569" letter-spacing="0.06em">LOOKUP</text>
+
+        <!-- C4: Jev Router -> LatticeDB (Focal Accent Path) -->
+        <line x1="620" y1="90" x2="672" y2="90" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d1-l-arrow-accent)" />
+        <rect x="626" y="82" width="40" height="16" fill="#ffffff" />
+        <text x="646" y="93" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490" letter-spacing="0.06em">CYPHER</text>
+
+        <!-- C5: Cache -> FastEmbed Workers -->
+        <line x1="620" y1="218" x2="672" y2="218" stroke="#475569" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d1-l-arrow)" />
+        <rect x="632" y="210" width="28" height="16" fill="#ffffff" />
+        <text x="646" y="221" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#475569" letter-spacing="0.06em">MISS</text>
+
+        <!-- C6: LatticeDB -> GroqCloud (Focal Accent Path via r=8 elbow) -->
+        <path d="M 844 90 L 860 90 A 8 8 0 0 1 868 98 L 868 130 A 8 8 0 0 0 876 138 L 896 138" fill="none" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d1-l-arrow-accent)" />
+        <rect x="850" y="106" width="36" height="16" fill="#ffffff" />
+        <text x="868" y="117" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490" letter-spacing="0.06em">GRAPH</text>
+
+        <!-- C7: FastEmbed -> GroqCloud (via r=8 elbow) -->
+        <path d="M 844 218 L 860 218 A 8 8 0 0 0 868 210 L 868 178 A 8 8 0 0 1 876 170 L 896 170" fill="none" stroke="#475569" stroke-width="1" marker-end="url(#d1-l-arrow)" />
+        <rect x="848" y="186" width="40" height="16" fill="#ffffff" />
+        <text x="868" y="197" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#475569" letter-spacing="0.06em">RERANK</text>
+
+        <!-- ========================================== -->
+        <!-- NODES (Masked and styled with role tokens) -->
+        <!-- ========================================== -->
+
+        <!-- N1: Client Ingress -->
+        <rect x="40" y="120" width="148" height="68" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="1" />
+        <rect x="50" y="128" width="56" height="13" rx="2" fill="rgba(100,116,139,0.12)" />
+        <text x="54" y="138" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#64748b" letter-spacing="0.14em">INGRESS</text>
+        <text x="50" y="156" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">Client Query</text>
+        <text x="50" y="171" font-family="'Geist Mono', monospace" font-size="9" fill="#475569">HTTP / SSE Stream</text>
+        <text x="130" y="138" font-family="'Geist Mono', monospace" font-size="7" fill="#0e7490">&lt;20ms</text>
+
+        <!-- N2: Litestar 2.24 Gateway -->
+        <rect x="240" y="120" width="156" height="68" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <rect x="250" y="128" width="60" height="13" rx="2" fill="rgba(9,13,22,0.06)" />
+        <text x="254" y="138" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#475569" letter-spacing="0.14em">RUST ASGI</text>
+        <text x="250" y="156" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">Litestar 2.24</text>
+        <text x="250" y="171" font-family="'Geist Mono', monospace" font-size="9" fill="#475569">Granian + msgspec</text>
+        <text x="330" y="138" font-family="'Geist Mono', monospace" font-size="7" fill="#047857">2-4x QPS</text>
+
+        <!-- N3: TypeSafe AI Jev (FOCAL ACCENT 1) -->
+        <rect x="448" y="56" width="172" height="68" rx="6" fill="rgba(14,116,144,0.08)" stroke="#0e7490" stroke-width="1.2" />
+        <rect x="458" y="64" width="62" height="13" rx="2" fill="rgba(14,116,144,0.18)" />
+        <text x="462" y="74" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#0e7490" letter-spacing="0.14em">SYSTEM 1</text>
+        <text x="458" y="92" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#0e7490">TypeSafe AI Jev</text>
+        <text x="458" y="107" font-family="'Geist Mono', monospace" font-size="9" fill="#0e7490">Choice Router &lt;10ms</text>
+        <text x="548" y="74" font-family="'Geist Mono', monospace" font-size="7" fill="#0e7490">$0.00 COST</text>
+
+        <!-- N4: Semantic Vector Cache -->
+        <rect x="448" y="184" width="172" height="68" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+        <rect x="458" y="192" width="58" height="13" rx="2" fill="rgba(71,85,105,0.08)" />
+        <text x="462" y="202" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#475569" letter-spacing="0.14em">CACHE T1</text>
+        <text x="458" y="220" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">Tier-1 Cache</text>
+        <text x="458" y="235" font-family="'Geist Mono', monospace" font-size="9" fill="#475569">Cosine Sim &gt;= 0.90</text>
+        <text x="540" y="202" font-family="'Geist Mono', monospace" font-size="7" fill="#047857">0.2ms p50</text>
+
+        <!-- N5: LatticeDB Engine (FOCAL ACCENT 2) -->
+        <rect x="672" y="56" width="172" height="68" rx="6" fill="rgba(14,116,144,0.08)" stroke="#0e7490" stroke-width="1.2" />
+        <rect x="682" y="64" width="66" height="13" rx="2" fill="rgba(14,116,144,0.18)" />
+        <text x="686" y="74" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#0e7490" letter-spacing="0.14em">GRAPH DB</text>
+        <text x="682" y="92" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#0e7490">LatticeDB Engine</text>
+        <text x="682" y="107" font-family="'Geist Mono', monospace" font-size="9" fill="#0e7490">HNSW + Cypher Traversal</text>
+        <text x="768" y="74" font-family="'Geist Mono', monospace" font-size="7" fill="#0e7490">0 NET HOPS</text>
+
+        <!-- N6: ProcessPoolExecutor ML Workers -->
+        <rect x="672" y="184" width="172" height="68" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <rect x="682" y="192" width="72" height="13" rx="2" fill="rgba(9,13,22,0.06)" />
+        <text x="686" y="202" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#475569" letter-spacing="0.14em">CPU POOL</text>
+        <text x="682" y="220" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">FastEmbed ONNX</text>
+        <text x="682" y="235" font-family="'Geist Mono', monospace" font-size="9" fill="#475569">BGE Reranker v2-m3</text>
+        <text x="774" y="202" font-family="'Geist Mono', monospace" font-size="7" fill="#475569">8K CTX</text>
+
+        <!-- N7: GroqCloud Synthesis -->
+        <rect x="896" y="120" width="164" height="68" rx="6" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <rect x="906" y="128" width="64" height="13" rx="2" fill="rgba(9,13,22,0.06)" />
+        <text x="910" y="138" font-family="'Geist Mono', monospace" font-size="7" font-weight="500" fill="#475569" letter-spacing="0.14em">SYNTHESIS</text>
+        <text x="906" y="156" font-family="'Inter', sans-serif" font-size="12" font-weight="600" fill="#090d16">GroqCloud Engine</text>
+        <text x="906" y="171" font-family="'Geist Mono', monospace" font-size="9" fill="#475569">Llama 3.3 / DeepSeek</text>
+        <text x="990" y="138" font-family="'Geist Mono', monospace" font-size="7" fill="#047857">200+ T/S</text>
+
+        <!-- ========================================== -->
+        <!-- LEGEND STRIP (Horizontal bottom strip)      -->
+        <!-- ========================================== -->
+        <line x1="40" y1="292" x2="1060" y2="292" stroke="#cbd5e1" stroke-width="1" />
+
+        <!-- Legend Item 1 -->
+        <rect x="40" y="304" width="14" height="14" rx="3" fill="rgba(14,116,144,0.12)" stroke="#0e7490" stroke-width="1.2" />
+        <text x="62" y="315" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">FOCAL ACCENT</text>
+        <text x="136" y="315" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">TypeSafe Jev Router &amp; LatticeDB Core</text>
+
+        <!-- Legend Item 2 -->
+        <rect x="370" y="304" width="14" height="14" rx="3" fill="#ffffff" stroke="#090d16" stroke-width="1" />
+        <text x="392" y="315" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">BACKEND</text>
+        <text x="444" y="315" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Litestar ASGI &amp; ProcessPool Workers</text>
+
+        <!-- Legend Item 3 -->
+        <line x1="680" y1="311" x2="704" y2="311" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d1-l-arrow-link)" />
+        <text x="714" y="315" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">LINK / ROUTE</text>
+        <text x="786" y="315" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">System 1 Deterministic Path</text>
+
+        <!-- Legend Item 4 -->
+        <line x1="930" y1="311" x2="954" y2="311" stroke="#475569" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d1-l-arrow)" />
+        <text x="964" y="315" font-family="'Geist Mono', monospace" font-size="8" fill="#475569">ASYNC / CACHE</text>
+        <text x="1038" y="315" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Store</text>
+
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

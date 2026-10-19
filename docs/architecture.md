@@ -22,65 +22,13 @@ Traditional RAG and GraphRAG architectures introduce severe performance and cost
 
 The following sequence diagram illustrates the lifecycle of a user query through the system:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client
-    participant API as Litestar / Granian
-    participant Cache as Tier 1 Vector Cache
-    participant Router as TypeSafe Jev Router
-    participant Store as LatticeDB Store
-    participant Rerank as FastEmbed Cross-Encoder
-    participant Guard as Jev Noul Guardrail
-    participant Breaker as pybreaker Circuit
-    participant Groq as GroqCloud (Primary)
-    participant Redis as Tier 2 Redis Hash
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d2-query-lifecycle-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d2-query-lifecycle-light.svg">
+  <img alt="Lattice RAG Query Execution Lifecycle" src="diagrams/d2-query-lifecycle-dark.svg" width="100%">
+</picture>
 
-    Client->>API: POST /api/v1/query (JSON or SSE)
-    
-    par Concurrent Front-Door Triage
-        API->>Cache: Check semantic vector similarity
-        API->>Router: Jev Choice evaluation (70-500ms)
-    end
-
-    alt Semantic Cache Hit (>= 0.90 + Jev Noul Verified)
-        Cache-->>API: Return cached synthesis (< 20ms)
-        API-->>Client: Response (latency: ~15ms)
-    else Route is 'chitchat'
-        Router-->>API: 'chitchat'
-        API-->>Client: Instant deterministic conversational response (0 LLM cost)
-    else Route is 'vector_exact', 'graph_relational', or 'hybrid'
-        Note over API,Store: Stage 1: Vector + BM25 Hybrid Search
-        API->>Store: HNSW vector_search + BM25 fts_search
-        Store-->>API: Top 10 candidate chunks via RRF fusion
-
-        Note over API,Store: Stage 2: Relational Graph Traversal
-        API->>Store: traverse_from_entities(anchor_ids, hops=1..2, max=25)
-        Store-->>API: Subgraph (nodes, edges, relations)
-
-        Note over API,Rerank: Stage 3: Cross-Encoder Reranking
-        API->>Rerank: Score chunks + linearized graph paths
-        Rerank-->>API: Top 5 compressed candidate contexts
-
-        Note over API,Guard: Context Guardrail
-        API->>Guard: Batch Jev Noul relevance check
-        Guard-->>API: Pruned, verified factual context
-
-        Note over API,Breaker: Generation Cascade
-        API->>Breaker: Call primary generation
-        alt Circuit Closed (Normal)
-            Breaker->>Groq: Stream qwen/qwen3.8-27b (200+ tok/s)
-            Groq-->>API: Streaming tokens
-            API-->>Client: Streamed response + Subgraph metadata
-        else Circuit Tripped / Groq 429
-            Breaker->>Gemini: Cascade 1: gemini-3.8-flash
-            Gemini-->>API: Synthesized fallback
-            Breaker->>Redis: Cascade 2: Fallback HGET cache:fallback:queries
-            Redis-->>API: Pre-computed domain response
-            API-->>Client: Response with degraded-mode notice
-        end
-    end
-```
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d2-query-lifecycle-dark.html">Dark Specimen</a> | <a href="diagrams/d2-query-lifecycle-light.html">Light Specimen</a></sub>
 
 ---
 
@@ -117,8 +65,20 @@ Instead of invoking large generative models for intent recognition, `lattice-rag
 3. **Stage 3 (Precision Reranking):** FastEmbed runs a CPU-quantized Cross-Encoder (`bge-reranker-v2-m3`) scoring combined text chunks and linearized graph triples (`[Entity A] -> [RELATION] -> [Entity B]`) to isolate the definitive top 5 chunks.
 
 ### 3.5 Multi-Tier Caching & Circuit Breaker
-- **Tier 1 (Semantic Vector Cache):** Evaluates incoming query against in-memory query embeddings. If cosine similarity $\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence, returning the response in under 20ms.
-- **Tier 2 (Circuit Breaker & Redis Hash Fallback):** `pybreaker` monitors Groq API calls (fail max=3, reset=30s). On failure or rate-limiting, it cascades to Google Gemini 3.8 Flash, then to a pre-computed Redis hash map (`cache:fallback:queries`) of the top 50 domain queries.
+
+The synthesis generation subsystem employs an automated finite state machine circuit breaker (`pybreaker`) paired with a 3-tier cascade fallback pipeline:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d6-circuit-breaker-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d6-circuit-breaker-light.svg">
+  <img alt="3-Tier Resilient Circuit Breaker Cascade" src="diagrams/d6-circuit-breaker-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d6-circuit-breaker-dark.html">Dark Specimen</a> | <a href="diagrams/d6-circuit-breaker-light.html">Light Specimen</a></sub>
+
+- **Tier 1 (Semantic Vector Cache & Primary Groq):** Evaluates incoming query against in-memory query embeddings. If cosine similarity $\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence, returning the response in under 20ms. Standard non-cached queries route to primary **GroqCloud Llama 3.3** (`200+ tok/s`).
+- **Tier 2 (Circuit Breaker & Cascade 1 Fallback):** `pybreaker` monitors Groq API calls (`fail_max=3`, `reset_timeout=30s`). On 3 consecutive failures or 429 rate limits, the circuit trips to `OPEN`, diverting traffic transparently to **Google Gemini 3.8 Flash** (massive context & high resilience). After 30s, the breaker transitions to `HALF-OPEN` to evaluate a single canary probe.
+- **Tier 3 (Cascade 2 Offline FAQ Hash):** If external cloud LLM APIs are unreachable, the system falls back to a pre-computed in-memory Redis hash map (`cache:fallback:queries`) answering the top 50 domain queries in $< 2$ms.
 
 ### 3.6 CPU Isolation via ProcessPoolExecutor
 To prevent ONNX embeddings and GLiNER extraction from blocking Litestar's asynchronous event loop, all intensive CPU tasks are strictly isolated in a dedicated `ProcessPoolExecutor` via `run_in_pool()`.

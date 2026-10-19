@@ -8,30 +8,13 @@
 
 The graph follows a **Hierarchical Document-Chunk-Entity** architecture:
 
-```mermaid
-erDiagram
-    Document ||--o{ Chunk : "[:HAS_CHUNK]"
-    Chunk ||--o{ Entity : "[:CONTAINS]"
-    Entity ||--o{ Entity : "[:RELATION]"
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d3-storage-schema-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d3-storage-schema-light.svg">
+  <img alt="LatticeDB Hierarchical Graph and Dual-Index Data Model" src="diagrams/d3-storage-schema-dark.svg" width="100%">
+</picture>
 
-    Document {
-        string doc_id
-        string title
-    }
-    Chunk {
-        int id
-        string text
-        int position
-        string doc_id
-        vector_384 embedding
-    }
-    Entity {
-        int id
-        string name
-        string entity_type
-        vector_384 embedding
-    }
-```
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d3-storage-schema-dark.html">Dark Specimen</a> | <a href="diagrams/d3-storage-schema-light.html">Light Specimen</a></sub>
 
 ### Node Labels & Properties
 

@@ -13,29 +13,25 @@ This guide provides operational guidance for deploying, maintaining, monitoring,
 - **Embedded ML Inferences**: FastEmbed (`bge-small-en-v1.5`), GLiNER (`gliner-2.5-decide`), and INT8 ONNX Cross-Encoder (`bge-reranker-v2-m3`).
 - **Orchestration**: LangGraph state graph with TypeSafe AI front-door decision triage and context guardrailing.
 
-### 1.1 Application Lifecycle
+### 1.1 Single-Container Production Deployment Topology
 
-```
-[Start Granian]
-       │
-       ▼
-[ApplicationCore.lifespan()]
-       ├── Load Config & decrypt SecretStr environment variables
-       ├── Initialize LatticeStore at data/lattice_rag.db
-       ├── Ensure FTS BM25 & HNSW indices exist
-       ├── Initialize SemanticCache (Tier 1) & FallbackCache (Tier 2)
-       └── Warmup fastembed & ONNX tokenizer
-       │
-       ▼
-[Serving HTTP/SSE Requests at :8000]
-       │
-       ▼ (SIGTERM / SIGINT)
-[Graceful Shutdown]
-       ├── Complete inflight queries
-       ├── Flush and close LatticeStore database handle
-       ├── Close Redis client (if connected)
-       └── Close TypeSafe AI async HTTP transport
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d9-deployment-topology-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d9-deployment-topology-light.svg">
+  <img alt="Single-Container Production Deployment Topology" src="diagrams/d9-deployment-topology-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d9-deployment-topology-dark.html">Dark Specimen</a> | <a href="diagrams/d9-deployment-topology-light.html">Light Specimen</a></sub>
+
+### 1.2 ApplicationCore Lifecycle & State Machine
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d8-core-lifespan-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d8-core-lifespan-light.svg">
+  <img alt="ApplicationCore Lifespan & Service State Machine" src="diagrams/d8-core-lifespan-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d8-core-lifespan-dark.html">Dark Specimen</a> | <a href="diagrams/d8-core-lifespan-light.html">Light Specimen</a></sub>
 
 ---
 
@@ -178,3 +174,29 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
 - **Stateless Replicas**: The application code, routing, and synthesis stages are completely stateless.
 - **Shared Storage**: Mount `data/lattice_rag.db` over a shared block volume with read-only replicas, or use an active-passive setup with primary write node and read replicas.
 - **External Redis Tier 2**: For multi-node deployments, set `REDIS_URL=redis://redis-cluster:6379/0` so that circuit breaker fallback caching is shared across all application instances.
+
+---
+
+## 6. Continuous Integration & Quality Gates Pipeline
+
+`lattice-rag` enforces strict multi-stage quality gates on every push and pull request via GitHub Actions (`.github/workflows/eval-gate.yml`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="diagrams/d10-cicd-pipeline-light.svg">
+  <img alt="Strict CI/CD Quality Gates & Release Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
+</picture>
+
+<sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d10-cicd-pipeline-dark.html">Dark Specimen</a> | <a href="diagrams/d10-cicd-pipeline-light.html">Light Specimen</a></sub>
+
+### Gate Execution Sequence:
+1. **Parallel Quality Gates (Fail-Fast Verification)**:
+   - **Gate 01 (Ruff Lint & Format)**: Fast AST linting (`ruff check --select E,F,W,I,N,UP,B,A,C4,SIM`).
+   - **Gate 02 (Mypy Strict Typing)**: Enforces complete type safety with zero missing annotations across all modules (`mypy --strict src/`).
+   - **Gate 03 (Zero-Leakage Security Scan)**: Scans for credential exposures, verifies `SecretStr` masking, and confirms `.env` / `apikeys.md` git blocklists (`test_security_audit.py`).
+   - **Gate 04 (Hermetic Pytest Matrix)**: Executes 130+ unit tests under mocked environments with zero external network dependencies.
+2. **Golden Dataset Evaluation Gate**:
+   - Triggers `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json`.
+   - Validates multi-hop retrieval accuracy, groundedness scores, and verifies the Sub-Second SLA ($p95 < 1,000$ms).
+3. **Hermetic Docker Release**:
+   - Compiles and publishes signed container images to GitHub Container Registry (`ghcr.io/lattice-rag:latest`) upon all gates passing.
