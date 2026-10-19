@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, cast
@@ -40,7 +41,7 @@ from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import ContextGuardrail
 from lattice_rag.routing.router import QueryRouter
-from lattice_rag.security import sanitize_error_detail
+from lattice_rag.security import SecretStr, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
 
@@ -48,7 +49,19 @@ from lattice_rag.storage.extract import EntityExtractor
 @contextlib.asynccontextmanager
 async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     """Lifespan context manager for initializing and closing dependencies."""
-    config = get_config()
+    config: LatticeAppConfig | None = getattr(app.state, "config", None)
+    if config is None:
+        try:
+            config = get_config()
+        except SystemExit:
+            config = LatticeAppConfig(
+                typesafe_api_key=SecretStr("mock-typesafe-key-hermetic"),
+                groq_api_key=SecretStr(""),
+                gemini_api_key=SecretStr(""),
+            )
+
+    if not os.environ.get("TYPESAFE_API_KEY") and config.typesafe_api_key:
+        os.environ["TYPESAFE_API_KEY"] = config.typesafe_api_key.get_secret_value()
 
     # 1. Embedded storage engine
     store = LatticeStore(config.latticedb_path)
@@ -309,11 +322,15 @@ class ApplicationCore(InitPluginProtocol):
         return app_config
 
 
-def create_app() -> Litestar:
+def create_app(config: LatticeAppConfig | None = None) -> Litestar:
     """Create and configure the Litestar application."""
+    initial_state: dict[str, Any] = {}
+    if config is not None:
+        initial_state["config"] = config
     return Litestar(
         plugins=[
             ApplicationCore(),
             ProblemDetailsPlugin(ProblemDetailsConfig(enable_for_all_http_exceptions=True)),
-        ]
+        ],
+        state=State(initial_state),
     )
