@@ -1,10 +1,12 @@
 """Comprehensive Zero-Trust Security & Credential Leakage Audit Suite."""
+
 from __future__ import annotations
 
 import logging
 import re
 import subprocess
 from pathlib import Path
+
 import pytest
 from litestar import Litestar, get
 from litestar.testing import AsyncTestClient
@@ -18,9 +20,13 @@ from lattice_rag.api.dtos import (
     IngestResponse,
     QueryRequest,
     QueryResponse,
+    StreamDone,
+    StreamError,
+    StreamStage,
+    StreamToken,
 )
 from lattice_rag.app import create_app, secret_sanitizing_exception_handler
-from lattice_rag.security import RedactingFilter, SecretStr, sanitize_error_detail
+from lattice_rag.security import RedactingFilter
 
 
 @pytest.mark.asyncio
@@ -94,7 +100,9 @@ async def test_openapi_schema_contains_no_secrets():
             "redis://",
         ]
         for token in forbidden_tokens:
-            assert token not in schema_text, f"Forbidden token '{token}' discovered in OpenAPI schema"
+            assert token not in schema_text, (
+                f"Forbidden token '{token}' discovered in OpenAPI schema"
+            )
 
 
 def test_dto_boundary_isolation():
@@ -108,16 +116,18 @@ def test_dto_boundary_isolation():
         EvalRunResponse,
         HealthResponse,
         BenchmarkRunResponse,
+        StreamDone,
+        StreamError,
+        StreamStage,
+        StreamToken,
     ]
 
+    # A bare "key" is allowed (e.g. a cache key); credential-like names are not
+    sensitive_terms = ["api_key", "secret", "token", "password", "auth", "credential"]
     for dto in dto_classes:
-        fields = [f.lower() for f in getattr(dto, "__struct_fields__", ())]
-        for sensitive_term in ["secret", "key", "token", "password", "auth", "credential"]:
-            # 'key' is permitted in cache_key or query_key if any, but not api_key
-            for field_name in fields:
-                assert "api_key" not in field_name, f"DTO {dto.__name__} exposes sensitive field {field_name}"
-                assert "password" not in field_name, f"DTO {dto.__name__} exposes sensitive field {field_name}"
-                assert "token" not in field_name, f"DTO {dto.__name__} exposes sensitive field {field_name}"
+        for field_name in (f.lower() for f in getattr(dto, "__struct_fields__", ())):
+            leaked = [term for term in sensitive_terms if term in field_name]
+            assert not leaked, f"DTO {dto.__name__} exposes sensitive field {field_name}"
 
 
 def test_log_filter_redaction_comprehensive():
@@ -150,9 +160,7 @@ def test_log_filter_redaction_comprehensive():
 def test_git_tracked_files_zero_secrets():
     """Verify no live API keys or credentials are committed into tracked git files."""
     try:
-        tracked_files = subprocess.check_output(
-            ["git", "ls-files"], text=True
-        ).splitlines()
+        tracked_files = subprocess.check_output(["git", "ls-files"], text=True).splitlines()
     except Exception as e:
         pytest.skip(f"Git command failed: {e}")
 
@@ -176,5 +184,11 @@ def test_git_tracked_files_zero_secrets():
         for pat in secret_patterns:
             matches = pat.findall(content)
             # Filter out mock strings in tests
-            real_matches = [m for m in matches if not any(x in m for x in ["example", "abc1234", "dummy", "fake", "placeholder"])]
-            assert len(real_matches) == 0, f"Potential real credential found in tracked file {file_path}: {real_matches}"
+            real_matches = [
+                m
+                for m in matches
+                if not any(x in m for x in ["example", "abc1234", "dummy", "fake", "placeholder"])
+            ]
+            assert len(real_matches) == 0, (
+                f"Potential real credential found in tracked file {file_path}: {real_matches}"
+            )

@@ -1,4 +1,5 @@
 """Unit tests for Stage 1 HybridSearcher combining vector and BM25 search via RRF."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

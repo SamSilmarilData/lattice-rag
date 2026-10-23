@@ -1,4 +1,5 @@
 """Unit tests for Stage 2 GraphTraverser dynamic 1-to-2 hop traversal."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

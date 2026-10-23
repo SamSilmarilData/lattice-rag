@@ -1,7 +1,9 @@
 """Unit tests for GroqSynthesizer with mocked and structured evidence flows."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
@@ -26,7 +28,9 @@ async def test_groq_synthesizer_synthesize_success(mock_groq_client):
     mock_resp.choices = [mock_choice]
     mock_groq_client.chat.completions.create.return_value = mock_resp
 
-    answer = await synthesizer.synthesize("What is LatticeDB?", [{"doc_id": "doc1", "text": "LatticeDB text"}])
+    answer = await synthesizer.synthesize(
+        "What is LatticeDB?", [{"doc_id": "doc1", "text": "LatticeDB text"}]
+    )
 
     assert answer == "LatticeDB uses native HNSW indexing [Chunk 0]."
     mock_groq_client.chat.completions.create.assert_awaited_once()
@@ -61,7 +65,9 @@ async def test_groq_synthesizer_stream_success(mock_groq_client):
 @pytest.mark.asyncio
 async def test_groq_synthesizer_error_sanitization(mock_groq_client):
     synthesizer = GroqSynthesizer(client=mock_groq_client)
-    mock_groq_client.chat.completions.create.side_effect = Exception("Bearer gsk_1234567890abcdef Secret Key error")
+    mock_groq_client.chat.completions.create.side_effect = Exception(
+        "Bearer gsk_1234567890abcdef Secret Key error"
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         await synthesizer.synthesize("Query", [])
@@ -82,7 +88,9 @@ async def test_groq_without_key_constructs_and_raises_on_use(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_groq_stream_does_not_replay_tokens_after_midstream_429(mock_groq_client, monkeypatch):
+async def test_groq_stream_does_not_replay_tokens_after_midstream_429(
+    mock_groq_client, monkeypatch
+):
     """A 429 raised after tokens were emitted must not restart the answer from the top."""
     from types import SimpleNamespace
 

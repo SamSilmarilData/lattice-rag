@@ -3,18 +3,12 @@
 Verifies end-to-end execution on real in-process LatticeDB, real FastEmbed BGE embeddings,
 real INT8 ONNX bge-reranker-v2-m3, and live TypeSafe AI Jev Noul guardrails.
 """
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import numpy as np
 import pytest
-
 
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
@@ -46,7 +40,6 @@ def embedding_service() -> EmbeddingService:
     _ = svc.embed_query("warmup")
     _ = svc.rerank("warmup", ["warmup document"])
     return svc
-
 
 
 @pytest.mark.integration
@@ -112,7 +105,7 @@ async def test_full_pipeline_live_integration(
 
     # Verify Timings (Total under 1,000ms)
     total_latency_ms = sum(result.timings.values())
-    print(f"\nLive Pipeline Execution Timings:")
+    print("\nLive Pipeline Execution Timings:")
     for stage, dur in result.timings.items():
         print(f"  - {stage}: {dur:.1f}ms")
     print(f"Total Pipeline Latency: {total_latency_ms:.1f}ms")
@@ -131,7 +124,9 @@ async def test_full_pipeline_irrelevant_query_low_grounding(
     """Verify irrelevant query reports low_grounding through live Jev Noul guardrail."""
     c_text = "LatticeDB uses ACID transactions and writes require an explicit txn.commit() call."
     emb = embedding_service.embed_query(c_text)
-    temp_store.ingest_document("doc_acid", "ACID", [ChunkData(text=c_text, embedding=emb, position=0)])
+    temp_store.ingest_document(
+        "doc_acid", "ACID", [ChunkData(text=c_text, embedding=emb, position=0)]
+    )
 
     guardrail = ContextGuardrail(threshold=0.50)
     pipeline = RetrievalPipeline(

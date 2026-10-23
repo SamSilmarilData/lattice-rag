@@ -1,4 +1,5 @@
 """Unit tests for RetrievalPipeline orchestrator."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -52,13 +53,16 @@ async def test_pipeline_full_execution_flow():
     # Stage 3: Embedding service returns reranked result
     mock_embed = MagicMock(spec=EmbeddingService)
     mock_embed.embed_query.return_value = [0.0] * 384
-    mock_embed.rerank.return_value = [
-        RerankResult(index=0, score=9.2, text="Chunk 1 content")
-    ]
+    mock_embed.rerank.return_value = [RerankResult(index=0, score=9.2, text="Chunk 1 content")]
 
     # Guardrail: Passes chunk
     mock_guardrail = AsyncMock()
-    passed_chunk = {"node_id": 1, "text": "Chunk 1 content", "rerank_score": 9.2, "grounding_score": 0.85}
+    passed_chunk = {
+        "node_id": 1,
+        "text": "Chunk 1 content",
+        "rerank_score": 9.2,
+        "grounding_score": 0.85,
+    }
     mock_guardrail.filter_chunks.return_value = GuardrailResult(
         chunks=[passed_chunk], low_grounding=False
     )
@@ -110,7 +114,10 @@ async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embeddi
 
     hits = [
         SearchResult(
-            node_id=i, score=1.0 / (i + 1), text=f"chunk {i}", metadata={"doc_id": f"d{i}", "position": i}
+            node_id=i,
+            score=1.0 / (i + 1),
+            text=f"chunk {i}",
+            metadata={"doc_id": f"d{i}", "position": i},
         )
         for i in range(5 + RERANK_HEADROOM)
     ]

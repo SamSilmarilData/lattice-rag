@@ -1,4 +1,5 @@
 """Unit tests for secret security, masking, and credential migration."""
+
 from __future__ import annotations
 
 import logging

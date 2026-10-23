@@ -1,10 +1,11 @@
 """Unit tests for EvalController endpoint."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
+import pytest
 from litestar import Litestar
 from litestar.datastructures import State
 from litestar.di import Provide

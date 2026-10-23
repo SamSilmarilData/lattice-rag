@@ -1,4 +1,5 @@
 """Unit tests for Stage 3 PrecisionReranker."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

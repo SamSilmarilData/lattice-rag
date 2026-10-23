@@ -1,4 +1,5 @@
 """Unit tests for QueryRouter with TypeSafe AI Jev Choice routing."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -63,7 +64,9 @@ async def test_router_aclose_and_close():
 async def test_router_system_one_error_falls_back_to_hybrid():
     """Verify router catches system_one exceptions and gracefully returns hybrid decision."""
     mock_client = AsyncMock()
-    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+    mock_client.system_one.side_effect = RuntimeError(
+        "403 Forbidden: Request not allowed by policy"
+    )
 
     router = QueryRouter(ts_client=mock_client)
     decision = await router.route_query("Explain vector indexing")
@@ -71,7 +74,6 @@ async def test_router_system_one_error_falls_back_to_hybrid():
     assert isinstance(decision, RouteDecision)
     assert decision.route == "hybrid"
     assert decision.confidence == 0.5
-
 
 
 @pytest.mark.asyncio
@@ -102,7 +104,8 @@ async def test_router_real_questions_with_chitchat_words_reach_jev(query: str):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "query", ["hi!", "Hello there", "thanks a lot", "bye for now", "what can you do?", "Good morning!"]
+    "query",
+    ["hi!", "Hello there", "thanks a lot", "bye for now", "what can you do?", "Good morning!"],
 )
 async def test_router_pure_chitchat_uses_fast_path(query: str):
     mock_client = AsyncMock()

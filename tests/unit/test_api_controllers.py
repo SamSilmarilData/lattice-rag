@@ -1,9 +1,10 @@
 """Unit tests for Litestar API controllers using AsyncTestClient."""
+
 from __future__ import annotations
 
 import json
-
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 from litestar import Litestar
@@ -35,7 +36,9 @@ def mock_controllers_app():
         cache_hit=False,
         answer="LatticeDB is an embedded database.",
         total_latency_ms=45.2,
-        filtered_chunks=[{"node_id": 1, "text": "LatticeDB text", "score": 0.88, "doc_id": "doc1", "position": 0}],
+        filtered_chunks=[
+            {"node_id": 1, "text": "LatticeDB text", "score": 0.88, "doc_id": "doc1", "position": 0}
+        ],
         graph_context={"nodes": [{"node_id": 1, "name": "LatticeDB"}], "edges": []},
         timings=[{"stage": "retrieval", "duration_ms": 20.0}],
     )
@@ -52,7 +55,15 @@ def mock_controllers_app():
                 "route": "hybrid",
                 "cached": False,
                 "latency_ms": 10.0,
-                "sources": [{"node_id": 7, "text": "t", "doc_id": "doc1", "position": 3, "rerank_score": 0.5}],
+                "sources": [
+                    {
+                        "node_id": 7,
+                        "text": "t",
+                        "doc_id": "doc1",
+                        "position": 3,
+                        "rerank_score": 0.5,
+                    }
+                ],
                 "graph_path": {"nodes": [{"id": 1, "name": "LatticeDB"}], "edges": []},
                 "timings": [{"stage": "retrieval", "duration_ms": 2.0}],
                 "degraded": False,
@@ -171,7 +182,11 @@ async def test_api_query_stream_sse(mock_controllers_app):
         assert done["latencyMs"] == 10.0
         assert done["lowGrounding"] is False
         assert done["sources"][0] == {
-            "chunkId": 7, "text": "t", "score": 0.5, "documentId": "doc1", "position": 3
+            "chunkId": 7,
+            "text": "t",
+            "score": 0.5,
+            "documentId": "doc1",
+            "position": 3,
         }
         assert done["graphPath"]["nodes"][0]["nodeId"] == 1
         assert done["timings"][0] == {"stage": "retrieval", "durationMs": 2.0}
@@ -251,6 +266,7 @@ async def test_api_rfc9457_error_secret_sanitization(mock_controllers_app):
     )
 
     from lattice_rag.app import secret_sanitizing_exception_handler
+
     app.exception_handlers[Exception] = secret_sanitizing_exception_handler
 
     async with AsyncTestClient(app=app) as client:

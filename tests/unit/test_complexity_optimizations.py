@@ -1,8 +1,9 @@
 """Unit tests verifying algorithmic time-space complexity optimizations across subsystems."""
+
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
@@ -106,7 +107,10 @@ async def test_chitchat_single_pass_compiled_regex():
     assert "goodbye" in (await handler.handle("See you later, bye!")).lower()
     assert "welcome" in (await handler.handle("Thanks a lot for the help")).lower()
     assert "help you search" in (await handler.handle("Can you assist me with this?")).lower()
-    assert "specialized knowledge engine" in (await handler.handle("What is quantum chromodynamics?")).lower()
+    assert (
+        "specialized knowledge engine"
+        in (await handler.handle("What is quantum chromodynamics?")).lower()
+    )
 
 
 @pytest.mark.asyncio
@@ -168,19 +172,35 @@ def test_lattice_store_atomic_document_bundle(tmp_path):
     store = LatticeStore(db_file)
 
     chunks = [
-        ChunkData(text="Chunk 1 about LatticeDB", embedding=np.ones(384, dtype=np.float32), position=0),
-        ChunkData(text="Chunk 2 about FastEmbed", embedding=np.ones(384, dtype=np.float32), position=1),
+        ChunkData(
+            text="Chunk 1 about LatticeDB", embedding=np.ones(384, dtype=np.float32), position=0
+        ),
+        ChunkData(
+            text="Chunk 2 about FastEmbed", embedding=np.ones(384, dtype=np.float32), position=1
+        ),
     ]
 
     extractions = [
         (
             0,
-            [EntityData(name="LatticeDB", entity_type="Database", embedding=np.ones(384, dtype=np.float32))],
+            [
+                EntityData(
+                    name="LatticeDB",
+                    entity_type="Database",
+                    embedding=np.ones(384, dtype=np.float32),
+                )
+            ],
             [],
         ),
         (
             1,
-            [EntityData(name="FastEmbed", entity_type="Technology", embedding=np.ones(384, dtype=np.float32))],
+            [
+                EntityData(
+                    name="FastEmbed",
+                    entity_type="Technology",
+                    embedding=np.ones(384, dtype=np.float32),
+                )
+            ],
             [RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES")],
         ),
     ]

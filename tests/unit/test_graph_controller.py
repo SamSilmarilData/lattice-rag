@@ -1,9 +1,11 @@
 """Unit tests for GraphController and LatticeStore.get_subgraph_snapshot."""
+
 from __future__ import annotations
 
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 from litestar import Litestar
@@ -74,14 +76,22 @@ def test_lattice_store_get_subgraph_snapshot():
 
         # Ingest a document and some entities with relations
         chunks = [
-            ChunkData(text="LatticeDB is an embedded database.", embedding=np.zeros(384, dtype=np.float32), position=0)
+            ChunkData(
+                text="LatticeDB is an embedded database.",
+                embedding=np.zeros(384, dtype=np.float32),
+                position=0,
+            )
         ]
         stats = store.ingest_document("doc1", "Doc 1", chunks)
         chunk_id = stats.chunk_ids[0]
 
         entities = [
-            EntityData(name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)),
-            EntityData(name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)),
+            EntityData(
+                name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)
+            ),
+            EntityData(
+                name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)
+            ),
         ]
         relations = [
             RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES"),

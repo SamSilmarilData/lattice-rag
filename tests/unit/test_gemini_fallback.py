@@ -1,7 +1,9 @@
 """Unit tests for GeminiFallback with mocked client flows."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from lattice_rag.generation.gemini_fallback import GeminiFallback
@@ -57,7 +59,9 @@ async def test_gemini_fallback_stream_success(mock_gemini_client):
 @pytest.mark.asyncio
 async def test_gemini_fallback_error_sanitization(mock_gemini_client):
     synthesizer = GeminiFallback(client=mock_gemini_client)
-    mock_gemini_client.aio.models.generate_content.side_effect = Exception("Authorization: Bearer secret_api_key_fail")
+    mock_gemini_client.aio.models.generate_content.side_effect = Exception(
+        "Authorization: Bearer secret_api_key_fail"
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         await synthesizer.synthesize("Query", [])

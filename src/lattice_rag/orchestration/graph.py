@@ -133,9 +133,7 @@ class RAGOrchestrator:
         t0 = time.perf_counter()
 
         # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = (
-            self.semantic_cache.get_exact(state.query) if state.use_cache else None
-        )
+        exact_hit = self.semantic_cache.get_exact(state.query) if state.use_cache else None
         if isinstance(exact_hit, dict):
             elapsed = (time.perf_counter() - t0) * 1000
             logger.info("Exact cache HIT for query in O(1) time")

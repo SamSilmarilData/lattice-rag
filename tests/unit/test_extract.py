@@ -1,9 +1,8 @@
 """Unit tests for GLiNER entity and relation triple extraction."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
-
-import pytest
 
 from lattice_rag.storage.extract import EntityExtractor
 
@@ -60,6 +59,9 @@ def test_extract_triples_matches_names_with_symbols():
     from lattice_rag.storage.db import EntityData
 
     extractor = EntityExtractor()
-    entities = [EntityData(name="C++", entity_type="technology"), EntityData(name="ONNX", entity_type="technology")]
+    entities = [
+        EntityData(name="C++", entity_type="technology"),
+        EntityData(name="ONNX", entity_type="technology"),
+    ]
     triples = extractor.extract_triples("ONNX runtime is written in C++.", entities)
     assert {(t.source_name, t.target_name) for t in triples} == {("C++", "ONNX")}

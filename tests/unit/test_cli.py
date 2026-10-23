@@ -32,7 +32,8 @@ def test_serve_passes_host_and_port_through(monkeypatch):
     """`serve --host/--port` reach the server instead of being silently ignored."""
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        "lattice_rag.server.main", lambda host=None, port=None: captured.update(host=host, port=port)
+        "lattice_rag.server.main",
+        lambda host=None, port=None: captured.update(host=host, port=port),
     )
     result = CliRunner().invoke(cli.main, ["serve", "--host", "127.0.0.1", "--port", "9123"])
     assert result.exit_code == 0, result.output

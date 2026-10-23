@@ -1,4 +1,5 @@
 """Unit tests for the shared grounded-answer prompt."""
+
 from __future__ import annotations
 
 from lattice_rag.generation.prompt import NO_EVIDENCE, SYSTEM_PROMPT, build_messages

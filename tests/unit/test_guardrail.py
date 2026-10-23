@@ -1,4 +1,5 @@
 """Unit tests for ContextGuardrail using TypeSafe AI Jev Noul."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -107,7 +108,9 @@ async def test_guardrail_aclose_and_close():
 async def test_guardrail_system_one_error_graceful_fallback():
     """Verify guardrail catches system_one exceptions and gracefully preserves chunks."""
     mock_client = AsyncMock()
-    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+    mock_client.system_one.side_effect = RuntimeError(
+        "403 Forbidden: Request not allowed by policy"
+    )
 
     guardrail = ContextGuardrail(threshold=0.50, ts_client=mock_client)
     chunks = [
@@ -124,7 +127,6 @@ async def test_guardrail_system_one_error_graceful_fallback():
     assert filtered[1]["node_id"] == 2
     assert filtered[1]["grounding_score"] == 0.75
     assert result.low_grounding is False
-
 
 
 @pytest.mark.asyncio

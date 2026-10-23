@@ -1,12 +1,13 @@
 """Unit tests for LangGraph RAGOrchestrator and failover cascades."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
 from lattice_rag.orchestration.graph import RAGOrchestrator
-from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.routing.router import RouteDecision
 
 

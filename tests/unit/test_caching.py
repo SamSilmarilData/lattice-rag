@@ -1,4 +1,5 @@
 """Unit tests for Tier 1 Semantic Cache and Tier 2 Fallback Cache with Circuit Breaker."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,10 +12,10 @@ import pytest
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
 
-
 # =========================================================================
 # Tier 1: SemanticCache Unit Tests
 # =========================================================================
+
 
 @pytest.mark.asyncio
 async def test_semantic_cache_empty():
@@ -30,14 +31,15 @@ async def test_semantic_cache_empty():
 async def test_semantic_cache_hit_with_noul_verification():
     """Verify semantic cache returns response when cosine >= 0.90 and Noul >= 0.70."""
     mock_client = AsyncMock()
-    mock_response = SimpleNamespace(
-        nouls={"equivalent": SimpleNamespace(noul=0.95)}
-    )
+    mock_response = SimpleNamespace(nouls={"equivalent": SimpleNamespace(noul=0.95)})
     mock_client.system_one.return_value = mock_response
 
     cache = SemanticCache(similarity_threshold=0.90, ts_client=mock_client)
     emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-    stored_response = {"answer": "LatticeDB is an embedded graph database.", "route": "vector_exact"}
+    stored_response = {
+        "answer": "LatticeDB is an embedded graph database.",
+        "route": "vector_exact",
+    }
 
     cache.put("What is LatticeDB?", emb, stored_response)
 
@@ -71,9 +73,7 @@ async def test_semantic_cache_miss_noul_rejected():
     """Verify cosine >= 0.90 but Noul < 0.70 rejects false positive and records miss."""
     mock_client = AsyncMock()
     # High cosine but Noul detects semantic difference
-    mock_response = SimpleNamespace(
-        nouls={"equivalent": SimpleNamespace(noul=0.45)}
-    )
+    mock_response = SimpleNamespace(nouls={"equivalent": SimpleNamespace(noul=0.45)})
     mock_client.system_one.return_value = mock_response
 
     cache = SemanticCache(similarity_threshold=0.90, ts_client=mock_client)
@@ -107,6 +107,7 @@ async def test_semantic_cache_clear_and_aclose():
 # =========================================================================
 # Tier 2: FallbackCache Unit Tests
 # =========================================================================
+
 
 @pytest.mark.asyncio
 async def test_fallback_cache_embedded_connect_and_seed():

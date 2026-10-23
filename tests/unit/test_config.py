@@ -1,8 +1,6 @@
 """Unit tests for configuration loading and validation."""
-from __future__ import annotations
 
-import os
-from unittest.mock import patch
+from __future__ import annotations
 
 import pytest
 

@@ -1,7 +1,9 @@
 """Unit tests for the deep HybridRetriever module (TDD RED -> GREEN)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
@@ -13,12 +15,32 @@ from lattice_rag.storage.db import SearchResult, SubgraphResult
 class FakeStore:
     def __init__(self):
         self.vector_hits = [
-            SearchResult(node_id=1, score=0.9, text="Chunk 1 text about LatticeDB", metadata={"text": "Chunk 1 text about LatticeDB"}),
-            SearchResult(node_id=2, score=0.8, text="Chunk 2 text about HNSW", metadata={"text": "Chunk 2 text about HNSW"}),
+            SearchResult(
+                node_id=1,
+                score=0.9,
+                text="Chunk 1 text about LatticeDB",
+                metadata={"text": "Chunk 1 text about LatticeDB"},
+            ),
+            SearchResult(
+                node_id=2,
+                score=0.8,
+                text="Chunk 2 text about HNSW",
+                metadata={"text": "Chunk 2 text about HNSW"},
+            ),
         ]
         self.bm25_hits = [
-            SearchResult(node_id=1, score=5.2, text="Chunk 1 text about LatticeDB", metadata={"text": "Chunk 1 text about LatticeDB"}),
-            SearchResult(node_id=3, score=4.1, text="Chunk 3 text about Cypher", metadata={"text": "Chunk 3 text about Cypher"}),
+            SearchResult(
+                node_id=1,
+                score=5.2,
+                text="Chunk 1 text about LatticeDB",
+                metadata={"text": "Chunk 1 text about LatticeDB"},
+            ),
+            SearchResult(
+                node_id=3,
+                score=4.1,
+                text="Chunk 3 text about Cypher",
+                metadata={"text": "Chunk 3 text about Cypher"},
+            ),
         ]
 
     def vector_search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[SearchResult]:
@@ -34,7 +56,9 @@ class FakeStore:
     def get_entities_for_chunks(self, chunk_ids: list[int], budget: int = 25) -> list[int]:
         return [10, 11]
 
-    def traverse_from_entities(self, entity_ids: list[int], max_hops: int = 1, budget: int = 25) -> SubgraphResult:
+    def traverse_from_entities(
+        self, entity_ids: list[int], max_hops: int = 1, budget: int = 25
+    ) -> SubgraphResult:
         return SubgraphResult(
             nodes=[{"id": 10, "name": "LatticeDB"}, {"id": 11, "name": "HNSW"}],
             edges=[{"source": 10, "target": 11, "type": "IMPLEMENTS"}],
@@ -56,7 +80,9 @@ class FakeEmbeddingService:
                 self.score = score
                 self.text = text
 
-        return [FakeRerankResult(i, 0.95 - (i * 0.1), doc) for i, doc in enumerate(documents[:top_k])]
+        return [
+            FakeRerankResult(i, 0.95 - (i * 0.1), doc) for i, doc in enumerate(documents[:top_k])
+        ]
 
 
 @pytest.mark.asyncio
@@ -103,6 +129,7 @@ async def test_hybrid_retriever_guardrail_filtering():
     embed_svc = FakeEmbeddingService()
 
     mock_guardrail = MagicMock()
+
     # Guardrail filters out all but the first chunk
     async def _filter(query, chunks):
         return GuardrailResult(chunks=[chunks[0]], low_grounding=False)
@@ -115,7 +142,9 @@ async def test_hybrid_retriever_guardrail_filtering():
         router_guardrail=mock_guardrail,
     )
 
-    result = await retriever.retrieve(query="LatticeDB details", route="hybrid", apply_guardrail=True)
+    result = await retriever.retrieve(
+        query="LatticeDB details", route="hybrid", apply_guardrail=True
+    )
     assert len(result.final_chunks) == 1
     assert "guardrail_filter" in result.timings
     mock_guardrail.filter_chunks.assert_awaited_once()
@@ -138,6 +167,8 @@ async def test_hybrid_retriever_guardrail_all_rejected_activates_low_grounding()
         router_guardrail=mock_guardrail,
     )
 
-    result = await retriever.retrieve(query="Irrelevant prompt", route="hybrid", apply_guardrail=True)
+    result = await retriever.retrieve(
+        query="Irrelevant prompt", route="hybrid", apply_guardrail=True
+    )
     assert result.final_chunks == []
     assert result.low_grounding is True

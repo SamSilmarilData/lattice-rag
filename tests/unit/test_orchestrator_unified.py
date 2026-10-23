@@ -1,11 +1,12 @@
 """Unit tests verifying unified behavior between run() and stream_query() in RAGOrchestrator."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
-from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
@@ -24,18 +25,22 @@ def mock_orchestrator_components():
     mock_fb_cache.find_closest_fallback = AsyncMock(return_value="Cached FAQ")
 
     mock_pipeline = MagicMock()
-    mock_pipeline.execute = AsyncMock(return_value=MagicMock(
-        final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
-        graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
-        timings={"stage1_search": 1.0},
-        low_grounding=False,
-    ))
+    mock_pipeline.execute = AsyncMock(
+        return_value=MagicMock(
+            final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
+            graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
+            timings={"stage1_search": 1.0},
+            low_grounding=False,
+        )
+    )
 
     mock_groq = MagicMock()
     mock_groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
+
     async def _groq_stream(q, c, g):
         for tok in ["Grounded", " ", "answer", " ", "from", " ", "Groq."]:
             yield tok
+
     mock_groq.stream = _groq_stream
 
     mock_gemini = MagicMock()
@@ -62,7 +67,9 @@ def mock_orchestrator_components():
 @pytest.mark.asyncio
 async def test_unified_orchestrator_chitchat_parity(mock_orchestrator_components):
     c = mock_orchestrator_components
-    c["router"].route_query = AsyncMock(return_value=RouteDecision(route="chitchat", confidence=0.99))
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="chitchat", confidence=0.99)
+    )
 
     orchestrator = RAGOrchestrator(
         router=c["router"],

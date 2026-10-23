@@ -1,7 +1,9 @@
 """Unit tests for the deep ResilientSynthesizer module (TDD RED -> GREEN)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from lattice_rag.generation.resilient_synthesizer import (
@@ -90,7 +92,9 @@ async def test_resilient_synthesizer_massive_context_routes_to_gemini():
         fallback_cache=mock_fb_cache,
     )
 
-    res = await synthesizer.synthesize("Summarize everything", context_chunks=[], route="massive_context")
+    res = await synthesizer.synthesize(
+        "Summarize everything", context_chunks=[], route="massive_context"
+    )
     assert res.answer == "Massive context synthesis."
     assert res.provider == "gemini"
     mock_groq.synthesize.assert_not_called()
@@ -101,6 +105,7 @@ async def test_resilient_synthesizer_massive_context_routes_to_gemini():
 async def test_resilient_synthesizer_streaming_primary_and_fallback():
     # 1. Successful stream
     mock_groq = MagicMock()
+
     async def _stream_groq(q, c, g):
         for token in ["Hello", " ", "from", " ", "Groq"]:
             yield token
@@ -109,12 +114,15 @@ async def test_resilient_synthesizer_streaming_primary_and_fallback():
     mock_gemini = MagicMock()
     mock_fb_cache = MagicMock()
 
-    synthesizer = ResilientSynthesizer(groq=mock_groq, gemini=mock_gemini, fallback_cache=mock_fb_cache)
+    synthesizer = ResilientSynthesizer(
+        groq=mock_groq, gemini=mock_gemini, fallback_cache=mock_fb_cache
+    )
     tokens = [t async for t in synthesizer.stream("Hi", context_chunks=[])]
     assert "".join(tokens) == "Hello from Groq"
 
     # 2. Failed stream cascades to Gemini
     mock_groq_fail = MagicMock()
+
     async def _stream_fail(q, c, g):
         raise RuntimeError("Stream disconnect")
         yield "never"
@@ -125,7 +133,9 @@ async def test_resilient_synthesizer_streaming_primary_and_fallback():
 
     mock_groq_fail.stream = _stream_fail
     mock_gemini.stream = _stream_gemini
-    synthesizer_failover = ResilientSynthesizer(groq=mock_groq_fail, gemini=mock_gemini, fallback_cache=mock_fb_cache)
+    synthesizer_failover = ResilientSynthesizer(
+        groq=mock_groq_fail, gemini=mock_gemini, fallback_cache=mock_fb_cache
+    )
     fallback_tokens = [t async for t in synthesizer_failover.stream("Hi", context_chunks=[])]
     assert "".join(fallback_tokens) == "Hello from Gemini"
 

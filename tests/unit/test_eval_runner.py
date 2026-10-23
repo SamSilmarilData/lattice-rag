@@ -1,9 +1,11 @@
 """Hermetic unit tests for EvalRunner regression gating and dataset processing."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
@@ -74,7 +76,9 @@ async def test_eval_runner_passes_gate(mock_dataset_and_baseline):
     )
 
     runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
-    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path, use_temp_db=False)
+    resp = await runner.run_evaluation(
+        dataset_path=ds_path, baseline_path=base_path, use_temp_db=False
+    )
 
     assert isinstance(resp, EvalRunResponse)
     assert resp.total_queries == 2
@@ -106,7 +110,9 @@ async def test_eval_runner_fails_on_regression(mock_dataset_and_baseline):
     )
 
     runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
-    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path, use_temp_db=False)
+    resp = await runner.run_evaluation(
+        dataset_path=ds_path, baseline_path=base_path, use_temp_db=False
+    )
 
     assert resp.passed_gate is False
     assert resp.regression_delta < -0.03
@@ -124,12 +130,26 @@ async def test_eval_runner_fails_on_floor_violation(mock_dataset_and_baseline):
     mock_evaluator = AsyncMock()
     # First query 0.95, but second query 0.40 (below 0.50 floor)
     mock_evaluator.evaluate_query.side_effect = [
-        EvalQueryResult(query="q1", faithfulness=0.95, context_precision=0.90, answer_relevance=0.95, passed=True),
-        EvalQueryResult(query="q2", faithfulness=0.40, context_precision=0.90, answer_relevance=0.95, passed=False),
+        EvalQueryResult(
+            query="q1",
+            faithfulness=0.95,
+            context_precision=0.90,
+            answer_relevance=0.95,
+            passed=True,
+        ),
+        EvalQueryResult(
+            query="q2",
+            faithfulness=0.40,
+            context_precision=0.90,
+            answer_relevance=0.95,
+            passed=False,
+        ),
     ]
 
     runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
-    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path, use_temp_db=False)
+    resp = await runner.run_evaluation(
+        dataset_path=ds_path, baseline_path=base_path, use_temp_db=False
+    )
 
     # Even though mean faithfulness is (0.95+0.40)/2 = 0.675, floor was violated
     assert resp.passed_gate is False
@@ -140,7 +160,9 @@ async def test_eval_runner_missing_dataset_raises():
     """Verify FileNotFoundError when dataset file is missing."""
     runner = EvalRunner(orchestrator=AsyncMock(), evaluator=AsyncMock())
     with pytest.raises(FileNotFoundError):
-        await runner.run_evaluation(dataset_path="nonexistent.json", baseline_path="eval_baseline.json")
+        await runner.run_evaluation(
+            dataset_path="nonexistent.json", baseline_path="eval_baseline.json"
+        )
 
 
 @pytest.mark.asyncio
@@ -221,7 +243,11 @@ async def test_eval_runner_records_evaluator_failure_instead_of_aborting(mock_da
     mock_orch.semantic_cache = None
 
     good = EvalQueryResult(
-        query="Test query 2", faithfulness=0.9, context_precision=0.9, answer_relevance=0.9, passed=True
+        query="Test query 2",
+        faithfulness=0.9,
+        context_precision=0.9,
+        answer_relevance=0.9,
+        passed=True,
     )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.side_effect = [TimeoutError("Jev timed out"), good]
