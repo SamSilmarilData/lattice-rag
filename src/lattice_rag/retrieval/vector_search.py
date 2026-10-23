@@ -56,18 +56,18 @@ class HybridSearcher:
         )
 
         # Merge using Reciprocal Rank Fusion (RRF)
-        # score = sum(1 / (k + rank)) for each document across both result lists, k=60
+        # score = sum(1 / (k + rank)) over both result lists, with 1-based ranks and k=60
         k = 60
         fused_scores: dict[int, float] = {}
         node_map: dict[int, SearchResult] = {}
 
-        for rank, res in enumerate(vector_results):
+        for rank, res in enumerate(vector_results, start=1):
             node_id = res.node_id
             fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
             if node_id not in node_map:
                 node_map[node_id] = res
 
-        for rank, res in enumerate(bm25_results):
+        for rank, res in enumerate(bm25_results, start=1):
             node_id = res.node_id
             fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
             if node_id not in node_map:

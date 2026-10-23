@@ -19,6 +19,7 @@ from lattice_rag.api.controllers import (
 )
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.config import AppConfig
+from lattice_rag.ingestion.ingester import DocumentIngester
 from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.security import SecretStr
 from lattice_rag.storage.db import IngestStats
@@ -65,8 +66,9 @@ def mock_controllers_app():
     mock_store = MagicMock()
     mock_store.db.is_open = True
     mock_store.has_document.return_value = False
-    mock_store.ingest_document.return_value = IngestStats(chunk_count=1, entity_count=0, relation_count=0, chunk_ids=[101])
-    mock_store.ingest_entities.return_value = IngestStats(chunk_count=0, entity_count=1, relation_count=0)
+    mock_store.ingest_document_bundle.return_value = IngestStats(
+        chunk_count=1, entity_count=0, relation_count=0, chunk_ids=[101]
+    )
 
     # Mock EmbeddingService
     mock_embed_svc = MagicMock()
@@ -74,13 +76,13 @@ def mock_controllers_app():
 
     # Mock Extractor
     mock_extractor = MagicMock()
-    mock_extractor.extract_entities.return_value = []
+    mock_extractor.extract_entities_batch.return_value = [[]]
     mock_extractor.extract_triples.return_value = []
 
     # Mock Caches
     mock_sem_cache = MagicMock()
     mock_sem_cache.stats = (5, 2)
-    mock_sem_cache._cache = [MagicMock()]
+    mock_sem_cache.__len__.return_value = 1
     mock_sem_cache.clear = MagicMock()
 
     mock_fb_cache = MagicMock()
@@ -104,8 +106,15 @@ def mock_controllers_app():
         dependencies={
             "orchestrator": Provide(lambda: mock_orchestrator, sync_to_thread=False),
             "store": Provide(lambda: mock_store, sync_to_thread=False),
-            "embedding_service": Provide(lambda: mock_embed_svc, sync_to_thread=False),
-            "extractor": Provide(lambda: mock_extractor, sync_to_thread=False),
+            "ingester": Provide(
+                lambda: DocumentIngester(
+                    store=mock_store,
+                    embedding_service=mock_embed_svc,
+                    extractor=mock_extractor,
+                    cache=mock_sem_cache,
+                ),
+                sync_to_thread=False,
+            ),
             "semantic_cache": Provide(lambda: mock_sem_cache, sync_to_thread=False),
             "fallback_cache": Provide(lambda: mock_fb_cache, sync_to_thread=False),
             "config": Provide(lambda: mock_config, sync_to_thread=False),
@@ -262,7 +271,7 @@ async def test_api_ingest_requires_admin_key(mock_controllers_app):
         payload = {"documentId": "doc_x", "title": "T", "text": "Some text."}
         resp = await client.post("/api/v1/ingest", json=payload)
         assert resp.status_code == 401
-        mocks["store"].ingest_document.assert_not_called()
+        mocks["store"].ingest_document_bundle.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -303,4 +312,4 @@ async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
             "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
         )
         assert resp.status_code == 409
-        mocks["store"].ingest_document.assert_not_called()
+        mocks["store"].ingest_document_bundle.assert_not_called()

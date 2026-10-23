@@ -36,7 +36,6 @@ class RetrievalPipeline:
         store: Any,
         embedding_service: EmbeddingService,
         router_guardrail: Any = None,
-        guardrail: Any = None,
     ) -> None:
         """Initialize the unified retrieval pipeline.
 
@@ -44,22 +43,14 @@ class RetrievalPipeline:
             store: The LatticeDB store instance.
             embedding_service: Service to generate embeddings and rerank.
             router_guardrail: Optional guardrail to filter chunks (ContextGuardrail).
-            guardrail: Alias for router_guardrail.
         """
         self.store = store
         self.embedding_service = embedding_service
-        self.guardrail = router_guardrail or guardrail
-        self.router_guardrail = self.guardrail
+        self.guardrail = router_guardrail
 
-        # Encapsulated stage executors (with both naming conventions for compatibility)
         self.searcher = HybridSearcher(self.store, self.embedding_service)
-        self.hybrid_searcher = self.searcher
-
         self.traverser = GraphTraverser(self.store)
-        self.graph_traverser = self.traverser
-
         self.reranker = PrecisionReranker(self.embedding_service)
-        self.precision_reranker = self.reranker
 
     async def retrieve(
         self,

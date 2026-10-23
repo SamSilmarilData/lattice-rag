@@ -129,8 +129,12 @@ def query(text: str, stream: bool) -> None:
 
     async def _run() -> None:
         h = await _build_harness()
-        orchestrator = h["orchestrator"]
+        try:
+            await _query(h["orchestrator"])
+        finally:
+            await _close_harness(h)
 
+    async def _query(orchestrator: Any) -> None:
         click.echo(f"Query: {text}\n")
         if stream:
             click.echo("--- Streaming Response ---")
@@ -150,8 +154,6 @@ def query(text: str, stream: bool) -> None:
             click.echo(
                 f"Latency: {state.total_latency_ms:.1f}ms (Cached: {state.cache_hit}, Degraded: {state.degraded})"
             )
-
-        await _close_harness(h)
 
     asyncio.run(_run())
 

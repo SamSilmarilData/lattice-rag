@@ -12,10 +12,12 @@ def test_entity_extraction_with_mock_model():
     """Verify EntityExtractor parses entities and derives relation triples correctly."""
     extractor = EntityExtractor(model_name="test-model")
     mock_gliner = MagicMock()
-    mock_gliner.predict_entities.return_value = [
-        {"text": "LatticeDB", "label": "database", "score": 0.95},
-        {"text": "FastEmbed", "label": "technology", "score": 0.92},
-        {"text": "LatticeDB", "label": "database", "score": 0.91},  # duplicate to verify dedup
+    mock_gliner.batch_predict_entities.return_value = [
+        [
+            {"text": "LatticeDB", "label": "database", "score": 0.95},
+            {"text": "FastEmbed", "label": "technology", "score": 0.92},
+            {"text": "LatticeDB", "label": "database", "score": 0.91},  # duplicate to verify dedup
+        ]
     ]
     extractor._model = mock_gliner
 

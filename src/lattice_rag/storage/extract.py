@@ -131,11 +131,7 @@ class EntityExtractor:
                 results.append(entities)
         else:
             # Classic GLiNER
-            is_mock = (
-                hasattr(self._model, "_mock_return_value")
-                or self._model.__class__.__name__ == "MagicMock"
-            )
-            if not is_mock and hasattr(self._model, "batch_predict_entities"):
+            if hasattr(self._model, "batch_predict_entities"):
                 try:
                     batch_preds = self._model.batch_predict_entities(texts, labels=labels)
                 except Exception:

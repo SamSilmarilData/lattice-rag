@@ -31,7 +31,7 @@ class FakeStore:
         # Return entity nodes connected to chunk anchors
         return [{"entity_id": 10}, {"entity_id": 11}]
 
-    def get_entities_for_chunk(self, chunk_id: int) -> list[int]:
+    def get_entities_for_chunks(self, chunk_ids: list[int], budget: int = 25) -> list[int]:
         return [10, 11]
 
     def traverse_from_entities(self, entity_ids: list[int], max_hops: int = 1, budget: int = 25) -> SubgraphResult:
@@ -112,7 +112,7 @@ async def test_hybrid_retriever_guardrail_filtering():
     retriever = HybridRetriever(
         store=store,
         embedding_service=embed_svc,
-        guardrail=mock_guardrail,
+        router_guardrail=mock_guardrail,
     )
 
     result = await retriever.retrieve(query="LatticeDB details", route="hybrid", apply_guardrail=True)
@@ -135,7 +135,7 @@ async def test_hybrid_retriever_guardrail_all_rejected_activates_low_grounding()
     retriever = HybridRetriever(
         store=store,
         embedding_service=embed_svc,
-        guardrail=mock_guardrail,
+        router_guardrail=mock_guardrail,
     )
 
     result = await retriever.retrieve(query="Irrelevant prompt", route="hybrid", apply_guardrail=True)

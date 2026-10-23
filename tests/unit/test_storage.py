@@ -185,3 +185,29 @@ def test_has_document(temp_store: LatticeStore):
     temp_store.ingest_document_bundle("doc_a", "A", [_chunk("Alpha.")], [])
     assert temp_store.has_document("doc_a") is True
     assert temp_store.has_document("doc_b") is False
+
+
+def test_get_entities_for_chunks_is_rank_ordered_and_budgeted(temp_store: LatticeStore):
+    """Entities are collected chunk by chunk in rank order, deduplicated, up to the budget."""
+    stats = temp_store.ingest_document_bundle(
+        "doc_rank",
+        "Rank",
+        [_chunk("A and B."), _chunk("B, C and D.")],
+        [
+            (0, [EntityData(name="A", entity_type="x"), EntityData(name="B", entity_type="x")], []),
+            (
+                1,
+                [
+                    EntityData(name="B", entity_type="x"),
+                    EntityData(name="C", entity_type="x"),
+                    EntityData(name="D", entity_type="x"),
+                ],
+                [],
+            ),
+        ],
+    )
+    c1, c2 = stats.chunk_ids
+    ids = {n: temp_store.get_canonical_entity_id(n) for n in "ABCD"}
+
+    assert temp_store.get_entities_for_chunks([c1, c2], budget=3) == [ids["A"], ids["B"], ids["C"]]
+    assert temp_store.get_entities_for_chunks([c2, c1], budget=10)[0] == ids["B"]

@@ -101,7 +101,7 @@ class EvalRunner:
                 ephemeral_retrieval = RetrievalPipeline(
                     store=temp_store,
                     embedding_service=embed_svc,
-                    router_guardrail=self.orchestrator.retrieval.router_guardrail,
+                    router_guardrail=self.orchestrator.retrieval.guardrail,
                 )
 
                 active_orchestrator = RAGOrchestrator(

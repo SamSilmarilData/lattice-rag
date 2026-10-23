@@ -10,11 +10,7 @@ from litestar.status_codes import HTTP_409_CONFLICT
 
 from lattice_rag.api.dtos import IngestRequest, IngestResponse
 from lattice_rag.api.guards import require_admin_key
-from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.ingestion.ingester import DocumentExistsError, DocumentIngester, chunk_text
-from lattice_rag.retrieval.embeddings import EmbeddingService
-from lattice_rag.storage.db import LatticeStore
-from lattice_rag.storage.extract import EntityExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -32,33 +28,15 @@ class IngestController(Controller):
     async def ingest(
         self,
         data: JSONBody[IngestRequest],
-        ingester: NamedDependency[SkipValidation[DocumentIngester | None]] = None,
-        store: NamedDependency[SkipValidation[LatticeStore | None]] = None,
-        embedding_service: NamedDependency[SkipValidation[EmbeddingService | None]] = None,
-        extractor: NamedDependency[SkipValidation[EntityExtractor | None]] = None,
-        semantic_cache: NamedDependency[SkipValidation[SemanticCache | None]] = None,
+        ingester: NamedDependency[SkipValidation[DocumentIngester]],
     ) -> IngestResponse:
         """Ingest a document, chunk it, embed, extract entities, and store in LatticeDB."""
         logger.info(
             "received_ingest_request", extra={"doc_id": data.document_id, "title": data.title}
         )
 
-        active_ingester = ingester
-        if active_ingester is None:
-            if store is not None and embedding_service is not None and extractor is not None:
-                active_ingester = DocumentIngester(
-                    store=store,
-                    embedding_service=embedding_service,
-                    extractor=extractor,
-                    cache=semantic_cache,
-                )
-            else:
-                raise RuntimeError(
-                    "DocumentIngester or its underlying storage dependencies must be provided."
-                )
-
         try:
-            stats = await active_ingester.ingest(
+            stats = await ingester.ingest(
                 doc_id=data.document_id,
                 title=data.title,
                 text=data.text,

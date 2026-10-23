@@ -35,6 +35,15 @@ def top_k_for_route(route: str) -> int:
     return MASSIVE_CONTEXT_TOP_K if route == "massive_context" else DEFAULT_TOP_K
 
 
+def subgraph_as_dict(graph_context: Any) -> dict[str, Any] | None:
+    """Convert a SubgraphResult (or an already-plain dict) into the dict stored on state."""
+    if not graph_context:
+        return None
+    if isinstance(graph_context, dict):
+        return graph_context
+    return {"nodes": graph_context.nodes, "edges": graph_context.edges}
+
+
 class RAGOrchestrator:
     """Assembles and runs the full GraphRAG pipeline via LangGraph StateGraph.
 
@@ -63,7 +72,6 @@ class RAGOrchestrator:
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
-        self.retrieval_pipeline = retrieval_pipeline
         self.groq = groq
         self.gemini = gemini
         self.chitchat = chitchat
@@ -126,9 +134,7 @@ class RAGOrchestrator:
 
         # Step 1: O(1) Exact-match cache shortcut
         exact_hit = (
-            self.semantic_cache.get_exact(state.query)
-            if state.use_cache and hasattr(type(self.semantic_cache), "get_exact")
-            else None
+            self.semantic_cache.get_exact(state.query) if state.use_cache else None
         )
         if isinstance(exact_hit, dict):
             elapsed = (time.perf_counter() - t0) * 1000
@@ -187,15 +193,7 @@ class RAGOrchestrator:
         )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        graph_dict = None
-        if result.graph_context:
-            if hasattr(result.graph_context, "nodes") and hasattr(result.graph_context, "edges"):
-                graph_dict = {
-                    "nodes": result.graph_context.nodes,
-                    "edges": result.graph_context.edges,
-                }
-            elif isinstance(result.graph_context, dict):
-                graph_dict = result.graph_context
+        graph_dict = subgraph_as_dict(result.graph_context)
 
         return {
             "filtered_chunks": result.final_chunks,
@@ -252,15 +250,7 @@ class RAGOrchestrator:
             top_k=MASSIVE_CONTEXT_TOP_K,
             query_embedding=state.query_embedding,
         )
-        graph_dict = None
-        if result.graph_context:
-            if hasattr(result.graph_context, "nodes") and hasattr(result.graph_context, "edges"):
-                graph_dict = {
-                    "nodes": result.graph_context.nodes,
-                    "edges": result.graph_context.edges,
-                }
-            elif isinstance(result.graph_context, dict):
-                graph_dict = result.graph_context
+        graph_dict = subgraph_as_dict(result.graph_context)
 
         synth = await self.synthesizer.synthesize(
             query=state.query,
@@ -335,11 +325,7 @@ class RAGOrchestrator:
         t_triage = time.perf_counter()
 
         # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = (
-            self.semantic_cache.get_exact(query)
-            if hasattr(type(self.semantic_cache), "get_exact")
-            else None
-        )
+        exact_hit = self.semantic_cache.get_exact(query)
         if isinstance(exact_hit, dict):
             cached_answer = exact_hit.get("answer", "")
             route_val = exact_hit.get("route", "vector_exact")
@@ -432,17 +418,7 @@ class RAGOrchestrator:
         ret_elapsed = (time.perf_counter() - t_ret) * 1000
         timings.append({"stage": "retrieval", "duration_ms": ret_elapsed})
 
-        graph_dict = None
-        if ret_result.graph_context:
-            if hasattr(ret_result.graph_context, "nodes") and hasattr(
-                ret_result.graph_context, "edges"
-            ):
-                graph_dict = {
-                    "nodes": ret_result.graph_context.nodes,
-                    "edges": ret_result.graph_context.edges,
-                }
-            elif isinstance(ret_result.graph_context, dict):
-                graph_dict = ret_result.graph_context
+        graph_dict = subgraph_as_dict(ret_result.graph_context)
 
         # 3. Generation Stage
         yield {

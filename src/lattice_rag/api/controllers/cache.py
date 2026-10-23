@@ -30,7 +30,7 @@ class CacheController(Controller):
         logger.info("fetching_cache_stats")
 
         tier1_hits, tier1_misses = semantic_cache.stats
-        tier1_count = len(semantic_cache._cache)
+        tier1_count = len(semantic_cache)
 
         # The Groq circuit breaker guarding generation (shared by /query and /query/stream)
         circuit_status = orchestrator.synthesizer.circuit_status

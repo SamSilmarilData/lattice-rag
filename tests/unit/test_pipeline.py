@@ -42,7 +42,7 @@ async def test_pipeline_full_execution_flow():
     mock_store.bm25_search.return_value = [hit]
 
     # Stage 2: Chunk 1 links to Entity 10
-    mock_store.get_entities_for_chunk.return_value = [10]
+    mock_store.get_entities_for_chunks.return_value = [10]
     expected_subgraph = SubgraphResult(
         nodes=[{"id": 10, "name": "LatticeDB", "label": "Database"}],
         edges=[],
@@ -84,7 +84,7 @@ async def test_pipeline_guardrail_insufficient_evidence_propagates_flag():
     hit = SearchResult(node_id=5, score=0.5, text="Tangential chunk", metadata={})
     mock_store.vector_search.return_value = [hit]
     mock_store.bm25_search.return_value = []
-    mock_store.get_entities_for_chunk.return_value = []
+    mock_store.get_entities_for_chunks.return_value = []
     mock_store.traverse_from_entities.return_value = SubgraphResult(nodes=[], edges=[])
 
     mock_embed = MagicMock(spec=EmbeddingService)
