@@ -190,19 +190,18 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="diagrams/d10-cicd-pipeline-light.svg">
-  <img alt="Strict CI/CD Quality Gates & Release Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
+  <img alt="CI Quality Gates & Deploy Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
 </picture>
 
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d10-cicd-pipeline-dark.html">Dark Specimen</a> | <a href="diagrams/d10-cicd-pipeline-light.html">Light Specimen</a></sub>
 
 ### Gate Execution Sequence:
-1. **Parallel Quality Gates (Fail-Fast Verification)**:
-   - **Gate 01 (Ruff Lint & Format)**: Fast AST linting (`ruff check --select E,F,W,I,N,UP,B,A,C4,SIM`).
-   - **Gate 02 (Mypy Strict Typing)**: Enforces complete type safety with zero missing annotations across all modules (`mypy --strict src/`).
-   - **Gate 03 (Zero-Leakage Security Scan)**: Scans for credential exposures, verifies `SecretStr` masking, and confirms `.env` / `apikeys.md` git blocklists (`test_security_audit.py`).
-   - **Gate 04 (Hermetic Pytest Matrix)**: Executes 130+ unit tests under mocked environments with zero external network dependencies.
-2. **Golden Dataset Evaluation Gate**:
-   - Triggers `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json`.
-   - Validates multi-hop retrieval accuracy, groundedness scores, and verifies the Sub-Second SLA ($p95 < 1,000$ms).
-3. **Hermetic Docker Release**:
-   - Compiles and publishes signed container images to GitHub Container Registry (`ghcr.io/lattice-rag:latest`) upon all gates passing.
+1. **Parallel Quality Gates** (all actions pinned to commit SHAs):
+   - **`lint`**: `ruff check src tests` (rules `E,F,W,I,N,UP,B,A,C4,SIM`), `ruff format --check src tests` (ruff version pinned in `pyproject.toml`), and `mypy src` in strict mode.
+   - **`unit-tests`**: the hermetic `pytest tests/unit/` suite with mock keys and no network, including the security audit (`test_security_audit.py`: secret scan of tracked files, `SecretStr` masking, DTO field audit, log redaction, error shielding).
+   - **`frontend`**: `npm ci && npm run build` (`tsc -b` type-checks the studio against `types.ts`, then Vite builds it).
+2. **Golden Dataset Evaluation Gate** (after all three gates pass; skipped for fork PRs or without `TYPESAFE_API_KEY`):
+   - Runs `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json` on an ephemeral database.
+   - Fails on a mean regression above 0.03, any query's faithfulness below 0.50, or a Noul contradiction veto. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
+
+Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.
