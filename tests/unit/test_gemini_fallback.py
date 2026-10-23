@@ -80,3 +80,14 @@ async def test_gemini_fallback_error_sanitization(mock_gemini_client):
     err_msg = str(exc_info.value)
     assert "secret_api_key_fail" not in err_msg
     assert "Gemini fallback synthesis failed" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_gemini_without_key_constructs_and_raises_on_use(monkeypatch):
+    """A missing GEMINI_API_KEY must not crash construction; calls raise so the cascade degrades."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    synthesizer = GeminiFallback(api_key=None)
+    assert synthesizer.client is None
+    with pytest.raises(RuntimeError, match="not configured"):
+        await synthesizer.synthesize("q", [])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -23,15 +24,26 @@ class GroqSynthesizer:
         max_tokens: int = 256,
         client: AsyncGroq | None = None,
     ) -> None:
-        """Initializes the AsyncGroq client with configurable model and API key."""
+        """Initializes the AsyncGroq client with configurable model and API key.
+
+        Without a key (argument or GROQ_API_KEY) the client stays unset and every call
+        raises, so the resilient cascade degrades to Gemini/FAQ instead of failing boot.
+        """
         self.model = model
         self.max_tokens = max_tokens
+        resolved_key = api_key or os.environ.get("GROQ_API_KEY")
+        self.client: AsyncGroq | None
         if client is not None:
             self.client = client
-        elif api_key:
-            self.client = AsyncGroq(api_key=api_key, max_retries=2)
+        elif resolved_key:
+            self.client = AsyncGroq(api_key=resolved_key, max_retries=2)
         else:
-            self.client = AsyncGroq(max_retries=2)
+            self.client = None
+
+    def _require_client(self) -> AsyncGroq:
+        if self.client is None:
+            raise RuntimeError("Groq synthesis unavailable: GROQ_API_KEY is not configured")
+        return self.client
 
     def _build_prompt(
         self,
@@ -89,13 +101,14 @@ class GroqSynthesizer:
         graph_context: dict[str, Any] | None = None,
     ) -> str:
         """Non-streaming synthesis of a grounded answer."""
-        logger.info("groq_synthesizing_answer", query=query, model=self.model)
+        logger.info("groq_synthesizing_answer", model=self.model)
+        client = self._require_client()
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
         max_attempts = 4
         for attempt in range(max_attempts):
             try:
-                response = await self.client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
@@ -109,7 +122,7 @@ class GroqSynthesizer:
                 ) and attempt < max_attempts - 1:
                     wait_sec = 2.0 * (attempt + 1) + 0.5
                     logger.warning(
-                        "groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec, query=query
+                        "groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec
                     )
                     await asyncio.sleep(wait_sec)
                     continue
@@ -125,13 +138,14 @@ class GroqSynthesizer:
         graph_context: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming synthesis of a grounded answer yielding delta text tokens."""
-        logger.info("groq_streaming_synthesis", query=query, model=self.model)
+        logger.info("groq_streaming_synthesis", model=self.model)
+        client = self._require_client()
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
         max_attempts = 4
         for attempt in range(max_attempts):
             try:
-                response = await self.client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
@@ -152,7 +166,6 @@ class GroqSynthesizer:
                         "groq_stream_rate_limit_retry",
                         attempt=attempt + 1,
                         wait_sec=wait_sec,
-                        query=query,
                     )
                     await asyncio.sleep(wait_sec)
                     continue

@@ -47,11 +47,33 @@ async def test_rfc9457_error_shielding_scrubs_all_credentials():
         data = response.json()
         assert "detail" in data
 
-        # Assert no sensitive credentials survived in detail
-        assert "gsk_dummySecretKey" not in data["detail"]
-        assert "AIzaSy" not in data["detail"]
-        assert "Bearer" not in data["detail"]
-        assert "[REDACTED]" in data["detail"]
+        # Unexpected errors never echo exception text; only a reference id is returned
+        body = response.text
+        assert "gsk_dummySecretKey" not in body
+        assert "AIzaSy" not in body
+        assert "Bearer" not in body
+        assert "api.groq.com" not in body
+        assert data["requestId"] in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_internal_error_does_not_leak_paths_or_internals():
+    """Unexpected exceptions return a generic body with a request id, not str(exc)."""
+
+    @get("/boom")
+    async def boom() -> None:
+        raise RuntimeError("cannot open /srv/app/data/lattice_rag.db: MATCH (n) RETURN n")
+
+    app = Litestar(
+        route_handlers=[boom],
+        exception_handlers={Exception: secret_sanitizing_exception_handler},
+    )
+    async with AsyncTestClient(app) as client:
+        response = await client.get("/boom")
+        assert response.status_code == 500
+        assert "/srv/app" not in response.text
+        assert "MATCH" not in response.text
+        assert response.json()["requestId"]
 
 
 @pytest.mark.asyncio

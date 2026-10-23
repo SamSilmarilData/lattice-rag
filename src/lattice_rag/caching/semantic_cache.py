@@ -67,7 +67,7 @@ class SemanticCache:
             self._exact_map.move_to_end(norm_key)
             self._hits += 1
             self._exact_hits += 1
-            logger.info("cache_hit_exact", query=query_text)
+            logger.info("cache_hit_exact")
             return self._exact_map[norm_key]
         return None
 
@@ -119,7 +119,6 @@ class SemanticCache:
                         self._exact_map.move_to_end(best_norm)
                     logger.info(
                         "cache_hit_fuzzy",
-                        query=query_text,
                         score=best_score,
                         noul_prob=noul_result.noul,
                     )
@@ -128,7 +127,6 @@ class SemanticCache:
                     noul_prob = noul_result.noul if noul_result else 0.0
                     logger.info(
                         "cache_noul_rejected",
-                        query=query_text,
                         score=best_score,
                         noul_prob=noul_prob,
                     )

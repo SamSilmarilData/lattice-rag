@@ -7,6 +7,7 @@ from litestar.di import NamedDependency
 from litestar.params import SkipValidation
 
 from lattice_rag.api.dtos import BenchmarkRunResponse, StageBenchmarkDTO
+from lattice_rag.api.guards import require_admin_key
 from lattice_rag.benchmark import BenchmarkEngine
 from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.orchestration.graph import RAGOrchestrator
@@ -20,6 +21,7 @@ class BenchmarkController(Controller):
     """Litestar controller for executing automated performance latency benchmarks."""
 
     path = "/api/v1/benchmark"
+    guards = [require_admin_key]
 
     @post("/run")
     async def run_benchmark(

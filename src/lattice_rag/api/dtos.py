@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import msgspec
+
+# Request size bounds: keep user-supplied text small enough that embedding,
+# GLiNER extraction, and LLM prompts stay bounded per request.
+MAX_QUERY_CHARS = 2_000
+MAX_DOCUMENT_CHARS = 200_000
+
+QueryText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_QUERY_CHARS)]
+DocumentId = Annotated[str, msgspec.Meta(pattern=r"^[\w.-]{1,128}$")]
+Title = Annotated[str, msgspec.Meta(min_length=1, max_length=512)]
+DocumentText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_DOCUMENT_CHARS)]
+Tag = Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
 
 
 class QueryRequest(msgspec.Struct, rename="camel"):
     """Request DTO for queries."""
 
-    query: str
+    query: QueryText
     stream: bool = False
     filter_tags: list[str] = []
 
@@ -126,10 +137,10 @@ class QueryResponse(msgspec.Struct, rename="camel"):
 class IngestRequest(msgspec.Struct, rename="camel"):
     """Request DTO for document ingestion."""
 
-    document_id: str
-    title: str
-    text: str
-    tags: list[str] = []
+    document_id: DocumentId
+    title: Title
+    text: DocumentText
+    tags: Annotated[list[Tag], msgspec.Meta(max_length=32)] = []
 
 
 class IngestResponse(msgspec.Struct, rename="camel"):

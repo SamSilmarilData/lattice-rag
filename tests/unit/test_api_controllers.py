@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 from litestar import Litestar
+from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
@@ -14,7 +15,10 @@ from lattice_rag.api.controllers import (
     IngestController,
     QueryController,
 )
+from lattice_rag.api.guards import ADMIN_KEY_HEADER
+from lattice_rag.config import AppConfig
 from lattice_rag.orchestration.state import PipelineState
+from lattice_rag.security import SecretStr
 from lattice_rag.storage.db import IngestStats
 
 
@@ -89,6 +93,16 @@ def mock_controllers_app():
             "fallback_cache": Provide(lambda: mock_fb_cache, sync_to_thread=False),
             "config": Provide(lambda: mock_config, sync_to_thread=False),
         },
+        state=State(
+            {
+                "config": AppConfig(
+                    typesafe_api_key=SecretStr("ts"),
+                    groq_api_key=SecretStr(""),
+                    gemini_api_key=SecretStr(""),
+                    admin_api_key=SecretStr("admin-secret"),
+                )
+            }
+        ),
     )
     return app, {
         "orchestrator": mock_orchestrator,
@@ -136,7 +150,9 @@ async def test_api_ingest_endpoint(mock_controllers_app):
             "title": "Architecture Overview",
             "text": "LatticeDB operates as an in-process property-graph database. It supports HNSW vectors.",
         }
-        resp = await client.post("/api/v1/ingest", json=payload)
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["documentId"] == "doc_arch"
@@ -192,3 +208,41 @@ async def test_api_rfc9457_error_secret_sanitization(mock_controllers_app):
         assert "secret_token_123" not in data["detail"]
         assert data["status"] == 500
         assert data["title"] == "Internal Server Error"
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_requires_admin_key(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_x", "title": "T", "text": "Some text."}
+        resp = await client.post("/api/v1/ingest", json=payload)
+        assert resp.status_code == 401
+        mocks["store"].ingest_document.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"documentId": "../etc/passwd", "title": "T", "text": "x"},
+        {"documentId": "doc", "title": "T", "text": ""},
+        {"documentId": "doc", "title": "T", "text": "x" * 200_001},
+    ],
+)
+async def test_api_ingest_rejects_invalid_payloads(mock_controllers_app, payload):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["", "x" * 2_001])
+async def test_api_query_rejects_empty_or_oversized_query(mock_controllers_app, query):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query", json={"query": query})
+        assert resp.status_code == 400
+        mocks["orchestrator"].run.assert_not_called()

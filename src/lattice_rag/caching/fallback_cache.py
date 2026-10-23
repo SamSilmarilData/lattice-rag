@@ -11,6 +11,8 @@ import pybreaker
 import structlog
 from redis.asyncio import Redis
 
+from lattice_rag.security import sanitize_error_detail
+
 logger = structlog.get_logger(__name__)
 
 REDIS_HASH_KEY = "cache:fallback:queries"
@@ -79,7 +81,7 @@ class FallbackCache:
             logger.info("embedded_redis_connected", mode="fakeredis")
         else:
             self.redis = Redis.from_url(self.redis_url, decode_responses=True)
-            logger.info("external_redis_connected", url=self.redis_url)
+            logger.info("external_redis_connected", url=sanitize_error_detail(self.redis_url))
 
     async def _ensure_connected(self) -> None:
         if self.redis is None:
@@ -165,7 +167,7 @@ class FallbackCache:
         matches = difflib.get_close_matches(norm_query, self._cached_queries, n=1, cutoff=0.5)
         if matches:
             best_match = matches[0]
-            logger.info("fuzzy_fallback_matched", query=query, matched=best_match)
+            logger.info("fuzzy_fallback_matched", matched=best_match)
             return await self.get_fallback(best_match)
 
         # Token overlap matching with pre-tokenized index
@@ -187,7 +189,7 @@ class FallbackCache:
 
             if best_candidate is not None and best_score >= 0.3:
                 logger.info(
-                    "token_overlap_matched", query=query, matched=best_candidate, score=best_score
+                    "token_overlap_matched", matched=best_candidate, score=best_score
                 )
                 return await self.get_fallback(best_candidate)
 

@@ -96,3 +96,59 @@ REDIS_URL=redis://localhost:6379/0
     file_stat = os.stat(dotenv_file)
     file_mode = stat.S_IMODE(file_stat.st_mode)
     assert file_mode == 0o600
+
+
+def test_secret_str_truthiness():
+    """Empty secrets are falsy so `if config.groq_api_key` reflects configuration."""
+    assert not SecretStr("")
+    assert SecretStr("gsk_x")
+
+
+def test_redaction_covers_password_only_uri():
+    """redis://:password@host has no username and must still be redacted."""
+    cleaned = sanitize_error_detail("connecting to redis://:hunter2pass@cache:6379/0")
+    assert "hunter2pass" not in cleaned
+
+
+def test_redacting_formatter_scrubs_structlog_and_tracebacks(caplog: pytest.LogCaptureFixture):
+    """structlog output and exception tracebacks are redacted once rendered."""
+    import structlog
+
+    from lattice_rag.security import RedactingFormatter, configure_structlog
+
+    configure_structlog()
+    formatter = RedactingFormatter()
+    with caplog.at_level(logging.INFO):
+        structlog.get_logger("redaction-test").info("connect", url="redis://:pw123secret@h:1")
+        try:
+            raise RuntimeError("upstream rejected gsk_tracebacksecret")
+        except RuntimeError:
+            logging.getLogger("redaction-test").exception("failed")
+
+    rendered = "\n".join(formatter.format(r) for r in caplog.records)
+    assert "pw123secret" not in rendered
+    assert "gsk_tracebacksecret" not in rendered
+    assert "[REDACTED]" in rendered
+
+
+def test_migrate_keeps_file_when_no_keys(tmp_path: Path):
+    """An apikeys.md without recognizable keys must not be deleted."""
+    apikeys_file = tmp_path / "apikeys.md"
+    apikeys_file.write_text("my groq key is in my password manager\n", encoding="utf-8")
+
+    assert migrate_apikeys_to_dotenv(apikeys_file, tmp_path / ".env") is False
+    assert apikeys_file.exists()
+
+
+def test_migrate_skips_keys_already_in_dotenv(tmp_path: Path):
+    """Re-running the migration does not duplicate keys that .env already defines."""
+    dotenv_file = tmp_path / ".env"
+    dotenv_file.write_text("GROQ_API_KEY=gsk_existing\n", encoding="utf-8")
+    apikeys_file = tmp_path / "apikeys.md"
+    apikeys_file.write_text("GROQ_API_KEY=gsk_new\nTYPESAFE_API_KEY=ts_new\n", encoding="utf-8")
+
+    assert migrate_apikeys_to_dotenv(apikeys_file, dotenv_file) is True
+    text = dotenv_file.read_text(encoding="utf-8")
+    assert text.count("GROQ_API_KEY=") == 1
+    assert "TYPESAFE_API_KEY=ts_new" in text
+    assert stat.S_IMODE(os.stat(dotenv_file).st_mode) == 0o600

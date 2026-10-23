@@ -57,6 +57,16 @@ async def test_get_subgraph_endpoint(mock_graph_app):
         mock_store.get_subgraph_snapshot.assert_called_once_with(limit=25)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -5, 501])
+async def test_get_subgraph_rejects_out_of_range_limit(mock_graph_app, limit):
+    app, mock_store = mock_graph_app
+    async with AsyncTestClient(app) as client:
+        response = await client.get(f"/api/v1/graph/subgraph?limit={limit}")
+        assert response.status_code == 400
+        mock_store.get_subgraph_snapshot.assert_not_called()
+
+
 def test_lattice_store_get_subgraph_snapshot():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_snapshot.db"

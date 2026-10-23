@@ -71,7 +71,7 @@ class QueryRouter:
             logger.debug("deterministic_chitchat_fast_path", query=query)
             return RouteDecision(route="chitchat", confidence=1.0)
 
-        logger.info("Routing query", query=query)
+        logger.debug("Routing query", query=query)
         try:
             response = await self._client.system_one(
                 state={"query": query},

@@ -7,6 +7,7 @@ from litestar.di import NamedDependency
 from litestar.params import JSONBody, SkipValidation
 
 from lattice_rag.api.dtos import IngestRequest, IngestResponse
+from lattice_rag.api.guards import require_admin_key
 from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.ingestion.ingester import DocumentIngester, chunk_text
 from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -23,6 +24,7 @@ class IngestController(Controller):
     """Litestar controller for document ingestion."""
 
     path = "/api/v1"
+    guards = [require_admin_key]
 
     @post("/ingest")
     async def ingest(

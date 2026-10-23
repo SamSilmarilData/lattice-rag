@@ -10,7 +10,9 @@ import click
 @click.group()
 def main() -> None:
     """lattice-rag: In-process Hybrid GraphRAG engine."""
-    pass
+    from lattice_rag.security import configure_logging
+
+    configure_logging()
 
 
 @main.command()
@@ -35,14 +37,13 @@ def setup_keys() -> None:
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0", help="Server host")
-@click.option("--port", default=8000, type=int, help="Server port")
-def serve(host: str, port: int) -> None:
+@click.option("--host", default=None, help="Server host (default: HOST env or 0.0.0.0)")
+@click.option("--port", default=None, type=int, help="Server port (default: PORT env or 8000)")
+def serve(host: str | None, port: int | None) -> None:
     """Start the Granian ASGI server."""
-    click.echo(f"Starting lattice-rag on {host}:{port}")
     from lattice_rag.server import main as server_main
 
-    server_main()
+    server_main(host=host, port=port)
 
 
 async def _build_harness() -> dict[str, Any]:
@@ -157,7 +158,7 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     """Ingest a text file into the knowledge graph."""
     import asyncio
 
-    from lattice_rag.config import get_config
+    from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
@@ -167,7 +168,7 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     click.echo(f"Ingesting: {path.name} as doc_id='{doc_id or path.stem}'")
 
     async def _ingest() -> None:
-        config = get_config()
+        config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
         embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
         extractor = EntityExtractor()
@@ -189,7 +190,7 @@ def seed(dataset: str) -> None:
     import asyncio
     import json
 
-    from lattice_rag.config import get_config
+    from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
@@ -209,7 +210,7 @@ def seed(dataset: str) -> None:
     click.echo(f"Seeding LatticeDB with {len(corpus)} corpus documents from {dataset}...")
 
     async def _seed() -> None:
-        config = get_config()
+        config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
         embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
         extractor = EntityExtractor()

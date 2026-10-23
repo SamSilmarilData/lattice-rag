@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -22,14 +23,27 @@ class GeminiFallback:
         model: str = "gemini-3.8-flash",
         client: genai.Client | None = None,
     ) -> None:
-        """Initializes the Gemini genai client with configurable model and API key."""
+        """Initializes the Gemini genai client with configurable model and API key.
+
+        Without a key (argument, GEMINI_API_KEY or GOOGLE_API_KEY) the client stays unset
+        and every call raises, so the cascade degrades instead of failing boot.
+        """
         self.model = model
+        resolved_key = (
+            api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        )
+        self.client: genai.Client | None
         if client is not None:
             self.client = client
-        elif api_key:
-            self.client = genai.Client(api_key=api_key)
+        elif resolved_key:
+            self.client = genai.Client(api_key=resolved_key)
         else:
-            self.client = genai.Client()
+            self.client = None
+
+    def _require_client(self) -> genai.Client:
+        if self.client is None:
+            raise RuntimeError("Gemini synthesis unavailable: GEMINI_API_KEY is not configured")
+        return self.client
 
     def _build_prompt(
         self,
@@ -87,11 +101,12 @@ class GeminiFallback:
         graph_context: dict[str, Any] | None = None,
     ) -> str:
         """Non-streaming synthesis using Gemini."""
-        logger.info("gemini_synthesizing_answer", query=query, model=self.model)
+        logger.info("gemini_synthesizing_answer", model=self.model)
+        client = self._require_client()
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
         try:
-            response = await self.client.aio.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=self.model,
                 contents=prompt,
             )
@@ -108,11 +123,12 @@ class GeminiFallback:
         graph_context: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming synthesis using Gemini."""
-        logger.info("gemini_streaming_synthesis", query=query, model=self.model)
+        logger.info("gemini_streaming_synthesis", model=self.model)
+        client = self._require_client()
         prompt = self._build_prompt(query, context_chunks, graph_context)
 
         try:
-            stream_result = self.client.aio.models.generate_content_stream(
+            stream_result = client.aio.models.generate_content_stream(
                 model=self.model,
                 contents=prompt,
             )
