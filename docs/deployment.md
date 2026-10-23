@@ -31,7 +31,7 @@ Google Cloud Run provides an **Always Free tier** every single month that perfec
 - Configurable instance memory up to **2 GiB or 4 GiB**
 
 ### Zero-Cost Calculation
-Cloud Run scales to zero when idle. An active GraphRAG query with hybrid retrieval, Cypher traversal, cross-encoder reranking, and Jev guardrail finishes in ~800ms:
+Cloud Run scales to zero when idle. An active GraphRAG query with hybrid retrieval, graph traversal, cross-encoder reranking, and Jev guardrail finishes in ~800ms:
 $$\text{Free Queries} = \frac{360,000 \text{ GiB-seconds}}{2 \text{ GiB} \times 0.8\text{s}} \approx \mathbf{225,000 \text{ queries / month for } \$0.00}$$
 
 ### Deployment Steps
@@ -42,18 +42,20 @@ $$\text{Free Queries} = \frac{360,000 \text{ GiB-seconds}}{2 \text{ GiB} \times 
    gcloud config set project YOUR_PROJECT_ID
    ```
 
-2. **One-Command Automated Deployment**:
+2. **Store the API keys in Secret Manager** (once per project). The deploy script refuses to run until all four exist, and keys are never passed as plain environment variables or baked into the image:
+   ```bash
+   for name in TYPESAFE_API_KEY GROQ_API_KEY GEMINI_API_KEY ADMIN_API_KEY; do
+     read -rsp "$name: " value && echo
+     printf '%s' "$value" | gcloud secrets create "$name" --data-file=-
+   done
+   ```
+   Grant the Cloud Run runtime service account `roles/secretmanager.secretAccessor` on these secrets.
+
+3. **One-Command Automated Deployment**:
    ```bash
    ./scripts/deploy_cloud_run.sh YOUR_PROJECT_ID us-central1
    ```
-
-3. **Configure Environment Secrets**:
-   Set your production API keys in Cloud Run (via Cloud Console or `gcloud`):
-   ```bash
-   gcloud run services update lattice-rag \
-     --region us-central1 \
-     --set-env-vars TYPESAFE_API_KEY="your-typesafe-key",GROQ_API_KEY="your-groq-key",GEMINI_API_KEY="your-gemini-key"
-   ```
+   The service is deployed with `--max-instances 1` because the LatticeDB file lives on the instance's ephemeral disk: documents ingested at runtime are lost on restart or redeploy, while the golden corpus is pre-seeded into the image. The service is publicly reachable, but ingest, eval and benchmark require the `X-Admin-Key` header.
 
 4. **Verify Deployment**:
    Open the Cloud Run service URL in your browser:
@@ -112,4 +114,6 @@ Oracle Cloud provides the industry's most generous persistent compute tier for f
 
 `lattice-rag`'s multi-stage `Dockerfile` incorporates two key production optimizations:
 1. **Pre-Baked Model Weights**: ONNX weights for `bge-small-en-v1.5` and `bge-reranker-v2-m3` are downloaded during image creation (`docker build`), eliminating 600MB+ network pulls on container cold start.
-2. **Pre-Seeded Database Schema**: LatticeDB property graph tables and BM25 FTS5 indexes are initialized at build time, guaranteeing sub-second container readiness.
+2. **Pre-Seeded Database**: `lattice-rag seed` ingests the golden corpus at build time (it needs no API keys and skips documents that already exist), so the graph, HNSW and BM25 indexes are ready when the container starts.
+
+The runtime stage runs as an unprivileged user (`uid 10001`), excludes compilers (dependencies are built in a separate stage), and declares a `HEALTHCHECK` on `/health`.

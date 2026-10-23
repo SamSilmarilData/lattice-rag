@@ -20,14 +20,3 @@ def reset_config_cache():
     get_config.cache_clear()
     yield
     get_config.cache_clear()
-
-
-@pytest.fixture(autouse=True, scope="session")
-def cleanup_process_pool():
-    yield
-    try:
-        from lattice_rag.orchestration.pool import shutdown_pool
-
-        shutdown_pool()
-    except Exception:
-        pass

@@ -47,10 +47,10 @@ Instead of invoking large generative models for intent recognition, `lattice-rag
   - `vector_exact`: Direct factual lookups and code definitions.
   - `graph_relational`: Questions requiring multi-step relational hops across entities.
   - `hybrid`: Broad semantic queries needing both text context and relational graph structure.
-  - `chitchat`: Greetings and pleasantries.
+  - `chitchat`: Greetings and pleasantries. Messages made up entirely of small talk ("hi!", "thanks a lot", "what can you do?") skip the Jev call through a deterministic fast path; a question that merely contains such a word ("How does HNSW help recall?") is always routed by Jev.
   - `massive_context`: Cross-corpus summarizations requiring 1M token analysis.
 - **Context Guardrail (`routing/guardrail.py`):**
-  Uses the boolean `Noul` primitive to batch-score retrieved chunks against the user query, pruning irrelevant or tangential passages to eliminate hallucination.
+  Uses the boolean `Noul` primitive to batch-score retrieved chunks against the user query, pruning irrelevant or tangential passages. It returns a per-request `GuardrailResult(chunks, low_grounding)`; when no chunk passes, the answer is generated without evidence, flagged `lowGrounding: true` in the response, and never cached.
 
 ### 3.3 Storage Engine (LatticeDB)
 - Embedded single-file property-graph engine (`data/lattice_rag.db`).
@@ -60,13 +60,13 @@ Instead of invoking large generative models for intent recognition, `lattice-rag
   - Sub-millisecond graph traversals using native C bindings.
 
 ### 3.4 3-Stage Hybrid Retrieval Pipeline
-1. **Stage 1 (Vector Candidate Recall):** FastEmbed computes the query embedding; LatticeDB executes HNSW vector search and BM25 search concurrently, combining results via Reciprocal Rank Fusion (RRF).
-2. **Stage 2 (Relational Traversal):** Identifies entity anchors from Stage 1 chunks and executes dynamic 1-to-2 hop Cypher traversal (budget-capped at 25 nodes to ensure sub-second latency).
-3. **Stage 3 (Precision Reranking):** FastEmbed runs a CPU-quantized Cross-Encoder (`bge-reranker-v2-m3`) scoring combined text chunks and linearized graph triples (`[Entity A] -> [RELATION] -> [Entity B]`) to isolate the definitive top 5 chunks.
+1. **Stage 1 (Vector Candidate Recall):** The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`). Each candidate keeps its `doc_id` and `position` for citations.
+2. **Stage 2 (Relational Traversal):** Identifies entity anchors from the Stage 1 chunks and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`), budget-capped at 25 nodes. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.
+3. **Stage 3 (Precision Reranking):** The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`). Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead. Each candidate costs about 100 ms on CPU, which is why the headroom is small.
 
 ### 3.5 Multi-Tier Caching & Circuit Breaker
 
-The synthesis generation subsystem employs an automated finite state machine circuit breaker (`pybreaker`) paired with a 3-tier cascade fallback pipeline:
+`ResilientSynthesizer` (`generation/resilient_synthesizer.py`) is the single generation path for both `RAGOrchestrator.run()` and `stream_query()`. It owns one `pybreaker` circuit breaker around Groq, paired with a 3-tier cascade:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d6-circuit-breaker-dark.svg">
@@ -76,9 +76,10 @@ The synthesis generation subsystem employs an automated finite state machine cir
 
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d6-circuit-breaker-dark.html">Dark Specimen</a> | <a href="diagrams/d6-circuit-breaker-light.html">Light Specimen</a></sub>
 
-- **Tier 1 (Semantic Vector Cache & Primary Groq):** Evaluates incoming query against in-memory query embeddings. If cosine similarity $\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence, returning the response in under 20ms. Standard non-cached queries route to primary **GroqCloud Llama 3.3** (`200+ tok/s`).
-- **Tier 2 (Circuit Breaker & Cascade 1 Fallback):** `pybreaker` monitors Groq API calls (`fail_max=3`, `reset_timeout=30s`). On 3 consecutive failures or 429 rate limits, the circuit trips to `OPEN`, diverting traffic transparently to **Google Gemini 3.8 Flash** (massive context & high resilience). After 30s, the breaker transitions to `HALF-OPEN` to evaluate a single canary probe.
-- **Tier 3 (Cascade 2 Offline FAQ Hash):** If external cloud LLM APIs are unreachable, the system falls back to a pre-computed in-memory Redis hash map (`cache:fallback:queries`) answering the top 50 domain queries in $< 2$ms.
+- **Tier 1 (Semantic Vector Cache & Primary Groq):** Evaluates incoming query against in-memory query embeddings. If cosine similarity $\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence before the cached answer is returned. Standard non-cached queries route to primary **GroqCloud** (`GROQ_MODEL`). Only answers from the primary provider that were grounded in guardrail-approved evidence are cached.
+- **Tier 2 (Circuit Breaker & Cascade 1 Fallback):** The breaker records every Groq outcome from both the buffered and streaming paths (`fail_max=3`, `reset_timeout=30s`). A Groq call that ends in an error counts as one failure. The Groq SDK and `GroqSynthesizer` retry HTTP 429 internally first, so a rate-limited call only counts once its retries are exhausted. Client disconnects (`asyncio.CancelledError`) are not counted. After 3 consecutive failures the circuit opens and Groq is skipped in favour of **Gemini** (`GEMINI_MODEL`) until the reset timeout lets a probe through. Answers produced by Gemini or the FAQ are marked `degraded: true`.
+- **Tier 3 (Cascade 2 Offline FAQ Hash):** If both LLM providers fail, the system returns the closest pre-computed answer from the Redis hash (`cache:fallback:queries`, seeded from `fallback_queries.json`). This answer is for the closest *seeded* question, not necessarily the one asked, so it is always marked degraded.
+- **Streaming:** The cascade only moves to the next provider while nothing has been emitted. If a provider fails after its first token, the stream sends an `error` event and ends with `done` (`degraded: true`) rather than appending a second provider's answer.
 
-### 3.6 CPU Isolation via ProcessPoolExecutor
-To prevent ONNX embeddings and GLiNER extraction from blocking Litestar's asynchronous event loop, all intensive CPU tasks are strictly isolated in a dedicated `ProcessPoolExecutor` via `run_in_pool()`.
+### 3.6 Keeping CPU Work Off the Event Loop
+Embedding, reranking, GLiNER extraction and LatticeDB reads and writes run in worker threads via `asyncio.to_thread()`, so the Litestar event loop keeps serving other requests. ONNX Runtime releases the GIL during inference, so the heaviest work (embedding and reranking) runs in parallel with request handling, without the pickling and model-reload cost of a process pool.

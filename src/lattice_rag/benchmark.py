@@ -6,6 +6,7 @@ import statistics
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -20,6 +21,16 @@ from lattice_rag.retrieval.vector_search import HybridSearcher
 from lattice_rag.storage.db import LatticeStore
 
 logger = logging.getLogger(__name__)
+
+
+class _AlwaysEquivalent:
+    """Stand-in Jev client that confirms every cache candidate without a network call."""
+
+    async def system_one(self, state: Any, questions: Any) -> Any:
+        return SimpleNamespace(nouls={"equivalent": SimpleNamespace(noul=1.0)})
+
+    async def aclose(self) -> None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -47,6 +58,7 @@ class BenchmarkReport:
     sub_second_sla_met: bool = True
     tier1_cache_sla_met: bool = True
     total_duration_sec: float = 0.0
+    live_llm: bool = False  # False: the E2E stage (and its SLA) covers retrieval only
 
 
 class BenchmarkEngine:
@@ -115,25 +127,40 @@ class BenchmarkEngine:
         iterations: int = 15,
         warmup: int = 2,
     ) -> LatencyStats:
-        """Measure Tier 1 Semantic Cache resolution latency."""
-        from types import SimpleNamespace
-        from unittest.mock import AsyncMock
+        """Measure the Tier 1 exact-match hit path (no embedding, no network)."""
+        cache = SemanticCache(ts_client=None)
+        cache.put(query, self.embed_svc.embed_query(query), {"answer": "cached"})
 
-        mock_ts = AsyncMock()
-        mock_ts.system_one.return_value = SimpleNamespace(
-            nouls={"equivalent": SimpleNamespace(noul=0.95)}
+        def _probe() -> Any:
+            return cache.get_exact(query)
+
+        return await self.benchmark_callable(
+            name="Tier 1 Cache: exact hit",
+            fn=_probe,
+            iterations=iterations,
+            warmup=warmup,
         )
-        cache = SemanticCache(ts_client=mock_ts)
-        query_emb = self.embed_svc.embed_query(query)
 
-        # Seed entry
-        cache.put(query, query_emb, {"answer": "LatticeDB is an embedded database."})
+    async def benchmark_tier1_similarity(
+        self,
+        query: str = "What is LatticeDB?",
+        iterations: int = 15,
+        warmup: int = 2,
+    ) -> LatencyStats:
+        """Measure the Tier 1 cosine-similarity scan only.
+
+        A real fuzzy hit also makes a Jev Noul network call to confirm equivalence; that
+        call is replaced by an always-yes verifier here, so this is a lower bound.
+        """
+        cache = SemanticCache(ts_client=_AlwaysEquivalent(), vector_dimensions=384)  # type: ignore[arg-type]
+        query_emb = self.embed_svc.embed_query(query)
+        cache.put(query, query_emb, {"answer": "cached"})
 
         async def _probe() -> Any:
             return await cache.get(query, query_emb)
 
         return await self.benchmark_callable(
-            name="Tier 1 Semantic Cache",
+            name="Tier 1 Cache: similarity scan (excl. Noul call)",
             fn=_probe,
             iterations=iterations,
             warmup=warmup,
@@ -145,7 +172,7 @@ class BenchmarkEngine:
         iterations: int = 10,
         warmup: int = 2,
     ) -> LatencyStats:
-        """Measure Stage 1 HNSW <=> vector search + BM25 @@ text search with RRF."""
+        """Measure Stage 1 HNSW vector search + BM25 text search with RRF."""
         searcher = HybridSearcher(self.store, self.embed_svc)
         q_idx = 0
 
@@ -168,17 +195,20 @@ class BenchmarkEngine:
         iterations: int = 10,
         warmup: int = 2,
     ) -> LatencyStats:
-        """Measure Stage 2 Dynamic Cypher multi-hop graph traversal."""
+        """Measure Stage 2 multi-hop graph traversal from Stage 1 chunk anchors."""
         traverser = GraphTraverser(self.store)
         if not anchor_ids:
-            snapshot = self.store.get_subgraph_snapshot(5)
-            anchor_ids = [n["id"] for n in snapshot.nodes[:3]] or [1]
+            # Traversal starts from *chunk* ids (Stage 1 output), not entity ids
+            hits = await HybridSearcher(self.store, self.embed_svc).search(
+                "LatticeDB graph and vector search", top_k=10
+            )
+            anchor_ids = [h.node_id for h in hits]
 
         async def _traverse() -> Any:
             return await traverser.traverse(anchor_ids, route="graph_relational", budget=25)
 
         return await self.benchmark_callable(
-            name="Stage 2: Dynamic Cypher Traversal",
+            name="Stage 2: Graph Traversal (2-hop)",
             fn=_traverse,
             iterations=iterations,
             warmup=warmup,
@@ -233,7 +263,7 @@ class BenchmarkEngine:
                 return True
 
             return await self.benchmark_callable(
-                name="End-to-End Pipeline (In-Process RAG)",
+                name="End-to-End: retrieval only (no routing, guardrail or LLM)",
                 fn=_pipeline,
                 iterations=iterations,
                 warmup=warmup,
@@ -246,20 +276,16 @@ class BenchmarkEngine:
             q = queries[q_idx % len(queries)]
             q_idx += 1
             if live_llm:
-                return await orch.run(q)
-            else:
-                # Use in-process retrieval pipeline path directly without external LLM network hop
-                ret_pipeline: Any = getattr(
-                    orch,
-                    "retrieval_pipeline",
-                    getattr(orch, "retrieval", None),
-                )
-                if ret_pipeline is not None and hasattr(ret_pipeline, "execute"):
-                    return await ret_pipeline.execute(q, route="hybrid", apply_guardrail=False)
-                return await orch.run(q)
+                # Full StateGraph, bypassing Tier 1 so every iteration does real work
+                return await orch.run(q, use_cache=False)
+            return await orch.retrieval.execute(q, route="hybrid", apply_guardrail=False)
 
         return await self.benchmark_callable(
-            name="End-to-End Pipeline (Full StateGraph)",
+            name=(
+                "End-to-End: full pipeline (routing + retrieval + LLM)"
+                if live_llm
+                else "End-to-End: retrieval only (no routing, guardrail or LLM)"
+            ),
             fn=_e2e,
             iterations=iterations,
             warmup=warmup,
@@ -276,7 +302,7 @@ class BenchmarkEngine:
         start_suite = time.perf_counter()
         sample_queries = queries or [
             "How does LatticeDB combine HNSW and BM25 search in a single binary?",
-            "Explain the multi-hop Cypher traversal process from entity anchors.",
+            "Explain the multi-hop graph traversal process from entity anchors.",
             "Compare the caching tiers in the architecture: Tier 1 vs Tier 2 fallback.",
             "What is the role of FastEmbed and what dense embedding model does it use?",
             "How are relation triples extracted from text and mapped into LatticeDB?",
@@ -284,8 +310,13 @@ class BenchmarkEngine:
 
         report = BenchmarkReport()
 
-        # 1. Tier 1 Semantic Cache Benchmark
+        # 1. Tier 1 cache: exact hit (SLA-gated) and similarity scan
         report.stages["tier1_cache"] = await self.benchmark_tier1_cache(
+            query=sample_queries[0],
+            iterations=max(iterations, 10),
+            warmup=warmup,
+        )
+        report.stages["tier1_similarity"] = await self.benchmark_tier1_similarity(
             query=sample_queries[0],
             iterations=max(iterations, 10),
             warmup=warmup,
@@ -298,7 +329,7 @@ class BenchmarkEngine:
             warmup=warmup,
         )
 
-        # 3. Stage 2 Dynamic Cypher Traversal Benchmark
+        # 3. Stage 2 Graph Traversal Benchmark
         report.stages["stage2_traversal"] = await self.benchmark_stage2_traversal(
             iterations=iterations,
             warmup=warmup,
@@ -320,6 +351,7 @@ class BenchmarkEngine:
         )
 
         report.total_duration_sec = time.perf_counter() - start_suite
+        report.live_llm = live_llm
 
         # Evaluate Dual SLAs
         e2e_p95 = report.stages["e2e_pipeline"].p95_ms
@@ -333,31 +365,29 @@ class BenchmarkEngine:
     @staticmethod
     def format_ascii_table(report: BenchmarkReport) -> str:
         """Render a clean, aligned ANSI/ASCII table of benchmark percentiles and SLAs."""
+        name_width = max([len("Pipeline Stage"), *(len(s.stage) for s in report.stages.values())])
+        cols = ["p50", "p90", "p95", "p99", "Mean", "QPS"]
+        rule = "+" + "-" * (name_width + 2) + ("+" + "-" * 10) * len(cols) + "+"
         header = (
-            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+\n"
-            "| Pipeline Stage                                   | p50    | p90    | p95    | p99    | Mean   | QPS    |\n"
-            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
+            "| " + "Pipeline Stage".ljust(name_width) + " |" + "".join(f" {c:<8} |" for c in cols)
         )
-        lines = [header]
+        lines = [rule, header, rule]
 
         for s in report.stages.values():
-            line = (
-                f"| {s.stage:<48} | {s.p50_ms:>5.1f}ms | {s.p90_ms:>5.1f}ms | "
-                f"{s.p95_ms:>5.1f}ms | {s.p99_ms:>5.1f}ms | {s.mean_ms:>5.1f}ms | {s.qps:>6.1f} |"
-            )
-            lines.append(line)
+            values = [s.p50_ms, s.p90_ms, s.p95_ms, s.p99_ms, s.mean_ms]
+            cells = "".join(f" {v:>6.1f}ms |" for v in values) + f" {s.qps:>8.1f} |"
+            lines.append("| " + s.stage.ljust(name_width) + " |" + cells)
 
-        lines.append(
-            "+--------------------------------------------------+--------+--------+--------+--------+--------+--------+"
-        )
+        lines.append(rule)
 
         sla_e2e = "[PASSED]" if report.sub_second_sla_met else "[FAILED]"
         sla_cache = "[PASSED]" if report.tier1_cache_sla_met else "[FAILED]"
+        e2e_scope = "full pipeline" if report.live_llm else "retrieval only"
 
         summary = (
             f"\nSLA Verification:\n"
-            f"  * Sub-Second Multi-Hop SLA (E2E p95 < 1000ms):   {sla_e2e}\n"
-            f"  * Tier 1 Cache Latency SLA (Cache p95 < 25ms):   {sla_cache}\n"
+            f"  * Sub-Second SLA, {e2e_scope} (E2E p95 < 1000ms):   {sla_e2e}\n"
+            f"  * Tier 1 exact-hit SLA (p95 < 25ms):   {sla_cache}\n"
             f"Total Benchmark Suite Duration: {report.total_duration_sec:.2f}s\n"
         )
         lines.append(summary)

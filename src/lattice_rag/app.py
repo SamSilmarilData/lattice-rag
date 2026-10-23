@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import logging
-import os
 import uuid
 from collections.abc import AsyncGenerator
 from http import HTTPStatus
@@ -22,7 +21,9 @@ from litestar.openapi import OpenAPIConfig
 from litestar.openapi.plugins import ScalarRenderPlugin
 from litestar.plugins import InitPluginProtocol
 from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetailsPlugin
+from typesafe_sdk import AsyncTypeSafeClient
 
+from lattice_rag import __version__
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
@@ -42,7 +43,6 @@ from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
-from lattice_rag.orchestration.pool import shutdown_pool
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import ContextGuardrail
@@ -64,9 +64,14 @@ def _resolve_config(config: LatticeAppConfig | None) -> LatticeAppConfig:
         return get_config()
     except SystemExit:
         # Keep every other env setting (DB path, admin key, CORS); only the key is mocked
+        logger.warning(
+            "TYPESAFE_API_KEY is not set: starting in degraded mode (routing falls back to "
+            "hybrid, guardrail and semantic-cache verification are disabled)"
+        )
         return dataclasses.replace(
             load_config(require_typesafe=False),
             typesafe_api_key=SecretStr("mock-typesafe-key-hermetic"),
+            using_mock_keys=True,
         )
 
 
@@ -75,8 +80,9 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     """Lifespan context manager for initializing and closing dependencies."""
     config = _resolve_config(getattr(app.state, "config", None))
 
-    if not os.environ.get("TYPESAFE_API_KEY") and config.typesafe_api_key:
-        os.environ["TYPESAFE_API_KEY"] = config.typesafe_api_key.get_secret_value()
+    def typesafe_client() -> AsyncTypeSafeClient:
+        # Built from config rather than os.environ, so the mock key never leaks into the env
+        return AsyncTypeSafeClient(api_key=config.typesafe_api_key.get_secret_value())
 
     # 1. Embedded storage engine
     store = LatticeStore(config.latticedb_path)
@@ -85,15 +91,17 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     embedding_service = EmbeddingService(
         embed_model=config.embed_model,
         reranker_model=config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
     )
     extractor = EntityExtractor()
 
     # 3. Decision routing & context guardrail
-    router = QueryRouter()
-    guardrail = ContextGuardrail()
+    router = QueryRouter(ts_client=typesafe_client())
+    guardrail = ContextGuardrail(ts_client=typesafe_client())
 
-    # 4. Multi-tier caching
-    semantic_cache = SemanticCache()
+    # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
+    semantic_cache = SemanticCache(ts_client=None if config.using_mock_keys else typesafe_client())
     fallback_cache = FallbackCache(redis_url=config.redis_url)
     await fallback_cache.connect()
 
@@ -106,6 +114,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     groq = GroqSynthesizer(
         api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
         model=config.groq_model,
+        max_tokens=config.llm_max_tokens,
     )
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
@@ -164,14 +173,13 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
-        # Graceful shutdown of connections and worker pool
+        # Graceful shutdown of connections
         await evaluator.close()
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
         await guardrail.close()
         store.close()
-        shutdown_pool()
 
 
 # ── Dependency Providers ──────────────────────────────────────────────
@@ -373,7 +381,7 @@ class ApplicationCore(InitPluginProtocol):
         # Configure OpenAPI with Scalar render plugin
         app_config.openapi_config = OpenAPIConfig(
             title="lattice-rag API",
-            version="1.0.0",
+            version=__version__,
             render_plugins=[ScalarRenderPlugin()],
         )
 

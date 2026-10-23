@@ -1,6 +1,8 @@
 """Unit tests for Litestar API controllers using AsyncTestClient."""
 from __future__ import annotations
 
+import json
+
 from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
@@ -42,7 +44,20 @@ def mock_controllers_app():
     async def mock_stream_gen(q):
         yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
         yield {"event": "token", "data": {"delta": "LatticeDB"}}
-        yield {"event": "done", "data": {"answer": "LatticeDB", "route": "hybrid", "latency_ms": 10.0}}
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "LatticeDB",
+                "route": "hybrid",
+                "cached": False,
+                "latency_ms": 10.0,
+                "sources": [{"node_id": 7, "text": "t", "doc_id": "doc1", "position": 3, "rerank_score": 0.5}],
+                "graph_path": {"nodes": [{"id": 1, "name": "LatticeDB"}], "edges": []},
+                "timings": [{"stage": "retrieval", "duration_ms": 2.0}],
+                "degraded": False,
+                "low_grounding": False,
+            },
+        }
 
     mock_orchestrator.stream_query = mock_stream_gen
 
@@ -77,6 +92,7 @@ def mock_controllers_app():
     mock_config.typesafe_api_key.get_secret_value.return_value = "typesafe_key"
     mock_config.groq_api_key.get_secret_value.return_value = "groq_key"
     mock_config.gemini_api_key.get_secret_value.return_value = "gemini_key"
+    mock_config.using_mock_keys = False
 
     app = Litestar(
         route_handlers=[
@@ -140,6 +156,34 @@ async def test_api_query_stream_sse(mock_controllers_app):
         assert "event: stage" in text
         assert "event: token" in text
         assert "event: done" in text
+
+        done_line = text.split("event: done", 1)[1].split("data: ", 1)[1].splitlines()[0]
+        done = json.loads(done_line)
+        assert done["latencyMs"] == 10.0
+        assert done["lowGrounding"] is False
+        assert done["sources"][0] == {
+            "chunkId": 7, "text": "t", "score": 0.5, "documentId": "doc1", "position": 3
+        }
+        assert done["graphPath"]["nodes"][0]["nodeId"] == 1
+        assert done["timings"][0] == {"stage": "retrieval", "durationMs": 2.0}
+        assert "latency_ms" not in done_line
+
+
+@pytest.mark.asyncio
+async def test_api_query_stream_reports_failures_in_band(mock_controllers_app):
+    """A mid-stream exception becomes an SSE error event with no internal details."""
+    app, mocks = mock_controllers_app
+
+    async def failing_stream(q):
+        yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
+        raise RuntimeError("/srv/secret/path exploded")
+
+    mocks["orchestrator"].stream_query = failing_stream
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query/stream", json={"query": "q"})
+        assert "event: error" in resp.text
+        assert "Reference:" in resp.text
+        assert "/srv/secret" not in resp.text
 
 
 @pytest.mark.asyncio

@@ -130,9 +130,7 @@ class EvalRunner:
                     try:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
                         # answers (possibly from the ephemeral corpus) never reach users
-                        pipeline_state = await active_orchestrator.run(
-                            query, stream=False, use_cache=False
-                        )
+                        pipeline_state = await active_orchestrator.run(query, use_cache=False)
                         answer = pipeline_state.answer
                         chunks = pipeline_state.filtered_chunks
                     except Exception as e:

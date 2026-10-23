@@ -231,6 +231,7 @@ class LatticeStore:
         title: str,
         chunks: list[ChunkData],
         chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
+        tags: list[str] | None = None,
     ) -> IngestStats:
         """Atomically ingest document, chunks, entities, and relations in a single write transaction."""
         chunk_ids: list[int] = []
@@ -241,11 +242,12 @@ class LatticeStore:
         # rolled-back transaction cannot leave ids for nodes that were never written.
         pending: dict[str, int] = {}
 
+        doc_properties: dict[str, Any] = {"doc_id": doc_id, "title": title}
+        if tags:
+            doc_properties["tags"] = list(tags)
+
         with self.db.write() as txn:
-            doc_node = txn.create_node(
-                labels=["Document"],
-                properties={"doc_id": doc_id, "title": title},
-            )
+            doc_node = txn.create_node(labels=["Document"], properties=doc_properties)
 
             chunk_idx_to_id: dict[int, int] = {}
             for idx, chunk in enumerate(chunks):

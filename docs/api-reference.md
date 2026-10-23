@@ -15,17 +15,23 @@ http://localhost:8000/schema/scalar
 
 ## 2. Endpoints Overview
 
-| Method | Path | Request Body | Response Body | Description |
-|---|---|---|---|---|
-| `GET` | `/` | — | `text/html` | Root Embedded Visual Playground & Studio SPA (or fallback landing). |
-| `POST` | `/api/v1/query` | `QueryRequest` | `QueryResponse` | Synchronous RAG query endpoint. |
-| `POST` | `/api/v1/query/stream` | `QueryRequest` | `text/event-stream` | Real-time SSE token & event stream. |
-| `POST` | `/api/v1/ingest` | `IngestRequest` | `IngestResponse` | Document ingestion & graph construction. |
-| `GET` | `/api/v1/graph/subgraph` | — (Query param: `limit`) | `SubgraphDTO` | Knowledge graph snapshot (nodes & edges) for 2D visualizer. |
-| `GET` | `/api/v1/cache/stats` | — | `CacheStatsResponse` | Hit/miss metrics for Tier 1 & 2 caches. |
-| `POST` | `/api/v1/eval/run` | — (Query params) | `EvalRunResponse` | Run CI/CD evaluation gate against benchmark dataset. |
-| `POST` | `/api/v1/benchmark/run` | — (Query params: `iterations`, `warmup`) | `BenchmarkRunResponse` | Run automated latency and throughput micro-benchmarks with dual-SLA validation. |
-| `GET` | `/health` | — | `HealthResponse` | System health and connectivity telemetry. |
+| Method | Path | Auth | Request | Response Body | Description |
+|---|---|---|---|---|---|
+| `GET` | `/` | — | — | `text/html` | Studio SPA (or fallback landing page). |
+| `POST` | `/api/v1/query` | rate-limited | `QueryRequest` | `QueryResponse` | Synchronous RAG query. |
+| `POST` | `/api/v1/query/stream` | rate-limited | `QueryRequest` | `text/event-stream` | SSE stream of stage, token, error and done events. |
+| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. |
+| `GET` | `/api/v1/graph/subgraph` | — | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |
+| `GET` | `/api/v1/cache/stats` | — | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |
+| `POST` | `/api/v1/eval/run` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `EvalRunResponse` | Run the evaluation gate. |
+| `POST` | `/api/v1/benchmark/run` | **admin** | — | `BenchmarkRunResponse` | Retrieval-only latency benchmark (6 iterations, 2 warmup) with SLA checks. |
+| `GET` | `/health` | — | — | `HealthResponse` | Health and configuration status. |
+
+### 2.1 Authentication & Limits
+- **Admin endpoints** require `X-Admin-Key: <ADMIN_API_KEY>`. A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled.
+- **Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded.
+- **Validation** failures return `400` problem details: `query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB.
+- **Unexpected errors** return `500` with a generic `detail` and a `requestId` to correlate with server logs; exception text is never returned.
 
 ---
 
@@ -36,9 +42,7 @@ All DTOs are declared as `msgspec.Struct` with `rename="camel"` for zero-copy JS
 ### 3.1 `QueryRequest`
 ```typescript
 interface QueryRequest {
-  query: string;           // The natural language question
-  stream?: boolean;        // Whether to stream tokens (default: false)
-  filterTags?: string[];   // Optional document tag filters
+  query: string;           // The natural language question (1–2,000 chars)
 }
 ```
 
@@ -52,19 +56,21 @@ interface QueryResponse {
   sources: SourceChunk[];          // Attributed source text chunks
   graphPath?: SubgraphDTO;         // Traversed entity graph nodes and edges
   timings: StageTiming[];          // Stage latency breakdown (triage, retrieval, generation)
-  degraded: boolean;               // True if circuit breaker failover was activated
+  degraded: boolean;               // True if the answer came from Gemini fallback or the FAQ cache
+  lowGrounding: boolean;           // True if no retrieved chunk passed the relevance guardrail
 }
 ```
 
 ### 3.3 `SourceChunk` & `SubgraphDTO`
 ```typescript
 interface SourceChunk {
-  chunkId: number;
+  chunkId: number;         // LatticeDB node id
   text: string;
-  score: number;
+  score: number;           // Cross-encoder score (fused RRF score if not reranked)
   documentId: string;
-  position: number;
+  position: number;        // Chunk position within its document
 }
+// The answer cites sources as [Chunk N], where N is the index in `sources`.
 
 interface SubgraphDTO {
   nodes: GraphNode[];
@@ -91,7 +97,7 @@ interface IngestRequest {
   documentId: string;      // Unique identifier for the document
   title: string;           // Document title
   text: string;            // Raw document text content
-  tags?: string[];         // Metadata tags
+  tags?: string[];         // Up to 32 tags (1–64 chars), stored on the Document node
 }
 
 interface IngestResponse {
@@ -108,7 +114,7 @@ interface CacheStatsResponse {
   tier1Hits: number;
   tier1Misses: number;
   tier1CachedQueries: number;
-  tier2CircuitStatus: "closed" | "open" | "half-open";
+  tier2CircuitStatus: "closed" | "open" | "half-open";  // Groq circuit breaker (shared by /query and /query/stream)
   tier2CachedQueries: number;
 }
 
@@ -129,7 +135,7 @@ interface EvalQueryResult {
   faithfulness: number;        // Jev Score normalized expected value [0.0, 1.0]
   contextPrecision: number;    // Jev Score normalized expected value [0.0, 1.0]
   answerRelevance: number;     // Jev Score normalized expected value [0.0, 1.0]
-  passed: boolean;             // True if all metric floors (>= 0.50) are met
+  passed: boolean;             // faithfulness >= 0.70, contextPrecision >= 0.65, answerRelevance >= 0.70, no contradiction veto
 }
 
 interface EvalRunResponse {
@@ -137,7 +143,7 @@ interface EvalRunResponse {
   meanFaithfulness: number;     // Average faithfulness across all queries
   meanContextPrecision: number; // Average context precision across all queries
   meanAnswerRelevance: number;  // Average answer relevance across all queries
-  passedGate: boolean;          // True if max regression delta >= -0.03 and all floors met
+  passedGate: boolean;          // No mean metric dropped > 0.03 vs baseline and every query's faithfulness >= 0.50
   regressionDelta: number;      // Actual worst-case delta compared to baseline
   results: EvalQueryResult[];   // Granular query evaluation results
 }
@@ -160,8 +166,8 @@ interface StageBenchmarkDTO {
 
 interface BenchmarkRunResponse {
   totalDurationSec: number;     // Total benchmark suite execution time
-  subSecondSlaMet: boolean;     // Whether End-to-End p95 < 1,000ms
-  tier1CacheSlaMet: boolean;    // Whether Tier 1 Cache p95 < 25ms
+  subSecondSlaMet: boolean;     // Retrieval-only E2E p95 < 1,000ms (no routing, guardrail or LLM)
+  tier1CacheSlaMet: boolean;    // Tier 1 exact-hit p95 < 25ms
   stages: StageBenchmarkDTO[];  // Stage-by-stage latency percentiles
 }
 ```
@@ -179,26 +185,31 @@ Content-Type: application/json
 {"query": "What is the relation between LatticeDB and FastEmbed?"}
 ```
 
-**Stream Event Structure:**
+**Stream Event Structure:** every `data:` line is a camelCase JSON object matching one of the `Stream*` DTOs in `api/dtos.py` (mirrored in `frontend/src/types.ts`).
+
 ```
 event: stage
-data: {"stage": "routing", "route": "vector_exact", "confidence": 0.99}
+data: {"stage":"triage","status":"started"}
 
 event: stage
-data: {"stage": "retrieval", "chunks": 4, "nodes": 3, "edges": 1}
+data: {"stage":"retrieval","route":"hybrid"}
 
 event: stage
-data: {"stage": "guardrail", "retained_chunks": 1}
+data: {"stage":"generation","chunksCount":5}
 
 event: token
-data: {"token": "LatticeDB"}
+data: {"delta":"LatticeDB"}
 
 event: token
-data: {"token": " unites"}
-
-event: token
-data: {"token": " Cypher, HNSW, and BM25 in a single binary [Chunk 0]."}
+data: {"delta":" unites HNSW and BM25 in a single binary [Chunk 0]."}
 
 event: done
-data: {"latencyMs": 528.2, "cached": false, "route": "vector_exact"}
+data: {"answer":"LatticeDB unites ...","route":"hybrid","cached":false,"latencyMs":528.2,"sources":[...],"graphPath":{...},"timings":[...],"degraded":false,"lowGrounding":false}
 ```
+
+| Event | Payload | When |
+|---|---|---|
+| `stage` | `{stage, status?, route?, chunksCount?}` | A pipeline stage starts (`triage`, `cache_hit`, `chitchat`, `retrieval`, `generation`). |
+| `token` | `{delta}` | Next piece of answer text. |
+| `error` | `{detail}` | Generation stopped early (the provider failed after its first token), or the request failed (`detail` carries a reference id). |
+| `done` | Same fields as `QueryResponse` | Final event of a completed stream. |

@@ -16,29 +16,20 @@ class PipelineState:
 
     # --- Input ---
     query: str = ""
-    stream: bool = False
     use_cache: bool = True  # False: skip Tier 1 lookup and store (eval runs)
-    filter_tags: list[str] = field(default_factory=list)
 
     # --- Routing ---
     route: str = ""
-    route_confidence: float = 0.0
 
     # --- Caching ---
     cache_hit: bool = False
     cached_response: dict[str, Any] | None = None
 
-    # --- Retrieval Stage 1 (Vector + BM25) ---
+    # --- Retrieval (query embedding is computed once in triage and reused) ---
     query_embedding: Any = None  # np.ndarray at runtime
-    stage1_chunks: list[dict[str, Any]] = field(default_factory=list)
-
-    # --- Retrieval Stage 2 (Graph Traversal) ---
     graph_context: dict[str, Any] | None = None  # SubgraphResult as dict
 
-    # --- Retrieval Stage 3 (Reranking) ---
-    reranked_chunks: list[dict[str, Any]] = field(default_factory=list)
-
-    # --- Guardrail (Jev Noul) ---
+    # --- Reranked chunks that passed the guardrail (Jev Noul) ---
     filtered_chunks: list[dict[str, Any]] = field(default_factory=list)
     low_grounding: bool = False
 

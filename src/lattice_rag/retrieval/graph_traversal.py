@@ -10,7 +10,7 @@ logger = structlog.get_logger(__name__)
 
 
 class GraphTraverser:
-    """Stage 2: Dynamic 1-to-2 hop Cypher / pointer graph traversal."""
+    """Stage 2: 1-to-2 hop graph traversal over LatticeDB edges (in-process pointer walk)."""
 
     def __init__(self, store: LatticeStore):
         """Initialize GraphTraverser.

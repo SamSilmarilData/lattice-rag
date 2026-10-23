@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from lattice_rag.retrieval.embeddings import EmbeddingService, RerankResult
-from lattice_rag.retrieval.pipeline import RetrievalPipeline, RetrievalResult
+from lattice_rag.retrieval.pipeline import RERANK_HEADROOM, RetrievalPipeline, RetrievalResult
 from lattice_rag.routing.guardrail import GuardrailResult
 from lattice_rag.storage.db import SearchResult, SubgraphResult
 
@@ -112,7 +112,7 @@ async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embeddi
         SearchResult(
             node_id=i, score=1.0 / (i + 1), text=f"chunk {i}", metadata={"doc_id": f"d{i}", "position": i}
         )
-        for i in range(10)
+        for i in range(5 + RERANK_HEADROOM)
     ]
     mock_store = MagicMock()
     mock_store.vector_search.return_value = hits
@@ -120,16 +120,18 @@ async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embeddi
     mock_store.get_entities_for_chunks.return_value = []
 
     mock_embed = MagicMock(spec=EmbeddingService)
-    # The reranker promotes the last RRF candidate to the top
-    mock_embed.rerank.return_value = [RerankResult(index=9, score=9.0, text="chunk 9")]
+    # The reranker promotes the last RRF candidate (outside the top 5) to the top
+    last = 5 + RERANK_HEADROOM - 1
+    mock_embed.rerank.return_value = [RerankResult(index=last, score=9.0, text=f"chunk {last}")]
 
     pipeline = RetrievalPipeline(mock_store, mock_embed)
     result = await pipeline.execute(
         "q", top_k=5, apply_guardrail=False, query_embedding=np.ones(384, dtype=np.float32)
     )
 
-    assert len(mock_embed.rerank.call_args[0][1]) == 10
-    assert result.final_chunks[0]["node_id"] == 9
-    assert result.final_chunks[0]["doc_id"] == "d9"
-    assert result.final_chunks[0]["position"] == 9
+    # Every Stage 1 candidate (top_k + headroom) is reranked, not just the RRF top_k
+    assert len(mock_embed.rerank.call_args[0][1]) == 5 + RERANK_HEADROOM
+    assert result.final_chunks[0]["node_id"] == last
+    assert result.final_chunks[0]["doc_id"] == f"d{last}"
+    assert result.final_chunks[0]["position"] == last
     mock_embed.embed_query.assert_not_called()

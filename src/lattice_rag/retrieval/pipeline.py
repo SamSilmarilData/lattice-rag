@@ -13,6 +13,10 @@ from lattice_rag.storage.db import SubgraphResult
 
 logger = logging.getLogger(__name__)
 
+# Extra Stage 1 candidates the cross-encoder may promote into the top_k. Every candidate is
+# reranked, and on CPU each costs roughly 100 ms, so this trades recall against latency.
+RERANK_HEADROOM = 3
+
 
 @dataclass
 class RetrievalResult:
@@ -68,7 +72,8 @@ class RetrievalPipeline:
     ) -> RetrievalResult:
         """Execute the 3-stage retrieval pipeline with internal telemetry.
 
-        Stage 1: HNSW vector search + BM25 keyword recall with RRF fusion (2*top_k candidates).
+        Stage 1: HNSW vector search + BM25 keyword recall with RRF fusion
+            (top_k + RERANK_HEADROOM candidates).
         Stage 2: 1-to-2 hop graph traversal from the entities in those candidates.
         Stage 3: Cross-encoder reranking of every Stage 1 candidate down to top_k.
         Optional: TypeSafe Jev Noul context guardrail pruning.
@@ -80,7 +85,7 @@ class RetrievalPipeline:
         # ── Stage 1: Vector Search + BM25 ────────────────────────────────────
         t0 = time.perf_counter()
         stage1_results = await self.searcher.search(
-            query, top_k=max(top_k * 2, 10), query_embedding=query_embedding
+            query, top_k=top_k + RERANK_HEADROOM, query_embedding=query_embedding
         )
         timings["stage1_search"] = (time.perf_counter() - t0) * 1000.0
 
@@ -101,7 +106,7 @@ class RetrievalPipeline:
             chunk_dict.update(node_id=res.node_id, score=res.score, text=res.text)
             stage1_chunks.append(chunk_dict)
 
-        # ── Stage 2: Dynamic Cypher Graph Traversal ──────────────────────────
+        # ── Stage 2: Graph Traversal ─────────────────────────────────────────
         t0 = time.perf_counter()
         graph_context = await self.traverser.traverse(anchor_ids, route, budget=budget)
         timings["stage2_traverse"] = (time.perf_counter() - t0) * 1000.0

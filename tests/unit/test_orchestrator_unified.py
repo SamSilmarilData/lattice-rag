@@ -222,3 +222,35 @@ async def test_unified_orchestrator_low_grounding_is_reported_and_not_cached(
     assert state.low_grounding is True
     assert done_evt["data"]["low_grounding"] is True
     c["semantic_cache"].put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_massive_context_retrieves_more_evidence_in_both_paths(mock_orchestrator_components):
+    from lattice_rag.orchestration.graph import MASSIVE_CONTEXT_TOP_K
+
+    c = mock_orchestrator_components
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="massive_context", confidence=0.9)
+    )
+    c["gemini"].synthesize = AsyncMock(return_value="Summary.")
+
+    async def _gemini_stream(q, ch, g):
+        yield "Summary."
+
+    c["gemini"].stream = _gemini_stream
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    await orchestrator.run("Summarize everything about caching")
+    _ = [e async for e in orchestrator.stream_query("Summarize everything about caching")]
+
+    for call in c["pipeline"].execute.await_args_list:
+        assert call.kwargs["top_k"] == MASSIVE_CONTEXT_TOP_K

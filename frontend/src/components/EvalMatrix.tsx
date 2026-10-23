@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert, Zap, Timer, Activity } from 'lucide-react';
 import { EvalQueryResult, EvalRunResponse, BenchmarkRunResponse } from '../types';
+import { adminFetch } from '../adminKey';
 
 interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
@@ -175,7 +176,8 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
     setEvalError(null);
     setEvalStatus(`Executing Live Evaluation Gate (${evalLimit} queries) through TypeSafe Jev & GroqCloud...`);
     try {
-      const res = await fetch(`/api/v1/eval/run?limit=${evalLimit}`, {
+      // use_temp_db: evaluate against an ephemeral copy of the golden corpus, not the live DB
+      const res = await adminFetch(`/api/v1/eval/run?limit=${evalLimit}&use_temp_db=true`, {
         method: 'POST',
       });
       if (!res.ok) {
@@ -202,7 +204,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
     setBenchmarkRunning(true);
     setBenchmarkError(null);
     try {
-      const res = await fetch('/api/v1/benchmark/run', {
+      const res = await adminFetch('/api/v1/benchmark/run', {
         method: 'POST',
       });
       if (!res.ok) {

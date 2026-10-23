@@ -77,3 +77,19 @@ def test_hermetic_fallback_keeps_env_settings(monkeypatch, tmp_path):
     assert cfg.admin_api_key.get_secret_value() == "env-admin"
     assert cfg.latticedb_path == tmp_path / "env.db"
     assert cfg.typesafe_api_key.get_secret_value() == "mock-typesafe-key-hermetic"
+
+
+@pytest.mark.asyncio
+async def test_mock_key_mode_is_reported_and_not_written_to_env(monkeypatch, tmp_path):
+    """Booting without TYPESAFE_API_KEY reports degraded health and leaves os.environ alone."""
+    import os
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "")
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "mock.db"))
+
+    app = create_app()
+    async with AsyncTestClient(app) as client:
+        data = (await client.get("/health")).json()
+        assert data["typesafeConfigured"] is False
+        assert data["status"] == "degraded"
+        assert os.environ.get("TYPESAFE_API_KEY") == ""

@@ -63,7 +63,12 @@ async def _build_harness() -> dict[str, Any]:
 
     config = get_config()
     store = LatticeStore(config.latticedb_path)
-    embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+    embed_svc = EmbeddingService(
+        config.embed_model,
+        config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
+    )
     router = QueryRouter()
     guardrail = ContextGuardrail(threshold=0.5)
     sem_cache = SemanticCache()
@@ -73,6 +78,7 @@ async def _build_harness() -> dict[str, Any]:
     groq = GroqSynthesizer(
         api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
         model=config.groq_model,
+        max_tokens=config.llm_max_tokens,
     )
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
@@ -171,7 +177,12 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     async def _ingest() -> None:
         config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        embed_svc = EmbeddingService(
+            config.embed_model,
+            config.reranker_model,
+            onnx_reranker_repo=config.reranker_onnx_repo,
+            onnx_reranker_revision=config.reranker_onnx_revision,
+        )
         extractor = EntityExtractor()
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
@@ -218,7 +229,12 @@ def seed(dataset: str) -> None:
     async def _seed() -> None:
         config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        embed_svc = EmbeddingService(
+            config.embed_model,
+            config.reranker_model,
+            onnx_reranker_repo=config.reranker_onnx_repo,
+            onnx_reranker_revision=config.reranker_onnx_revision,
+        )
         extractor = EntityExtractor()
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
@@ -368,7 +384,6 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     import asyncio
 
     from lattice_rag.eval import EvalRunner, JevEvaluator
-    from lattice_rag.orchestration.pool import shutdown_pool
     from lattice_rag.storage.extract import EntityExtractor
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
@@ -418,8 +433,6 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
         finally:
             await evaluator.close()
             await _close_harness(h)
-
-            shutdown_pool()
 
     passed = asyncio.run(_run())
     if fail_on_regression and not passed:

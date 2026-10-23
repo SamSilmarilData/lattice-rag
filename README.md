@@ -41,11 +41,11 @@ Traditional GraphRAG architectures suffer from heavy JVM database footprints (Ne
 | **Local SLMs** | **FastEmbed + GLiNER** | Quantized ONNX dense/sparse embeddings and local entity-relationship triple extraction on CPU. |
 | **Cross-Encoder** | **bge-reranker-v2-m3** | High-precision INT8 ONNX reranker with 8,192 token context window. |
 | **System 1 Routing** | **TypeSafe AI Jev** | 70–500ms `Choice` primitive routing + batched `Noul` boolean context noise pruning. |
-| **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 local semantic vector cache (<20ms); Tier 2 `pybreaker` circuit breaker cascading to Redis Top 50 FAQ. |
+| **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 in-process exact + semantic cache (fuzzy hits verified by Jev Noul); Tier 2 Redis hash of pre-computed FAQ answers used when every LLM provider fails. |
 | **Primary Synthesis** | **GroqCloud** | Ultra-fast token streaming (200+ tok/s) via `qwen/qwen3.8-27b` with structured citation grounding. |
-| **Context Fallback** | **Gemini 3.8 Flash** | Massive context window (>100k tokens) reserved for cross-document synthesis and circuit breaker failover. |
+| **Context Fallback** | **Gemini 3.8 Flash** | Large-context model for cross-document synthesis and for failover when the Groq circuit breaker opens. |
 | **CI/CD Quality Gate** | **TypeSafe Jev Score + Noul** | Automated 20-query evaluation gate blocking PRs on regression ($\Delta \ge -0.03$), floor drop ($< 0.50$), and contradiction veto. |
-| **Secret Hygiene** | **Zero-Trust Security** | `SecretStr` masking, log redaction, RFC 9457 error shielding, and automated `apikeys.md` migration. |
+| **Secret Hygiene** | **Defense in Depth** | Admin-key guard on write/cost endpoints, rate limits and input bounds, `SecretStr` masking, log redaction, RFC 9457 error shielding, prompt-injection delimiting, and `apikeys.md` migration. |
 
 ---
 
@@ -91,21 +91,21 @@ lattice-rag/
 │   │   └── guardrail.py         # TypeSafe AI Jev Noul context pruning
 │   ├── caching/
 │   │   ├── semantic_cache.py    # Tier 1 Semantic Vector Cache (<20ms)
-│   │   └── fallback_cache.py    # Tier 2 pybreaker + Redis Hash top 50 FAQ
+│   │   └── fallback_cache.py    # Tier 2 Redis hash of pre-computed FAQ answers
 │   ├── retrieval/
-│   │   ├── retriever.py         # Deep HybridRetriever: unifies 3-stage search, guardrail, timings
+│   │   ├── retriever.py         # Backward-compat re-export of HybridRetriever
 │   │   ├── embeddings.py        # FastEmbed dense/sparse ONNX models
 │   │   ├── vector_search.py     # Stage 1: HNSW vector + BM25 RRF recall
-│   │   ├── graph_traversal.py   # Stage 2: Dynamic 1-to-2 hop Cypher traversal
+│   │   ├── graph_traversal.py   # Stage 2: 1-to-2 hop graph traversal from chunk entities
 │   │   ├── reranker.py          # Stage 3: Cross-encoder precision reranking
-│   │   └── pipeline.py          # Legacy/internal 3-stage retrieval pipeline
+│   │   └── pipeline.py          # RetrievalPipeline (alias HybridRetriever): 3 stages + guardrail
 │   ├── generation/
-│   │   ├── resilient_synthesizer.py # Deep ResilientSynthesizer: multi-tier failovers (Groq -> Gemini -> Redis)
+│   │   ├── resilient_synthesizer.py # Single generation path: Groq circuit breaker -> Gemini -> Redis FAQ
+│   │   ├── prompt.py            # Shared grounded prompt with delimited, untrusted evidence
 │   │   ├── groq_synthesizer.py  # Primary Groq streaming generator (qwen/qwen3.8-27b @ 200+ tok/s)
 │   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
 │   ├── orchestration/
-│   │   ├── pool.py              # Centralized ProcessPoolExecutor for CPU ML tasks
 │   │   ├── state.py             # LangGraph typed PipelineState
 │   │   └── graph.py             # RAGOrchestrator StateGraph pipeline
 │   └── eval/
@@ -186,13 +186,13 @@ lattice-rag --help
 # Migrate temporary apikeys.md into secure .env
 lattice-rag setup-keys
 
-# Start the Granian Rust ASGI server on port 8000
+# Start the Granian Rust ASGI server (defaults to HOST/PORT from the environment)
 lattice-rag serve --host 0.0.0.0 --port 8000
 
 # Execute a query directly via CLI
 lattice-rag query "How does LatticeDB combine HNSW and BM25 search?"
 
-# Pre-seed the embedded knowledge graph from the golden corpus
+# Pre-seed the embedded knowledge graph from the golden corpus (idempotent, no API keys needed)
 lattice-rag seed --dataset eval_dataset.json
 
 # Ingest a text document into the embedded knowledge graph
@@ -216,13 +216,15 @@ When running `lattice-rag serve`, navigate to `http://localhost:8000/` to open t
 - **CI/CD Evaluation Matrix**: Interactive dashboard displaying per-query Faithfulness, Context Precision, and Relevance scores across the 20-query golden dataset, with a one-click **"Run Live Evaluation Gate"** runner and click-to-test navigation.
 - **Document Ingestion Drawer**: Live document text chunking, embedding, entity extraction, and LatticeDB linking with immediate graph visualizer refresh.
 
+Ingestion, evaluation and benchmark actions prompt for the server's `ADMIN_API_KEY` (kept in `sessionStorage` for the tab).
+
 ---
 
 ## ☁️ Zero-Cost Production Deployment
 
 `lattice-rag` can be hosted for **$0.00/month** in production without downgrading our state-of-the-art `bge-reranker-v2-m3` cross-encoder.
 
-See [`docs/deployment.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/deployment.md) for full guides covering:
+See [`docs/deployment.md`](docs/deployment.md) for full guides covering:
 1. **Google Cloud Run (Always Free Tier - Recommended)**: Serverless container with 2GB RAM scaling to zero, consuming $0.00 within Google's monthly 360,000 GiB-seconds free tier (~225,000 queries/month free). Deploy via `./scripts/deploy_cloud_run.sh`.
 2. **Cloudflare Tunnel (`cloudflared`)**: Run locally on Apple Silicon (sub-100ms rerank) and expose globally with free HTTPS and DDoS protection via `cloudflared tunnel --url http://localhost:8000`.
 3. **Oracle Cloud Infrastructure (OCI Always Free)**: 4 ARM vCPUs + 24GB RAM persistent Ubuntu VM running 24/7 with zero cold starts.
@@ -244,54 +246,53 @@ lattice-rag serve
 | `GET` | `/` | Root Embedded Visual Playground & Studio SPA (or graceful fallback). |
 | `POST` | `/api/v1/query` | Standard JSON query endpoint returning answer, sources, graph path, and latency breakdown. |
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
-| `POST` | `/api/v1/ingest` | Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB. |
+| `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). |
 | `GET` | `/api/v1/graph/subgraph` | Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
-| `GET` | `/api/v1/cache/stats` | Telemetry on Tier 1 semantic vector cache hits and Tier 2 circuit breaker status. |
-| `POST` | `/api/v1/eval/run` | Triggers the CI/CD evaluation gate with custom dataset/baseline paths and regression tolerance. |
-| `POST` | `/api/v1/benchmark/run` | Executes statistical performance benchmarking with dual SLA verification ($p50, p90, p95, p99$, QPS). |
+| `GET` | `/api/v1/cache/stats` | Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
+| `POST` | `/api/v1/eval/run` | **Admin key.** Runs the evaluation gate (dataset/baseline must be `*.json` files in the project root). |
+| `POST` | `/api/v1/benchmark/run` | **Admin key.** Retrieval-only latency benchmark with SLA verification ($p50, p90, p95, p99$, QPS). |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |
+
+Admin endpoints require the `X-Admin-Key` header (`ADMIN_API_KEY`); query endpoints are rate-limited per client. See [`docs/api-reference.md`](docs/api-reference.md).
 
 ---
 
 ## ⚡ Performance Profiling & Dual-SLA Verification
 
-`lattice-rag` provides strict sub-second performance guarantees verified by an empirical benchmarking harness:
+`lattice-rag` ships a benchmarking harness with SLA checks. By default it measures **retrieval only** (no routing, guardrail or LLM call); add `--live` to time the full pipeline.
 
 ```bash
-# Run CLI benchmark harness with dual SLA verification
-lattice-rag benchmark --iterations 5 --warmup 2 --sla-check
+lattice-rag benchmark --iterations 5 --warmup 1 --sla-check
 ```
 
-### Empirical Production Benchmark Results
+### Benchmark Results (Apple M2, seeded golden corpus)
 
-| Pipeline Stage | p50 (Median) | p90 | p95 (SLA Target) | p99 | Mean | Throughput |
-|---|---|---|---|---|---|---|
-| **Tier 1 Semantic Cache** | **0.2ms** | 1.1ms | **1.1ms** (<25ms SLA) | 1.1ms | 0.3ms | **3,346 QPS** |
-| **Stage 1: Hybrid Retrieval (HNSW+BM25)** | 11.4ms | 11.9ms | 11.9ms | 11.9ms | 11.0ms | 91.1 QPS |
-| **Stage 2: Dynamic Cypher Traversal** | 1.4ms | 13.8ms | 13.8ms | 13.8ms | 5.4ms | 186.9 QPS |
-| **Stage 3: Cross-Encoder Rerank (v2-m3)** | 308.6ms | 338.5ms | 338.5ms | 338.5ms | 314.4ms | 3.2 QPS |
-| **End-to-End Pipeline (Full StateGraph)** | **547.1ms** | 557.0ms | **557.0ms** (<1000ms SLA) | 557.0ms | 549.4ms | **1.8 QPS** |
+| Pipeline Stage | p50 | p95 | Mean | Throughput |
+|---|---|---|---|---|
+| **Tier 1 Cache: exact hit** | 0.02ms | **0.03ms** (<25ms SLA) | 0.02ms | 51,591 QPS |
+| **Stage 1: Hybrid Retrieval (HNSW+BM25)** | 6.8ms | 7.2ms | 6.9ms | 145.8 QPS |
+| **Stage 2: Graph Traversal (2-hop)** | 1.5ms | 1.7ms | 1.6ms | 638.7 QPS |
+| **Stage 3: Cross-Encoder Rerank (3 chunks)** | 278.3ms | 293.7ms | 281.4ms | 3.6 QPS |
+| **End-to-End: retrieval only (8 reranked)** | 801.9ms | **812.6ms** (<1000ms SLA) | 798.7ms | 1.3 QPS |
 
-- **Sub-Second Multi-Hop SLA**: $p95 = 557.0\text{ms} < 1,000\text{ms}$ **[PASSED]**
-- **Tier 1 Cache Latency SLA**: $p95 = 1.1\text{ms} < 25\text{ms}$ **[PASSED]**
-
-For detailed architectural benchmarks, memory consumption profiles (stable at 340 MB RSS), and comparison against cloud vector architectures, see [`docs/performance-benchmark.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/performance-benchmark.md). For operational runbooks and health probes, see [`docs/production-readiness.md`](file:///Users/samyakmeshram/Documents/GitHub/lattice-rag/docs/production-readiness.md).
+For detailed architectural benchmarks, memory consumption profiles (stable at 340 MB RSS), and comparison against cloud vector architectures, see [`docs/performance-benchmark.md`](docs/performance-benchmark.md). For operational runbooks and health probes, see [`docs/production-readiness.md`](docs/production-readiness.md).
 
 ---
 
 ## 🧪 Testing & Verification
 
-Run the automated test suite across unit and integration suites:
+Run the automated test suite:
 
 ```bash
-# Run full test suite (124 tests, 100% green, 0 warnings)
-pytest tests/ -v
+# Hermetic unit suite (what CI runs; mock keys, no network)
+pytest tests/unit/
+
+# Integration suite (needs real GROQ/TYPESAFE keys and downloads ONNX models)
+pytest tests/integration/
 ```
 
-All 124 tests execute cleanly with 0 warnings:
-- **Hermetic Unit Tests (112 tests)**: Security secret masking, RFC 9457 error shielding, log redaction, config post-init validation, fast embeddings, dynamic Cypher traversal, Stage 3 triples capping, Jev triage & contradiction veto, semantic cache cosine similarity, Redis circuit breaker transitions, API controllers, unified document ingestion with batched embeddings, deep hybrid retrieval, resilient synthesis cascading failover, and unified orchestrator streaming/buffered parity.
-- **Integration Tests (12 tests)**: Live end-to-end RAG pipeline, live CI/CD regression gate, benchmark engine SLA verification, and benchmark API endpoints.
+The unit suite covers security (secret masking, log redaction including structlog and tracebacks, RFC 9457 shielding, admin-key guard, input bounds, rate limiting), routing (including the chitchat fast path), retrieval, the guardrail, the shared circuit breaker and streaming failover, semantic-cache consistency, ingestion idempotency, storage transactions, eval gating, and buffered/streaming orchestrator parity.
 
 ---
 
@@ -299,8 +300,12 @@ All 124 tests execute cleanly with 0 warnings:
 
 - **Zero Git Leaks:** `.env`, `apikeys.md`, `*.key`, and `data/*.db` are hard-blocked in `.gitignore`.
 - **Masked Runtime Logs:** Keys wrapped in `SecretStr` are masked as `sk-****{last_4}` in all `str()` and `repr()` representations.
-- **Log Sanitizer:** `RedactingFilter` regex-scrubs Bearer tokens and API keys from logging outputs.
-- **RFC 9457 Error Shielding:** Exception handlers sanitize outbound error responses to ensure auth headers never leak to clients.
+- **Access Control:** Ingest, eval and benchmark require `X-Admin-Key`; queries are rate-limited and input sizes are bounded.
+- **Log Sanitizer:** `RedactingFormatter` redacts API keys, bearer tokens and URI credentials from every rendered log line, including tracebacks and structlog events.
+- **RFC 9457 Error Shielding:** Unexpected errors return a generic problem document with a request id; exception text is only logged server-side.
+- **Prompt-Injection Delimiting:** Retrieved evidence is wrapped, escaped and marked untrusted in the shared LLM prompt.
+
+See [`docs/security.md`](docs/security.md).
 
 ---
 

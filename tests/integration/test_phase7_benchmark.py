@@ -60,6 +60,7 @@ async def test_benchmark_engine_component_slas():
         # 3. Clean string formatting check
         table_output = BenchmarkEngine.format_ascii_table(report)
         assert "Stage 1: Hybrid Retrieval" in table_output
+        assert "retrieval only" in table_output
         assert "[PASSED]" in table_output
     finally:
         store.close()
@@ -67,11 +68,14 @@ async def test_benchmark_engine_component_slas():
 
 
 @pytest.mark.asyncio
-async def test_benchmark_api_endpoint():
+async def test_benchmark_api_endpoint(monkeypatch):
     """Verify POST /api/v1/benchmark/run returns formatted BenchmarkRunResponse DTO."""
+    monkeypatch.setenv("ADMIN_API_KEY", "integration-admin")
     app = create_app()
     async with AsyncTestClient(app) as client:
-        response = await client.post("/api/v1/benchmark/run")
+        response = await client.post(
+            "/api/v1/benchmark/run", headers={"X-Admin-Key": "integration-admin"}
+        )
         assert response.status_code == 201 or response.status_code == 200
         data = response.json()
 

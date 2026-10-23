@@ -25,6 +25,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TOP_K = 5
+# Cross-document synthesis goes to Gemini's large context window, so give it more evidence
+# (bounded because every retrieved candidate passes through the CPU cross-encoder)
+MASSIVE_CONTEXT_TOP_K = 12
+
+
+def top_k_for_route(route: str) -> int:
+    return MASSIVE_CONTEXT_TOP_K if route == "massive_context" else DEFAULT_TOP_K
+
 
 class RAGOrchestrator:
     """Assembles and runs the full GraphRAG pipeline via LangGraph StateGraph.
@@ -147,7 +156,6 @@ class RAGOrchestrator:
         updates: dict[str, Any] = {
             "query_embedding": query_embedding,
             "route": route_decision.route,
-            "route_confidence": route_decision.confidence,
             "timings": state.timings + [{"stage": "triage", "duration_ms": elapsed}],
         }
 
@@ -239,7 +247,10 @@ class RAGOrchestrator:
         t0 = time.perf_counter()
 
         result = await self.retrieval.execute(
-            state.query, state.route, query_embedding=state.query_embedding
+            state.query,
+            state.route,
+            top_k=MASSIVE_CONTEXT_TOP_K,
+            query_embedding=state.query_embedding,
         )
         graph_dict = None
         if result.graph_context:
@@ -293,14 +304,14 @@ class RAGOrchestrator:
 
     # ── Public Interfaces ────────────────────────────────────────────────
 
-    async def run(self, query: str, stream: bool = False, use_cache: bool = True) -> PipelineState:
+    async def run(self, query: str, use_cache: bool = True) -> PipelineState:
         """Execute the full pipeline and return the final state.
 
         ``use_cache=False`` bypasses Tier 1 entirely (no lookup, no store), so evaluation
         measures the live pipeline without touching the cache users are served from.
         """
         t0 = time.perf_counter()
-        initial_state = PipelineState(query=query, stream=stream, use_cache=use_cache)
+        initial_state = PipelineState(query=query, use_cache=use_cache)
 
         result = await self._graph.ainvoke(initial_state)
 
@@ -413,7 +424,10 @@ class RAGOrchestrator:
         yield {"event": "stage", "data": {"stage": "retrieval", "route": route_decision.route}}
         t_ret = time.perf_counter()
         ret_result = await self.retrieval.execute(
-            query, route_decision.route, query_embedding=query_embedding
+            query,
+            route_decision.route,
+            top_k=top_k_for_route(route_decision.route),
+            query_embedding=query_embedding,
         )
         ret_elapsed = (time.perf_counter() - t_ret) * 1000
         timings.append({"stage": "retrieval", "duration_ms": ret_elapsed})

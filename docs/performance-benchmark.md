@@ -14,14 +14,16 @@ Traditional GraphRAG architectures suffer from severe cloud latency inflation an
 
 | SLA Target | Target Threshold | Empirical Result ($p95$) | Status | Enforcement Mechanism |
 |---|---|---|---|---|
-| **Sub-Second Multi-Hop SLA** | End-to-End $p95 < 1,000$ms | **545.4ms** | **[PASSED]** | `--sla-check` CLI & `BenchmarkEngine` |
-| **Tier 1 Cache Latency SLA** | Cache hit $p95 < 25$ms | **1.2ms** | **[PASSED]** | In-memory cosine fast-path & Noul guard |
+| **Sub-Second Retrieval SLA** | Retrieval-only E2E $p95 < 1,000$ms | **812.6ms** | **[PASSED]** | `--sla-check` CLI & `BenchmarkEngine` |
+| **Tier 1 Cache Latency SLA** | Exact-hit $p95 < 25$ms | **0.03ms** | **[PASSED]** | In-memory exact-match map |
+
+**Scope of the numbers.** The default (zero-cost) benchmark measures *retrieval only*: Stage 1, Stage 2 and Stage 3, without Jev routing, the Noul guardrail or the LLM call, which all depend on external network latency. `lattice-rag benchmark --live` runs the full pipeline (bypassing the Tier 1 cache) and reports it as a separate scope. The Tier 1 SLA covers the exact-match path; the similarity-scan row excludes the Jev Noul verification call that a real fuzzy hit makes.
 
 ---
 
 ## 2. Empirical Benchmark Matrix
 
-The following empirical metrics were captured under real-world multi-hop graph retrieval workloads on an Apple Silicon M-series host (8 cores, unified memory) on a seeded database of 34 nodes and 41 relations:
+The following metrics were captured with `lattice-rag benchmark --iterations 5 --warmup 1` on an Apple M2 (8 cores) against the seeded golden-corpus database:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d4-latency-waterfall-dark.svg">
@@ -32,40 +34,38 @@ The following empirical metrics were captured under real-world multi-hop graph r
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d4-latency-waterfall-dark.html">Dark Specimen</a> | <a href="diagrams/d4-latency-waterfall-light.html">Light Specimen</a></sub>
 
 ```
-+--------------------------------------------------+--------+--------+--------+--------+--------+--------+
-| Pipeline Stage                                   | p50    | p90    | p95    | p99    | Mean   | QPS    |
-+--------------------------------------------------+--------+--------+--------+--------+--------+--------+
-| Tier 1 Semantic Cache                            |   0.1ms |   1.2ms |   1.2ms |   1.2ms |   0.2ms | 4076.8 |
-| Stage 1: Hybrid Retrieval (HNSW+BM25)            |   7.5ms |   8.5ms |   8.5ms |   8.5ms |   7.5ms |  132.8 |
-| Stage 2: Dynamic Cypher Traversal                |   0.8ms |   0.8ms |   0.8ms |   0.8ms |   0.7ms | 1378.2 |
-| Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3) | 510.3ms | 523.7ms | 523.7ms | 523.7ms | 511.2ms |    2.0 |
-| End-to-End Pipeline (Full StateGraph)            | 538.8ms | 545.4ms | 545.4ms | 545.4ms | 538.4ms |    1.9 |
-+--------------------------------------------------+--------+--------+--------+--------+--------+--------+
++-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+
+| Pipeline Stage                                            | p50      | p90      | p95      | p99      | Mean     | QPS      |
++-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+
+| Tier 1 Cache: exact hit                                   |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  51590.5 |
+| Tier 1 Cache: similarity scan (excl. Noul call)           |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  33845.7 |
+| Stage 1: Hybrid Retrieval (HNSW+BM25)                     |    6.8ms |    7.2ms |    7.2ms |    7.2ms |    6.9ms |    145.8 |
+| Stage 2: Graph Traversal (2-hop)                          |    1.5ms |    1.6ms |    1.7ms |    1.7ms |    1.6ms |    638.7 |
+| Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3)        |  278.3ms |  291.2ms |  293.7ms |  295.8ms |  281.4ms |      3.6 |
+| End-to-End: retrieval only (no routing, guardrail or LLM) |  801.9ms |  811.4ms |  812.6ms |  813.5ms |  798.7ms |      1.3 |
++-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+
 ```
 
 ### Stage-by-Stage Architectural Breakdown
 
-1. **Tier 1 Semantic Cache ($p95 = 1.2$ms, $\sim 4,000$ QPS)**:
-   - In-memory vector comparison across cached query embeddings using vectorized NumPy dot product.
-   - Exact query strings resolve in $< 0.1$ms.
-   - Paraphrased queries ($0.90 \le \text{cosine} < 0.999$) are verified via TypeSafe AI Jev Noul.
+1. **Tier 1 Cache (exact hit $p95 = 0.03$ms)**:
+   - Exact (normalized) query strings resolve from an in-memory map without embedding the query.
+   - Paraphrased queries ($\text{cosine} \ge 0.90$) are found by a vectorized NumPy dot product, then confirmed by a TypeSafe AI Jev Noul call. That network call dominates a real fuzzy hit and is excluded from the similarity-scan row.
 
-2. **Stage 1: Hybrid Retrieval ($p95 = 8.5$ms, $\sim 132$ QPS)**:
-   - Embedded dense vector query embedding via FastEmbed (`BAAI/bge-small-en-v1.5`, 384 dimensions) runs in $\sim 5$ms.
-   - Native LatticeDB HNSW search and BM25 full-text keyword search execute concurrently.
-   - Reciprocal Rank Fusion ($k=60$) deduplicates and merges rankings in $< 1$ms.
+2. **Stage 1: Hybrid Retrieval ($p95 = 7.2$ms)**:
+   - Query embedding via FastEmbed (`BAAI/bge-small-en-v1.5`, 384 dimensions). In the full pipeline this embedding is computed once during triage and reused here.
+   - LatticeDB HNSW search and BM25 full-text search, merged with Reciprocal Rank Fusion ($k=60$) into `top_k + 3` candidates.
 
-3. **Stage 2: Dynamic Cypher Subgraph Traversal ($p95 = 0.8$ms, $\sim 1,378$ QPS)**:
-   - LatticeDB traverses `:CONTAINS` edges from anchor chunks to entity nodes, then traverses `:RELATION` edges up to 2 hops.
-   - Direct pointer chasing in C-level LatticeDB bindings yields sub-millisecond execution times.
+3. **Stage 2: Graph Traversal ($p95 = 1.7$ms)**:
+   - Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API.
+   - Earlier versions of this benchmark passed entity ids where chunk ids were expected, so the traversal found no anchors and timed a no-op (about 0.3 ms). The figure above measures a real traversal.
 
-4. **Stage 3: Cross-Encoder Precision Reranking ($p95 = 523.7$ms, $\sim 2.0$ QPS)**:
-   - Top 5 candidate chunks are combined with linearized graph triples (`Entity1 --[REL]--> Entity2`).
-   - Scored via CPU-quantized INT8 ONNX `BAAI/bge-reranker-v2-m3` using sequential multi-threaded inference (`intra_op_num_threads=4`).
+4. **Stage 3: Cross-Encoder Reranking ($p95 = 293.7$ms for 3 chunks)**:
+   - INT8 ONNX `BAAI/bge-reranker-v2-m3` scores each candidate's chunk text (`intra_op_num_threads=4`). Cost grows roughly linearly at about 100 ms per candidate on this CPU, which is why Stage 1 adds only 3 candidates of headroom.
 
-5. **End-to-End Pipeline ($p95 = 545.4$ms)**:
-   - Fully assembled state graph orchestration traversing triage, Stage 1, Stage 2, and Stage 3 in a single in-process async task.
-   - Leaves $\approx 450$ms of headroom under the $1,000$ms Sub-Second SLA for network transmission.
+5. **End-to-End, retrieval only ($p95 = 812.6$ms)**:
+   - Stage 1 + Stage 2 + Stage 3 for `top_k=5` (8 reranked candidates), without routing, guardrail or generation.
+   - The rerank stage dominates. Routing, the guardrail and the LLM call add network-bound latency on top; measure them with `--live`.
 
 ---
 
@@ -94,7 +94,7 @@ The following empirical metrics were captured under real-world multi-hop graph r
 |---|---|---|
 | **Architecture** | Single container, single process | App + Pinecone/Weaviate + Neo4j Aura + Cohere Rerank API |
 | **Network Hops** | 0 external network hops | 4–6 HTTPS roundtrips per query |
-| **End-to-End Latency** | **$545$ms** ($p95$) | $1,800$ms – $3,500$ms ($p95$) |
+| **Retrieval Latency** | **$813$ms** ($p95$, retrieval only) | $1,800$ms – $3,500$ms ($p95$) |
 | **Monthly Cloud Cost** | **$0.00** | $150 – $800+ / month (minimum SaaS tiers) |
 | **Deployment Complexity** | Single Docker container (`docker run`) | Multi-tenant VPC peering, secrets management, distributed schema migrations |
 | **Data Privacy** | In-process, single host | Customer text sent to multiple 3rd-party vector/graph clouds |
@@ -122,76 +122,32 @@ lattice-rag benchmark --dataset eval_dataset.json --output benchmark_results.jso
 
 ### 5.3 Automated REST API
 
-Trigger benchmark runs programmatically:
+The endpoint requires the admin key and runs a fixed retrieval-only suite (6 iterations, 2 warmup):
 ```bash
-curl -X POST "http://localhost:8000/api/v1/benchmark/run?iterations=5&warmup=1"
+curl -X POST "http://localhost:8000/api/v1/benchmark/run" -H "X-Admin-Key: $ADMIN_API_KEY"
 ```
-Response:
+Response (abridged to two stages and a subset of fields; each stage also has `minMs`, `p90Ms`, `p99Ms` and `maxMs`):
 ```json
 {
-  "totalDurationSec": 6.54,
+  "totalDurationSec": 7.91,
   "subSecondSlaMet": true,
   "tier1CacheSlaMet": true,
   "stages": [
     {
-      "stage": "Tier 1 Semantic Cache",
-      "samplesCount": 10,
-      "meanMs": 0.2,
-      "minMs": 0.1,
-      "p50Ms": 0.1,
-      "p90Ms": 1.2,
-      "p95Ms": 1.2,
-      "p99Ms": 1.2,
-      "maxMs": 1.2,
-      "qps": 4076.8
-    },
-    {
       "stage": "Stage 1: Hybrid Retrieval (HNSW+BM25)",
       "samplesCount": 5,
-      "meanMs": 7.5,
-      "minMs": 6.8,
-      "p50Ms": 7.5,
-      "p90Ms": 8.5,
-      "p95Ms": 8.5,
-      "p99Ms": 8.5,
-      "maxMs": 8.5,
-      "qps": 132.8
+      "meanMs": 6.9,
+      "p50Ms": 6.8,
+      "p95Ms": 7.2,
+      "qps": 145.8
     },
     {
-      "stage": "Stage 2: Dynamic Cypher Traversal",
-      "samplesCount": 5,
-      "meanMs": 0.7,
-      "minMs": 0.6,
-      "p50Ms": 0.8,
-      "p90Ms": 0.8,
-      "p95Ms": 0.8,
-      "p99Ms": 0.8,
-      "maxMs": 0.8,
-      "qps": 1378.2
-    },
-    {
-      "stage": "Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3)",
-      "samplesCount": 5,
-      "meanMs": 511.2,
-      "minMs": 502.1,
-      "p50Ms": 510.3,
-      "p90Ms": 523.7,
-      "p95Ms": 523.7,
-      "p99Ms": 523.7,
-      "maxMs": 523.7,
-      "qps": 2.0
-    },
-    {
-      "stage": "End-to-End Pipeline (Full StateGraph)",
-      "samplesCount": 5,
-      "meanMs": 538.4,
-      "minMs": 531.0,
-      "p50Ms": 538.8,
-      "p90Ms": 545.4,
-      "p95Ms": 545.4,
-      "p99Ms": 545.4,
-      "maxMs": 545.4,
-      "qps": 1.9
+      "stage": "End-to-End: retrieval only (no routing, guardrail or LLM)",
+      "samplesCount": 3,
+      "meanMs": 798.7,
+      "p50Ms": 801.9,
+      "p95Ms": 812.6,
+      "qps": 1.3
     }
   ]
 }

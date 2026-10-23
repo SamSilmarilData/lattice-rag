@@ -28,10 +28,17 @@ class AppConfig:
     port: int = 8000
     embed_model: str = "BAAI/bge-small-en-v1.5"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    # INT8 ONNX export used when reranker_model is bge-reranker-v2-m3. Set the revision to a
+    # commit hash to pin the downloaded weights.
+    reranker_onnx_repo: str = "onnx-community/bge-reranker-v2-m3-ONNX"
+    reranker_onnx_revision: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
     gemini_model: str = "gemini-3.8-flash"
+    llm_max_tokens: int = 256
     cors_allow_origins: tuple[str, ...] = ()
     query_rate_limit_per_minute: int = 60
+    # True when the app booted without TYPESAFE_API_KEY and runs in degraded hermetic mode
+    using_mock_keys: bool = False
 
     def __post_init__(self) -> None:
         """Validate config after initialization."""
@@ -64,8 +71,13 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         port=int(os.environ.get("PORT", "8000")),
         embed_model=os.environ.get("EMBED_MODEL", "BAAI/bge-small-en-v1.5"),
         reranker_model=os.environ.get("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
+        reranker_onnx_repo=os.environ.get(
+            "RERANKER_ONNX_REPO", "onnx-community/bge-reranker-v2-m3-ONNX"
+        ),
+        reranker_onnx_revision=os.environ.get("RERANKER_ONNX_REVISION") or None,
         groq_model=os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+        llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", "256")),
         cors_allow_origins=_split_csv(os.environ.get("CORS_ALLOW_ORIGINS", "")),
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
     )

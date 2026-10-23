@@ -190,6 +190,7 @@ class DocumentIngester:
                     title=title,
                     chunks=chunk_data_list,
                     chunk_entities_relations=prepared_chunk_extractions,
+                    tags=tags,
                 )
             raw_ent = getattr(ingest_stats, "entity_count", 0)
             raw_rel = getattr(ingest_stats, "relation_count", 0)
