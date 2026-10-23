@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 _SENTENCE_SPLITTER = re.compile(r"(?<=[.!?])\s+")
 
 
+class DocumentExistsError(ValueError):
+    """Raised when ingesting a doc_id that is already stored (ingest is not an upsert)."""
+
+    def __init__(self, doc_id: str) -> None:
+        super().__init__(f"Document {doc_id!r} already exists")
+        self.doc_id = doc_id
+
+
 def chunk_text(text: str, target_size: int = 512, overlap: int = 64) -> list[str]:
     """Paragraph and sentence-aware chunking targeting ~512 chars with 64 overlap."""
     if not text or not text.strip():
@@ -89,6 +97,9 @@ class DocumentIngester:
         self.cache = cache
         self.target_chunk_size = target_chunk_size
         self.chunk_overlap = chunk_overlap
+        # Serializes the duplicate check with the write so concurrent ingests of one doc_id
+        # cannot both pass the check
+        self._write_lock = asyncio.Lock()
 
     async def ingest(
         self,
@@ -99,7 +110,14 @@ class DocumentIngester:
         target_chunk_size: int | None = None,
         chunk_overlap: int | None = None,
     ) -> IngestStats:
-        """Ingest a text document: chunk, embed, extract entities/relations, and commit to LatticeDB."""
+        """Ingest a text document: chunk, embed, extract entities/relations, and commit to LatticeDB.
+
+        Raises:
+            DocumentExistsError: if ``doc_id`` is already stored.
+        """
+        if await asyncio.to_thread(self.store.has_document, doc_id):
+            raise DocumentExistsError(doc_id)
+
         t_size = target_chunk_size or self.target_chunk_size
         t_overlap = chunk_overlap or self.chunk_overlap
 
@@ -162,12 +180,17 @@ class DocumentIngester:
             "ingest_document_bundle" in getattr(self.store, "__dict__", {})
         )
         if use_bundle:
-            ingest_stats = self.store.ingest_document_bundle(
-                doc_id=doc_id,
-                title=title,
-                chunks=chunk_data_list,
-                chunk_entities_relations=prepared_chunk_extractions,
-            )
+            async with self._write_lock:
+                if await asyncio.to_thread(self.store.has_document, doc_id):
+                    raise DocumentExistsError(doc_id)
+                # The WAL write runs off the event loop so it does not stall other requests
+                ingest_stats = await asyncio.to_thread(
+                    self.store.ingest_document_bundle,
+                    doc_id=doc_id,
+                    title=title,
+                    chunks=chunk_data_list,
+                    chunk_entities_relations=prepared_chunk_extractions,
+                )
             raw_ent = getattr(ingest_stats, "entity_count", 0)
             raw_rel = getattr(ingest_stats, "relation_count", 0)
             raw_ids = getattr(ingest_stats, "chunk_ids", [])

@@ -17,6 +17,7 @@ class PipelineState:
     # --- Input ---
     query: str = ""
     stream: bool = False
+    use_cache: bool = True  # False: skip Tier 1 lookup and store (eval runs)
     filter_tags: list[str] = field(default_factory=list)
 
     # --- Routing ---
@@ -39,6 +40,7 @@ class PipelineState:
 
     # --- Guardrail (Jev Noul) ---
     filtered_chunks: list[dict[str, Any]] = field(default_factory=list)
+    low_grounding: bool = False
 
     # --- Generation ---
     answer: str = ""

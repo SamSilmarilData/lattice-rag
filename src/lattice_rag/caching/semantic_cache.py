@@ -136,8 +136,27 @@ class SemanticCache:
         self._misses += 1
         return None
 
+    def _index_of(self, norm_key: str) -> int | None:
+        for i, entry in enumerate(self._cache):
+            if entry.query_text.strip().lower() == norm_key:
+                return i
+        return None
+
+    def _remove_at(self, idx: int) -> None:
+        """Drop entry idx and shift the following matrix rows up to keep rows aligned."""
+        assert self._embeddings_matrix is not None
+        last = len(self._cache) - 1
+        self._cache.pop(idx)
+        if idx < last:
+            self._embeddings_matrix[idx:last] = self._embeddings_matrix[idx + 1 : last + 1]
+        self._embeddings_matrix[last] = 0.0
+
     def put(self, query_text: str, query_embedding: np.ndarray, response: dict[str, Any]) -> None:
-        """Store a new entry with normalized vector and bounded LRU eviction."""
+        """Store an entry with a normalized vector and bounded LRU eviction.
+
+        Invariant: exactly one ``_cache`` entry (and matrix row) per normalized query, and
+        ``_exact_map`` holds the same keys in LRU order. Re-putting a query replaces it.
+        """
         norm_key = query_text.strip().lower()
 
         # Compute normalized unit vector for fast BLAS dot product
@@ -156,39 +175,30 @@ class SemanticCache:
                 if len(c_entry.query_embedding) == vec_dim:
                     self._embeddings_matrix[i] = c_entry.query_embedding
 
-        # LRU eviction if at capacity
-        if len(self._cache) >= self.max_size:
-            self._evictions += 1
-            # Evict least recently used key from exact map and oldest from cache list
-            oldest_key, _ = self._exact_map.popitem(last=False)
-            # Find and remove matching entry in _cache
-            idx_to_remove = next(
-                (
-                    i
-                    for i, entry in enumerate(self._cache)
-                    if entry.query_text.strip().lower() == oldest_key
-                ),
-                0,
-            )
-            self._cache.pop(idx_to_remove)
-            # Shift remaining rows in embeddings matrix
-            if idx_to_remove < len(self._cache):
-                self._embeddings_matrix[idx_to_remove : len(self._cache)] = self._embeddings_matrix[
-                    idx_to_remove + 1 : len(self._cache) + 1
-                ]
-
-        insert_idx = len(self._cache)
         entry = CacheEntry(
             query_text=query_text,
             query_embedding=norm_vec,
             response=response,
             created_at=time.time(),
         )
-        self._cache.append(entry)
+
+        existing_idx = self._index_of(norm_key)
+        if existing_idx is not None:
+            self._cache[existing_idx] = entry
+            self._embeddings_matrix[existing_idx] = norm_vec
+        else:
+            if len(self._cache) >= self.max_size:
+                self._evictions += 1
+                oldest_key, _ = self._exact_map.popitem(last=False)
+                oldest_idx = self._index_of(oldest_key)
+                if oldest_idx is not None:
+                    self._remove_at(oldest_idx)
+            self._embeddings_matrix[len(self._cache)] = norm_vec
+            self._cache.append(entry)
+
         self._exact_map[norm_key] = response
         self._exact_map.move_to_end(norm_key)
-        self._embeddings_matrix[insert_idx] = norm_vec
-        logger.debug("cache_put", query=query_text, size=len(self._cache))
+        logger.debug("cache_put", size=len(self._cache))
 
     @property
     def stats(self) -> tuple[int, int]:

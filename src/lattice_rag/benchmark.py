@@ -199,10 +199,9 @@ class BenchmarkEngine:
             {"node_id": c.node_id, "text": c.text, "score": c.score, "metadata": c.metadata}
             for c in chunks[:3]
         ] or [{"node_id": 1, "text": "Sample text for reranking", "score": 0.5, "metadata": {}}]
-        graph_ctx = self.store.get_subgraph_snapshot(10)
 
         async def _rerank() -> Any:
-            return await reranker.rerank(query, chunks_dicts, graph_ctx, top_k=3, max_triples=5)
+            return await reranker.rerank(query, chunks_dicts, top_k=3)
 
         return await self.benchmark_callable(
             name="Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3)",
@@ -230,9 +229,7 @@ class BenchmarkEngine:
                 nonlocal q_idx
                 q = queries[q_idx % len(queries)]
                 q_idx += 1
-                await retriever.retrieve(
-                    q, route="hybrid", apply_guardrail=False, top_k=3, max_triples=5
-                )
+                await retriever.retrieve(q, route="hybrid", apply_guardrail=False, top_k=3)
                 return True
 
             return await self.benchmark_callable(

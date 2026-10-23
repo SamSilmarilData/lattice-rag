@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class GuardrailResult:
+    """Per-call guardrail verdict: the chunks that passed and whether grounding is too weak."""
+
+    chunks: list[dict[str, Any]]
+    low_grounding: bool
 
 
 class ContextGuardrail:
@@ -36,10 +45,9 @@ class ContextGuardrail:
                 )
             self._client = AsyncTypeSafeClient()
         self.threshold = threshold
-        self.low_grounding_flag: bool = False
         logger.debug("ContextGuardrail initialized", threshold=threshold)
 
-    async def filter_chunks(self, query: str, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def filter_chunks(self, query: str, chunks: list[dict[str, Any]]) -> GuardrailResult:
         """Filters chunks based on their relevance to the query.
 
         Args:
@@ -47,12 +55,12 @@ class ContextGuardrail:
             chunks: A list of dictionaries, each containing 'text', 'node_id', and 'score'.
 
         Returns:
-            A filtered list of chunk dictionaries that meet the relevance threshold.
-            If all chunks fail the threshold, injects a fallback item with low_grounding_flag=True.
+            The chunks that meet the relevance threshold (each with a ``grounding_score``).
+            ``low_grounding`` is True when candidates existed but none passed. The result is
+            returned per call; the guardrail keeps no request state, so it is safe to share.
         """
         if not chunks:
-            self.low_grounding_flag = False
-            return []
+            return GuardrailResult(chunks=[], low_grounding=False)
 
         logger.info("Filtering chunks", chunk_count=len(chunks))
 
@@ -83,48 +91,32 @@ class ContextGuardrail:
                 if prob >= self.threshold:
                     logger.debug("Chunk passed", index=i, probability=prob)
                     chunk_copy = dict(chunk)
-                    chunk_copy["low_grounding_flag"] = False
                     chunk_copy["grounding_score"] = prob
                     filtered_chunks.append(chunk_copy)
                 else:
                     logger.debug("Chunk filtered out", index=i, probability=prob)
 
             if not filtered_chunks:
-                self.low_grounding_flag = True
-                logger.warning(
-                    "All candidate chunks failed grounding threshold, low_grounding_flag activated"
-                )
-                return [
-                    {
-                        "node_id": -1,
-                        "text": "INSUFFICIENT_EVIDENCE: All candidate chunks failed relevance grounding.",
-                        "score": 0.0,
-                        "grounding_score": 0.0,
-                        "low_grounding_flag": True,
-                    }
-                ]
+                logger.warning("All candidate chunks failed grounding threshold")
+                return GuardrailResult(chunks=[], low_grounding=True)
 
-            self.low_grounding_flag = False
             logger.info(
                 "Filtering complete",
                 original_count=len(chunks),
                 filtered_count=len(filtered_chunks),
             )
-            return filtered_chunks
+            return GuardrailResult(chunks=filtered_chunks, low_grounding=False)
         except Exception as e:
             logger.warning(
                 "context_guardrail_system_one_failed_fallback_to_candidate_chunks",
-                query=query,
                 error=str(e),
             )
-            self.low_grounding_flag = False
             fallback_chunks: list[dict[str, Any]] = []
             for c in chunks:
                 c_copy = dict(c)
-                c_copy["low_grounding_flag"] = False
                 c_copy["grounding_score"] = float(c.get("rerank_score", c.get("score", 1.0)))
                 fallback_chunks.append(c_copy)
-            return fallback_chunks
+            return GuardrailResult(chunks=fallback_chunks, low_grounding=False)
 
     async def aclose(self) -> None:
         """Closes the underlying TypeSafe AI client."""

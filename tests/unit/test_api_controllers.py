@@ -37,6 +37,7 @@ def mock_controllers_app():
         timings=[{"stage": "retrieval", "duration_ms": 20.0}],
     )
     mock_orchestrator.run = AsyncMock(return_value=mock_state)
+    mock_orchestrator.synthesizer.circuit_status = "closed"
 
     async def mock_stream_gen(q):
         yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
@@ -48,6 +49,7 @@ def mock_controllers_app():
     # Mock Store
     mock_store = MagicMock()
     mock_store.db.is_open = True
+    mock_store.has_document.return_value = False
     mock_store.ingest_document.return_value = IngestStats(chunk_count=1, entity_count=0, relation_count=0, chunk_ids=[101])
     mock_store.ingest_entities.return_value = IngestStats(chunk_count=0, entity_count=1, relation_count=0)
 
@@ -68,7 +70,6 @@ def mock_controllers_app():
 
     mock_fb_cache = MagicMock()
     mock_fb_cache.redis = MagicMock()
-    mock_fb_cache.circuit_status = "closed"
     mock_fb_cache.cached_query_count = AsyncMock(return_value=50)
 
     # Mock Config
@@ -246,3 +247,16 @@ async def test_api_query_rejects_empty_or_oversized_query(mock_controllers_app, 
         resp = await client.post("/api/v1/query", json={"query": query})
         assert resp.status_code == 400
         mocks["orchestrator"].run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].has_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_arch", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 409
+        mocks["store"].ingest_document.assert_not_called()

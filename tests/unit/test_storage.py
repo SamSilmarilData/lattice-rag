@@ -138,3 +138,50 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
     c2_ents = temp_store.get_entities_for_chunk(c2)
     assert ent_id_1 in c1_ents
     assert ent_id_1 in c2_ents
+
+
+class _BadVector:
+    """Passes the dimension check but makes set_vector fail mid-transaction."""
+
+    def __len__(self) -> int:
+        return 384
+
+
+def _chunk(text: str) -> ChunkData:
+    return ChunkData(text=text, embedding=np.zeros(384, dtype=np.float32), position=0)
+
+
+def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
+    """A rolled-back ingest must not leave cache entries pointing at nodes that don't exist."""
+    with pytest.raises(TypeError):
+        temp_store.ingest_document_bundle(
+            "d1",
+            "t",
+            [_chunk("LatticeDB rocks.")],
+            [
+                (
+                    0,
+                    [
+                        EntityData(name="LatticeDB", entity_type="tech"),
+                        EntityData(name="Ghost", entity_type="tech", embedding=_BadVector()),  # type: ignore[arg-type]
+                    ],
+                    [],
+                )
+            ],
+        )
+
+    assert temp_store.get_canonical_entity_id("LatticeDB") is None
+
+    # A later ingest of the same entity creates a real node
+    temp_store.ingest_document_bundle(
+        "d2", "t", [_chunk("LatticeDB again.")], [(0, [EntityData(name="LatticeDB", entity_type="tech")], [])]
+    )
+    ent_id = temp_store.get_canonical_entity_id("LatticeDB")
+    assert ent_id in temp_store.db.get_nodes_by_label("Entity")
+
+
+def test_has_document(temp_store: LatticeStore):
+    assert temp_store.has_document("doc_a") is False
+    temp_store.ingest_document_bundle("doc_a", "A", [_chunk("Alpha.")], [])
+    assert temp_store.has_document("doc_a") is True
+    assert temp_store.has_document("doc_b") is False

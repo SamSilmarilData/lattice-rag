@@ -160,6 +160,7 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
 
     from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
+    from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
@@ -174,11 +175,15 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
         extractor = EntityExtractor()
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
-        stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+        try:
+            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+        except DocumentExistsError as e:
+            raise click.ClickException(f"{e}. Use a different --doc-id.") from e
+        finally:
+            store.close()
         click.echo(
             f"✓ Ingestion complete: {stats.chunk_count} chunks, {stats.entity_count} entities, {stats.relation_count} relations."
         )
-        store.close()
 
     asyncio.run(_ingest())
 
@@ -192,6 +197,7 @@ def seed(dataset: str) -> None:
 
     from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
+    from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
@@ -220,8 +226,11 @@ def seed(dataset: str) -> None:
             d_id = doc.get("document_id", "doc")
             d_title = doc.get("title", d_id)
             d_text = doc.get("text", "")
-            click.echo(f"  Ingesting '{d_title}' ({len(d_text)} chars)...")
-            await ingester.ingest(d_id, d_title, d_text)
+            try:
+                await ingester.ingest(d_id, d_title, d_text)
+                click.echo(f"  Ingested '{d_title}' ({len(d_text)} chars)")
+            except DocumentExistsError:
+                click.echo(f"  Skipped '{d_title}' (already seeded)")
 
         click.echo("✓ LatticeDB pre-seeding complete!")
         store.close()

@@ -128,7 +128,7 @@ async def test_full_pipeline_irrelevant_query_low_grounding(
     temp_store: LatticeStore,
     embedding_service: EmbeddingService,
 ):
-    """Verify irrelevant query triggers low_grounding_flag through live Jev Noul guardrail."""
+    """Verify irrelevant query reports low_grounding through live Jev Noul guardrail."""
     c_text = "LatticeDB uses ACID transactions and writes require an explicit txn.commit() call."
     emb = embedding_service.embed_query(c_text)
     temp_store.ingest_document("doc_acid", "ACID", [ChunkData(text=c_text, embedding=emb, position=0)])

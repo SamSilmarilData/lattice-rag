@@ -18,23 +18,6 @@ def mock_gemini_client():
 
 
 @pytest.mark.asyncio
-async def test_gemini_fallback_prompt_construction(mock_gemini_client):
-    synthesizer = GeminiFallback(client=mock_gemini_client, model="gemini-3.8-flash")
-
-    chunks = [{"doc_id": "doc1", "text": "Large cross-document context paragraph."}]
-    graph_context = {
-        "nodes": [{"node_id": 10, "name": "Gemini"}],
-        "edges": [],
-    }
-
-    prompt = synthesizer._build_prompt("Summarize cross-doc context", chunks, graph_context)
-
-    assert "Large cross-document context paragraph" in prompt
-    assert "acting as a secondary synthesizer" in prompt
-    assert "User Question: Summarize cross-doc context" in prompt
-
-
-@pytest.mark.asyncio
 async def test_gemini_fallback_synthesize_success(mock_gemini_client):
     synthesizer = GeminiFallback(client=mock_gemini_client, model="gemini-3.8-flash")
 
@@ -48,6 +31,8 @@ async def test_gemini_fallback_synthesize_success(mock_gemini_client):
     mock_gemini_client.aio.models.generate_content.assert_awaited_once()
     call_kwargs = mock_gemini_client.aio.models.generate_content.call_args.kwargs
     assert call_kwargs["model"] == "gemini-3.8-flash"
+    assert "untrusted" in call_kwargs["config"]["system_instruction"]
+    assert "<evidence>" in call_kwargs["contents"]
 
 
 @pytest.mark.asyncio

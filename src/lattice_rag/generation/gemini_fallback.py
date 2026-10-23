@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import os
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -9,6 +8,7 @@ from typing import Any
 import structlog
 from google import genai
 
+from lattice_rag.generation.prompt import build_messages
 from lattice_rag.security import sanitize_error_detail
 
 logger = structlog.get_logger(__name__)
@@ -45,55 +45,6 @@ class GeminiFallback:
             raise RuntimeError("Gemini synthesis unavailable: GEMINI_API_KEY is not configured")
         return self.client
 
-    def _build_prompt(
-        self,
-        query: str,
-        context_chunks: list[dict[str, Any]],
-        graph_context: dict[str, Any] | None = None,
-    ) -> str:
-        """Builds the system prompt with evidence for fallback/massive context synthesis."""
-        parts: list[str] = [
-            "You are a helpful knowledge assistant answering questions based on provided context.",
-            "Note: You are acting as a secondary synthesizer for high-context or failover requests.",
-            "Instructions:",
-            "- Ground every claim directly in the provided evidence.",
-            "- Cite source chunks by their position or ID when possible.",
-            "- If relational graph triples are provided, use them to explain connections between entities.",
-            "- Acknowledge when evidence is insufficient to answer the question.",
-            "- Be concise and precise.",
-            "",
-            "Text Chunks:",
-        ]
-
-        if not context_chunks:
-            parts.append("(No text chunks retrieved)")
-        else:
-            for i, chunk in enumerate(context_chunks):
-                doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
-                chunk_text = chunk.get("text", str(chunk))
-                parts.append(f"[Chunk {i} (Doc: {doc_id})]: {chunk_text}")
-
-        if graph_context:
-            parts.append("")
-            parts.append("Knowledge Graph Context:")
-            edges = graph_context.get("edges", [])
-            nodes = {
-                n.get("node_id", n.get("id")): n.get("name", "")
-                for n in graph_context.get("nodes", [])
-            }
-            if edges:
-                for edge in edges:
-                    src = nodes.get(edge.get("source_id"), edge.get("source_name", "Unknown"))
-                    tgt = nodes.get(edge.get("target_id"), edge.get("target_name", "Unknown"))
-                    rel = edge.get("relation_type", "RELATION")
-                    parts.append(f"- {src} --[{rel}]--> {tgt}")
-            else:
-                parts.append(json.dumps(graph_context))
-
-        parts.append("")
-        parts.append(f"User Question: {query}")
-        return "\n".join(parts)
-
     async def synthesize(
         self,
         query: str,
@@ -103,12 +54,13 @@ class GeminiFallback:
         """Non-streaming synthesis using Gemini."""
         logger.info("gemini_synthesizing_answer", model=self.model)
         client = self._require_client()
-        prompt = self._build_prompt(query, context_chunks, graph_context)
+        prompt = build_messages(query, context_chunks, graph_context)
 
         try:
             response = await client.aio.models.generate_content(
                 model=self.model,
-                contents=prompt,
+                contents=prompt.user,
+                config={"system_instruction": prompt.system},
             )
             return response.text or ""
         except Exception as e:
@@ -125,12 +77,13 @@ class GeminiFallback:
         """Streaming synthesis using Gemini."""
         logger.info("gemini_streaming_synthesis", model=self.model)
         client = self._require_client()
-        prompt = self._build_prompt(query, context_chunks, graph_context)
+        prompt = build_messages(query, context_chunks, graph_context)
 
         try:
             stream_result = client.aio.models.generate_content_stream(
                 model=self.model,
-                contents=prompt,
+                contents=prompt.user,
+                config={"system_instruction": prompt.system},
             )
             response = await stream_result if inspect.isawaitable(stream_result) else stream_result
             async for chunk in response:

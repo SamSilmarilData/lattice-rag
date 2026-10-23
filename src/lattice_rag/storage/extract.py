@@ -188,8 +188,7 @@ class EntityExtractor:
             present = [
                 e
                 for e in entities
-                if re.search(r"\b" + re.escape(e.name) + r"\b", sentence, re.IGNORECASE)
-                or e.name in sentence
+                if re.search(r"(?<!\w)" + re.escape(e.name) + r"(?!\w)", sentence, re.IGNORECASE)
             ]
             for i, ent1 in enumerate(present):
                 for ent2 in present[i + 1 :]:

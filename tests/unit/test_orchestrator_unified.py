@@ -22,13 +22,6 @@ def mock_orchestrator_components():
 
     mock_fb_cache = MagicMock()
     mock_fb_cache.find_closest_fallback = AsyncMock(return_value="Cached FAQ")
-    mock_fb_cache.circuit_status = "closed"
-    async def _call_breaker(fn, *args, **kwargs):
-        res = fn(*args, **kwargs)
-        if hasattr(res, "__await__"):
-            return await res
-        return res
-    mock_fb_cache.call_with_breaker = AsyncMock(side_effect=_call_breaker)
 
     mock_pipeline = MagicMock()
     mock_pipeline.execute = AsyncMock(return_value=MagicMock(
@@ -157,3 +150,75 @@ async def test_unified_orchestrator_standard_query_parity(mock_orchestrator_comp
     assert tokens == state.answer
     assert done_evt["data"]["answer"] == state.answer
     assert done_evt["data"]["route"] == state.route
+
+
+@pytest.mark.asyncio
+async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestrator_components):
+    """When Groq is down, both paths report degraded=True and neither caches the answer."""
+    c = mock_orchestrator_components
+    c["groq"].synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
+
+    async def _groq_stream_fail(q, ch, g):
+        raise RuntimeError("Groq 503")
+        yield "never"  # pragma: no cover
+
+    async def _gemini_stream(q, ch, g):
+        yield "Gemini answer."
+
+    c["groq"].stream = _groq_stream_fail
+    c["gemini"].stream = _gemini_stream
+
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    state = await orchestrator.run("Explain LatticeDB")
+    stream_events = [evt async for evt in orchestrator.stream_query("Explain LatticeDB")]
+    done_evt = [e for e in stream_events if e["event"] == "done"][0]
+
+    assert state.degraded is True
+    assert done_evt["data"]["degraded"] is True
+    assert done_evt["data"]["answer"] == state.answer == "Gemini answer."
+    c["semantic_cache"].put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unified_orchestrator_low_grounding_is_reported_and_not_cached(
+    mock_orchestrator_components,
+):
+    """Answers built on evidence the guardrail rejected are flagged and never cached."""
+    c = mock_orchestrator_components
+    c["pipeline"].execute = AsyncMock(
+        return_value=MagicMock(
+            final_chunks=[],
+            graph_context=SubgraphResult(nodes=[], edges=[]),
+            timings={},
+            low_grounding=True,
+        )
+    )
+
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    state = await orchestrator.run("Unanswerable question")
+    stream_events = [evt async for evt in orchestrator.stream_query("Unanswerable question")]
+    done_evt = [e for e in stream_events if e["event"] == "done"][0]
+
+    assert state.low_grounding is True
+    assert done_evt["data"]["low_grounding"] is True
+    c["semantic_cache"].put.assert_not_called()

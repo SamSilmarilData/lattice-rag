@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from lattice_rag.retrieval.retriever import HybridRetriever
+from lattice_rag.routing.guardrail import GuardrailResult
 from lattice_rag.storage.db import SearchResult, SubgraphResult
 
 
@@ -84,7 +85,6 @@ async def test_hybrid_retriever_full_execution_flow():
         query="Explain LatticeDB and HNSW",
         route="hybrid",
         top_k=2,
-        max_triples=3,
     )
 
     assert len(result.final_chunks) == 2
@@ -105,7 +105,7 @@ async def test_hybrid_retriever_guardrail_filtering():
     mock_guardrail = MagicMock()
     # Guardrail filters out all but the first chunk
     async def _filter(query, chunks):
-        return [chunks[0]]
+        return GuardrailResult(chunks=[chunks[0]], low_grounding=False)
 
     mock_guardrail.filter_chunks = AsyncMock(side_effect=_filter)
 
@@ -128,7 +128,9 @@ async def test_hybrid_retriever_guardrail_all_rejected_activates_low_grounding()
 
     mock_guardrail = MagicMock()
     # Guardrail rejects all chunks
-    mock_guardrail.filter_chunks = AsyncMock(return_value=[])
+    mock_guardrail.filter_chunks = AsyncMock(
+        return_value=GuardrailResult(chunks=[], low_grounding=True)
+    )
 
     retriever = HybridRetriever(
         store=store,

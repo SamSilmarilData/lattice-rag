@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import numpy as np
-import pybreaker
 import pytest
 
 from lattice_rag.caching.fallback_cache import FallbackCache
@@ -106,7 +105,7 @@ async def test_semantic_cache_clear_and_aclose():
 
 
 # =========================================================================
-# Tier 2: FallbackCache & Circuit Breaker Unit Tests
+# Tier 2: FallbackCache Unit Tests
 # =========================================================================
 
 @pytest.mark.asyncio
@@ -114,8 +113,6 @@ async def test_fallback_cache_embedded_connect_and_seed():
     """Verify FallbackCache boots embedded fakeredis without external Redis or API keys."""
     fb = FallbackCache(redis_url="embedded")
     await fb.connect()
-
-    assert fb.circuit_status == "closed"
 
     queries = {
         "What is Litestar?": "Litestar is an ASGI framework.",
@@ -165,42 +162,36 @@ async def test_fallback_cache_seed_from_file_and_fuzzy_match():
     await fb.close()
 
 
-@pytest.mark.asyncio
-async def test_fallback_circuit_breaker_transitions():
-    """Verify circuit breaker transitions: closed -> fail 3 times -> open -> blocks calls."""
-    fb = FallbackCache(redis_url="embedded")
+def _unit(i: int, dim: int = 8) -> np.ndarray:
+    v = np.zeros(dim, dtype=np.float32)
+    v[i % dim] = 1.0
+    return v
 
-    # Define mock failing and succeeding coroutines
-    fail_count = 0
 
-    async def flaky_llm():
-        nonlocal fail_count
-        fail_count += 1
-        raise RuntimeError(f"Simulated Groq 503 error #{fail_count}")
+def test_semantic_cache_duplicate_put_replaces_entry():
+    """Two concurrent misses on the same query both put; that must not create two entries."""
+    cache = SemanticCache(ts_client=AsyncMock(), max_size=3, vector_dimensions=8)
+    cache.put("What is X?", _unit(0), {"answer": "first"})
+    cache.put("what is x?  ", _unit(0), {"answer": "second"})
 
-    async def healthy_llm():
-        return "LLM response successfully generated"
+    assert len(cache) == 1
+    assert cache.get_exact("What is X?") == {"answer": "second"}
 
-    # Initially closed
-    assert fb.circuit_status == "closed"
 
-    # Successful call passes through breaker
-    healthy_res = await fb.call_with_breaker(healthy_llm)
-    assert healthy_res == "LLM response successfully generated"
-    assert fb.circuit_status == "closed"
+def test_semantic_cache_eviction_stays_consistent_with_duplicates():
+    """Eviction never raises and evicted queries disappear from both indexes."""
+    cache = SemanticCache(ts_client=AsyncMock(), max_size=2, vector_dimensions=8)
+    cache.put("a", _unit(0), {"answer": "a"})
+    cache.put("a", _unit(0), {"answer": "a2"})
+    cache.put("b", _unit(1), {"answer": "b"})
+    cache.put("c", _unit(2), {"answer": "c"})  # evicts "a" (least recently used)
+    cache.put("d", _unit(3), {"answer": "d"})  # evicts "b"
 
-    # Trip breaker by calling failing coroutine 3 times
-    for i in range(3):
-        with pytest.raises((RuntimeError, pybreaker.CircuitBreakerError)):
-            await fb.call_with_breaker(flaky_llm)
-
-    # Breaker is now OPEN
-    assert fb.circuit_status == "open"
-
-    # Next call should be blocked immediately with CircuitBreakerError without executing flaky_llm
-    calls_before = fail_count
-    with pytest.raises(pybreaker.CircuitBreakerError):
-        await fb.call_with_breaker(flaky_llm)
-    assert fail_count == calls_before  # flaky_llm was NOT called
-
-    await fb.close()
+    assert len(cache) == 2
+    assert cache.get_exact("a") is None
+    assert cache.get_exact("b") is None
+    assert {e.query_text for e in cache._cache} == {"c", "d"}
+    assert set(cache._exact_map) == {"c", "d"}
+    # Matrix rows line up with the surviving entries
+    for i, entry in enumerate(cache._cache):
+        assert np.allclose(cache._embeddings_matrix[i], entry.query_embedding)

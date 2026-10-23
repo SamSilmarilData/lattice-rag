@@ -7,6 +7,7 @@ import pytest
 
 from lattice_rag.retrieval.embeddings import EmbeddingService, RerankResult
 from lattice_rag.retrieval.pipeline import RetrievalPipeline, RetrievalResult
+from lattice_rag.routing.guardrail import GuardrailResult
 from lattice_rag.storage.db import SearchResult, SubgraphResult
 
 
@@ -58,8 +59,9 @@ async def test_pipeline_full_execution_flow():
     # Guardrail: Passes chunk
     mock_guardrail = AsyncMock()
     passed_chunk = {"node_id": 1, "text": "Chunk 1 content", "rerank_score": 9.2, "grounding_score": 0.85}
-    mock_guardrail.filter_chunks.return_value = [passed_chunk]
-    mock_guardrail.low_grounding_flag = False
+    mock_guardrail.filter_chunks.return_value = GuardrailResult(
+        chunks=[passed_chunk], low_grounding=False
+    )
 
     pipeline = RetrievalPipeline(mock_store, mock_embed, router_guardrail=mock_guardrail)
     result = await pipeline.execute("Explain LatticeDB", route="hybrid")
@@ -91,13 +93,43 @@ async def test_pipeline_guardrail_insufficient_evidence_propagates_flag():
 
     # Guardrail rejects all chunks
     mock_guardrail = AsyncMock()
-    mock_guardrail.filter_chunks.return_value = [
-        {"node_id": -1, "text": "INSUFFICIENT_EVIDENCE", "low_grounding_flag": True}
-    ]
-    mock_guardrail.low_grounding_flag = True
+    mock_guardrail.filter_chunks.return_value = GuardrailResult(chunks=[], low_grounding=True)
 
     pipeline = RetrievalPipeline(mock_store, mock_embed, router_guardrail=mock_guardrail)
     result = await pipeline.execute("Difficult question", route="hybrid")
 
     assert result.low_grounding is True
-    assert result.final_chunks[0]["low_grounding_flag"] is True
+    assert result.final_chunks == []
+
+
+@pytest.mark.asyncio
+async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embedding():
+    """All Stage 1 candidates reach the reranker, source metadata survives, and a provided
+    query embedding is not recomputed."""
+    import numpy as np
+
+    hits = [
+        SearchResult(
+            node_id=i, score=1.0 / (i + 1), text=f"chunk {i}", metadata={"doc_id": f"d{i}", "position": i}
+        )
+        for i in range(10)
+    ]
+    mock_store = MagicMock()
+    mock_store.vector_search.return_value = hits
+    mock_store.bm25_search.return_value = []
+    mock_store.get_entities_for_chunks.return_value = []
+
+    mock_embed = MagicMock(spec=EmbeddingService)
+    # The reranker promotes the last RRF candidate to the top
+    mock_embed.rerank.return_value = [RerankResult(index=9, score=9.0, text="chunk 9")]
+
+    pipeline = RetrievalPipeline(mock_store, mock_embed)
+    result = await pipeline.execute(
+        "q", top_k=5, apply_guardrail=False, query_embedding=np.ones(384, dtype=np.float32)
+    )
+
+    assert len(mock_embed.rerank.call_args[0][1]) == 10
+    assert result.final_chunks[0]["node_id"] == 9
+    assert result.final_chunks[0]["doc_id"] == "d9"
+    assert result.final_chunks[0]["position"] == 9
+    mock_embed.embed_query.assert_not_called()

@@ -121,6 +121,19 @@ class LatticeStore:
         """Return canonical node_id for an entity name if it exists in the graph."""
         return self._entity_cache.get(name.strip().lower())
 
+    def has_document(self, doc_id: str) -> bool:
+        """Return True if a Document node with this doc_id is already stored."""
+        doc_nodes = self.db.get_nodes_by_label("Document")
+        if not doc_nodes:
+            return False
+        with self.db.read() as txn:
+            return any(txn.get_property(nid, "doc_id") == doc_id for nid in doc_nodes)
+
+    def _lookup_entity(self, name: str, pending: dict[str, int]) -> int | None:
+        norm_name = name.strip().lower()
+        found = self._entity_cache.get(norm_name)
+        return found if found is not None else pending.get(norm_name)
+
     def ingest_document(
         self,
         doc_id: str,
@@ -165,12 +178,15 @@ class LatticeStore:
         """Ingest extracted entities and relations linked to their source chunk with canonical deduplication."""
         entity_name_to_id: dict[str, int] = {}
         created_relations = 0
+        # New canonical entities are published to the shared cache only after commit
+        pending: dict[str, int] = {}
 
         with self.db.write() as txn:
             for ent in entities:
                 norm_name = ent.name.strip().lower()
-                if norm_name in self._entity_cache:
-                    ent_id = self._entity_cache[norm_name]
+                existing = self._lookup_entity(ent.name, pending)
+                if existing is not None:
+                    ent_id = existing
                 else:
                     ent_node = txn.create_node(
                         labels=["Entity", ent.entity_type],
@@ -179,17 +195,17 @@ class LatticeStore:
                     ent_id = ent_node.id
                     if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
                         txn.set_vector(ent_id, "embedding", ent.embedding)
-                    self._entity_cache[norm_name] = ent_id
+                    pending[norm_name] = ent_id
 
                 txn.create_edge(chunk_id, ent_id, "CONTAINS")
                 entity_name_to_id[ent.name] = ent_id
 
             for rel in relations:
-                source_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(
-                    rel.source_name.strip().lower()
+                source_id = entity_name_to_id.get(rel.source_name) or self._lookup_entity(
+                    rel.source_name, pending
                 )
-                target_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(
-                    rel.target_name.strip().lower()
+                target_id = entity_name_to_id.get(rel.target_name) or self._lookup_entity(
+                    rel.target_name, pending
                 )
                 if source_id is not None and target_id is not None:
                     txn.create_edge(
@@ -201,6 +217,7 @@ class LatticeStore:
                     created_relations += 1
 
             txn.commit()
+        self._entity_cache.update(pending)
 
         return IngestStats(
             chunk_count=0,
@@ -220,6 +237,9 @@ class LatticeStore:
         entity_name_to_id: dict[str, int] = {}
         total_entities = 0
         total_relations = 0
+        # New canonical entities are published to the shared cache only after commit, so a
+        # rolled-back transaction cannot leave ids for nodes that were never written.
+        pending: dict[str, int] = {}
 
         with self.db.write() as txn:
             doc_node = txn.create_node(
@@ -256,8 +276,9 @@ class LatticeStore:
 
                 for ent in entities:
                     norm_name = ent.name.strip().lower()
-                    if norm_name in self._entity_cache:
-                        ent_id = self._entity_cache[norm_name]
+                    existing = self._lookup_entity(ent.name, pending)
+                    if existing is not None:
+                        ent_id = existing
                     elif ent.name in entity_name_to_id:
                         ent_id = entity_name_to_id[ent.name]
                     else:
@@ -271,7 +292,7 @@ class LatticeStore:
                             and len(ent.embedding) == self.vector_dimensions
                         ):
                             txn.set_vector(ent_id, "embedding", ent.embedding)
-                        self._entity_cache[norm_name] = ent_id
+                        pending[norm_name] = ent_id
                         total_entities += 1
 
                     entity_name_to_id[ent.name] = ent_id
@@ -279,11 +300,11 @@ class LatticeStore:
                         txn.create_edge(real_chunk_id, ent_id, "CONTAINS")
 
                 for rel in relations:
-                    s_id = entity_name_to_id.get(rel.source_name) or self._entity_cache.get(
-                        rel.source_name.strip().lower()
+                    s_id = entity_name_to_id.get(rel.source_name) or self._lookup_entity(
+                        rel.source_name, pending
                     )
-                    t_id = entity_name_to_id.get(rel.target_name) or self._entity_cache.get(
-                        rel.target_name.strip().lower()
+                    t_id = entity_name_to_id.get(rel.target_name) or self._lookup_entity(
+                        rel.target_name, pending
                     )
                     if s_id is not None and t_id is not None:
                         txn.create_edge(
@@ -295,6 +316,7 @@ class LatticeStore:
                         total_relations += 1
 
             txn.commit()
+        self._entity_cache.update(pending)
 
         return IngestStats(
             chunk_count=len(chunks),

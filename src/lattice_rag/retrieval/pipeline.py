@@ -63,21 +63,25 @@ class RetrievalPipeline:
         route: str = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
-        max_triples: int = 5,
         budget: int = 25,
+        query_embedding: Any | None = None,
     ) -> RetrievalResult:
         """Execute the 3-stage retrieval pipeline with internal telemetry.
 
-        Stage 1: HNSW vector search + BM25 keyword recall with RRF fusion.
-        Stage 2: Dynamic 1-to-2 hop Cypher graph traversal from entity anchors.
-        Stage 3: Cross-encoder precision reranking with linearized triple capping.
+        Stage 1: HNSW vector search + BM25 keyword recall with RRF fusion (2*top_k candidates).
+        Stage 2: 1-to-2 hop graph traversal from the entities in those candidates.
+        Stage 3: Cross-encoder reranking of every Stage 1 candidate down to top_k.
         Optional: TypeSafe Jev Noul context guardrail pruning.
+
+        ``query_embedding`` lets callers that already embedded the query skip re-embedding.
         """
         timings: dict[str, float] = {}
 
         # ── Stage 1: Vector Search + BM25 ────────────────────────────────────
         t0 = time.perf_counter()
-        stage1_results = await self.searcher.search(query, top_k=max(top_k * 2, 10))
+        stage1_results = await self.searcher.search(
+            query, top_k=max(top_k * 2, 10), query_embedding=query_embedding
+        )
         timings["stage1_search"] = (time.perf_counter() - t0) * 1000.0
 
         if not stage1_results:
@@ -92,11 +96,9 @@ class RetrievalPipeline:
         anchor_ids = [res.node_id for res in stage1_results]
         stage1_chunks: list[dict[str, Any]] = []
         for res in stage1_results:
-            chunk_dict: dict[str, Any] = {"node_id": res.node_id, "score": res.score}
-            if hasattr(res, "text") and res.text:
-                chunk_dict["text"] = res.text
-            elif hasattr(res, "metadata") and isinstance(res.metadata, dict):
-                chunk_dict["text"] = res.metadata.get("text", "")
+            # Source metadata (doc_id, position) travels with the chunk for citations
+            chunk_dict: dict[str, Any] = {**(res.metadata or {})}
+            chunk_dict.update(node_id=res.node_id, score=res.score, text=res.text)
             stage1_chunks.append(chunk_dict)
 
         # ── Stage 2: Dynamic Cypher Graph Traversal ──────────────────────────
@@ -106,14 +108,9 @@ class RetrievalPipeline:
 
         # ── Stage 3: Cross-Encoder Precision Reranking ───────────────────────
         t0 = time.perf_counter()
-        candidate_chunks = stage1_chunks[:top_k]
-        stage3_results = await self.reranker.rerank(
-            query=query,
-            chunks=candidate_chunks,
-            graph_context=graph_context,
-            top_k=top_k,
-            max_triples=max_triples,
-        )
+        # Rerank every candidate: truncating first would leave the cross-encoder
+        # only able to reorder what RRF already chose.
+        stage3_results = await self.reranker.rerank(query=query, chunks=stage1_chunks, top_k=top_k)
         timings["stage3_rerank"] = (time.perf_counter() - t0) * 1000.0
 
         final_chunks = stage3_results
@@ -123,28 +120,13 @@ class RetrievalPipeline:
         if apply_guardrail and self.guardrail is not None:
             t0 = time.perf_counter()
             try:
-                filtered = self.guardrail.filter_chunks(query, stage3_results)
-                if hasattr(filtered, "__await__"):
-                    filtered_chunks = await filtered
-                else:
-                    filtered_chunks = filtered
-                duration_ms = (time.perf_counter() - t0) * 1000.0
-                timings["guardrail_filter"] = duration_ms
-
-                has_flag = getattr(self.guardrail, "low_grounding_flag", False)
-                if (
-                    not filtered_chunks
-                    or has_flag is True
-                    or any(
-                        isinstance(c, dict) and c.get("low_grounding_flag") for c in filtered_chunks
-                    )
-                ):
-                    low_grounding = True
-                final_chunks = filtered_chunks
+                verdict = await self.guardrail.filter_chunks(query, stage3_results)
+                timings["guardrail_filter"] = (time.perf_counter() - t0) * 1000.0
+                final_chunks = verdict.chunks
+                low_grounding = verdict.low_grounding or not verdict.chunks
             except Exception as e:
                 logger.warning(
-                    "guardrail_filter_unexpected_error_fallback: query=%s error=%s",
-                    query,
+                    "guardrail_filter_unexpected_error_fallback: error=%s",
                     str(e),
                 )
                 final_chunks = stage3_results
@@ -162,8 +144,8 @@ class RetrievalPipeline:
         route: str = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
-        max_triples: int = 5,
         budget: int = 25,
+        query_embedding: Any | None = None,
     ) -> RetrievalResult:
         """Execute the full retrieval pipeline (alias for retrieve)."""
         return await self.retrieve(
@@ -171,8 +153,8 @@ class RetrievalPipeline:
             route=route,
             apply_guardrail=apply_guardrail,
             top_k=top_k,
-            max_triples=max_triples,
             budget=budget,
+            query_embedding=query_embedding,
         )
 
 

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
-from lattice_rag.ingestion.ingester import DocumentIngester
+from lattice_rag.ingestion.ingester import DocumentExistsError, DocumentIngester
 from lattice_rag.storage.db import ChunkData, EntityData, IngestStats, RelationData
 
 
@@ -16,6 +16,9 @@ class FakeStore:
     def __init__(self):
         self.documents = {}
         self.entities = {}
+
+    def has_document(self, doc_id: str) -> bool:
+        return doc_id in self.documents
 
     def ingest_document(self, doc_id: str, title: str, chunks: list[ChunkData]) -> IngestStats:
         self.documents[doc_id] = {"title": title, "chunks": chunks}
@@ -181,3 +184,17 @@ async def test_document_ingester_ingest_file(tmp_path: Path):
     assert stats.chunk_count == 1
     assert "sample_architecture" in store.documents
     assert store.documents["sample_architecture"]["title"] == "sample_architecture.txt"
+
+
+@pytest.mark.asyncio
+async def test_document_ingester_rejects_duplicate_doc_id():
+    """Re-ingesting a doc_id must not duplicate its chunks."""
+    store = FakeStore()
+    ingester = DocumentIngester(
+        store=store, embedding_service=FakeEmbeddingService(), extractor=FakeExtractor()
+    )
+    await ingester.ingest(doc_id="doc_1", title="T", text="LatticeDB is fast.")
+
+    with pytest.raises(DocumentExistsError):
+        await ingester.ingest(doc_id="doc_1", title="T", text="LatticeDB is fast.")
+    assert len(store.documents["doc_1"]["chunks"]) == 1

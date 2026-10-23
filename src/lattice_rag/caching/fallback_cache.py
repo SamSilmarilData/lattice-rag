@@ -1,13 +1,9 @@
-import datetime
 import difflib
 import hashlib
 import json
 import re
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-import pybreaker
 import structlog
 from redis.asyncio import Redis
 
@@ -54,17 +50,20 @@ _STOP_WORDS = frozenset(
 
 
 class FallbackCache:
-    """Tier 2 Circuit Breaker + Embedded In-Process Redis Hash fallback."""
+    """Tier 2 offline FAQ store: pre-computed answers in a Redis hash (in-process by default).
+
+    The Groq circuit breaker lives in ResilientSynthesizer; this class only serves answers
+    once every generation provider has failed.
+    """
 
     def __init__(self, redis_url: str = "embedded") -> None:
-        """Sets up Redis async client and pybreaker CircuitBreaker.
+        """Sets up the Redis async client.
 
         Args:
             redis_url: URL for Redis. Default is 'embedded' which uses in-process
                        fakeredis, requiring zero external server or API keys.
         """
         self.redis_url = redis_url
-        self.breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30)
         self.redis: Redis | None = None
         self._cached_queries: list[str] = []
         self._candidate_tokens: dict[str, set[str]] = {}
@@ -86,42 +85,6 @@ class FallbackCache:
     async def _ensure_connected(self) -> None:
         if self.redis is None:
             await self.connect()
-
-    async def call_with_breaker(
-        self, coro_fn: Callable[..., Any], *args: Any, **kwargs: Any
-    ) -> Any:
-        """Executes an async callable under the circuit breaker.
-
-        If the circuit breaker is OPEN, immediately raises pybreaker.CircuitBreakerError
-        without executing coro_fn.
-        If coro_fn raises an exception, increments the failure counter and trips
-        to OPEN when fail_max is reached.
-        If coro_fn succeeds, resets failure counter and recovers from half-open.
-        """
-        timeout = datetime.timedelta(seconds=self.breaker.reset_timeout)
-        opened_at = self.breaker._state_storage.opened_at
-        if self.breaker.current_state == "open":
-            if opened_at and datetime.datetime.now(datetime.UTC) < opened_at + timeout:
-                raise pybreaker.CircuitBreakerError("Circuit breaker is OPEN")
-            self.breaker.half_open()
-
-        for listener in self.breaker.listeners:
-            listener.before_call(self.breaker, coro_fn, *args, **kwargs)
-
-        try:
-            result = await coro_fn(*args, **kwargs)
-            self.breaker._state_storage.reset_counter()
-            self.breaker.state.on_success()
-            for succ_listener in self.breaker.listeners:
-                succ_listener.success(self.breaker)
-            return result
-        except BaseException as e:
-            if self.breaker.is_system_error(e):
-                self.breaker._inc_counter()
-                for fail_listener in self.breaker.listeners:
-                    fail_listener.failure(self.breaker, e)
-                self.breaker.state.on_failure(e)
-            raise
 
     async def get_fallback(self, query_hash: str) -> str | None:
         """Looks up cache:fallback:queries hash in Redis by query_hash or raw query string."""
@@ -188,9 +151,7 @@ class FallbackCache:
                     best_candidate = candidate
 
             if best_candidate is not None and best_score >= 0.3:
-                logger.info(
-                    "token_overlap_matched", matched=best_candidate, score=best_score
-                )
+                logger.info("token_overlap_matched", matched=best_candidate, score=best_score)
                 return await self.get_fallback(best_candidate)
 
         return None
@@ -248,11 +209,6 @@ class FallbackCache:
 
         await self.seed_fallback(queries)
         return len(queries)
-
-    @property
-    def circuit_status(self) -> str:
-        """Returns 'closed', 'open', or 'half-open' based on breaker state."""
-        return self.breaker.current_state
 
     async def cached_query_count(self) -> int:
         """Returns number of unique entries in the Redis fallback hash."""

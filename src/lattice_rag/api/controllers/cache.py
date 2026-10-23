@@ -9,6 +9,7 @@ from litestar.params import SkipValidation
 from lattice_rag.api.dtos import CacheStatsResponse
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
+from lattice_rag.orchestration.graph import RAGOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class CacheController(Controller):
         self,
         semantic_cache: NamedDependency[SkipValidation[SemanticCache]],
         fallback_cache: NamedDependency[SkipValidation[FallbackCache]],
+        orchestrator: NamedDependency[SkipValidation[RAGOrchestrator]],
     ) -> CacheStatsResponse:
         """Return real-time cache statistics for Tier 1 and Tier 2."""
         logger.info("fetching_cache_stats")
@@ -30,7 +32,8 @@ class CacheController(Controller):
         tier1_hits, tier1_misses = semantic_cache.stats
         tier1_count = len(semantic_cache._cache)
 
-        circuit_status = fallback_cache.circuit_status
+        # The Groq circuit breaker guarding generation (shared by /query and /query/stream)
+        circuit_status = orchestrator.synthesizer.circuit_status
         tier2_count = await fallback_cache.cached_query_count()
 
         return CacheStatsResponse(

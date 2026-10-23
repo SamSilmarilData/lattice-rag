@@ -115,10 +115,6 @@ class EvalRunner:
                     embedding_service=embed_svc,
                 )
 
-            # Clear semantic cache before eval run so every query is freshly evaluated
-            if active_orchestrator.semantic_cache is not None:
-                active_orchestrator.semantic_cache.clear()
-
             # For suites with >5 queries, enforce concurrency 1 and inter-query pacing to avoid Groq 1000 OTPM rate limits
             effective_concurrency = 1 if len(queries_data) > 5 else max_concurrency
             semaphore = asyncio.Semaphore(effective_concurrency)
@@ -132,7 +128,11 @@ class EvalRunner:
                     ground_truth = item.get("ground_truth", "")
 
                     try:
-                        pipeline_state = await active_orchestrator.run(query, stream=False)
+                        # Bypass Tier 1 so every query is freshly evaluated and eval
+                        # answers (possibly from the ephemeral corpus) never reach users
+                        pipeline_state = await active_orchestrator.run(
+                            query, stream=False, use_cache=False
+                        )
                         answer = pipeline_state.answer
                         chunks = pipeline_state.filtered_chunks
                     except Exception as e:
@@ -140,12 +140,23 @@ class EvalRunner:
                         answer = f"ERROR: {e}"
                         chunks = []
 
-                    return await self.evaluator.evaluate_query(
-                        query=query,
-                        retrieved_chunks=chunks,
-                        generated_answer=answer,
-                        ground_truth=ground_truth,
-                    )
+                    try:
+                        return await self.evaluator.evaluate_query(
+                            query=query,
+                            retrieved_chunks=chunks,
+                            generated_answer=answer,
+                            ground_truth=ground_truth,
+                        )
+                    except Exception as e:
+                        # Score the query as a hard failure rather than aborting the run
+                        logger.error("eval_query_scoring_failed", query=query, error=str(e))
+                        return EvalQueryResult(
+                            query=query,
+                            faithfulness=0.0,
+                            context_precision=0.0,
+                            answer_relevance=0.0,
+                            passed=False,
+                        )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]

@@ -4,12 +4,14 @@ import logging
 
 from litestar import Controller, post
 from litestar.di import NamedDependency
+from litestar.exceptions import HTTPException
 from litestar.params import JSONBody, SkipValidation
+from litestar.status_codes import HTTP_409_CONFLICT
 
 from lattice_rag.api.dtos import IngestRequest, IngestResponse
 from lattice_rag.api.guards import require_admin_key
 from lattice_rag.caching.semantic_cache import SemanticCache
-from lattice_rag.ingestion.ingester import DocumentIngester, chunk_text
+from lattice_rag.ingestion.ingester import DocumentExistsError, DocumentIngester, chunk_text
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
@@ -55,12 +57,15 @@ class IngestController(Controller):
                     "DocumentIngester or its underlying storage dependencies must be provided."
                 )
 
-        stats = await active_ingester.ingest(
-            doc_id=data.document_id,
-            title=data.title,
-            text=data.text,
-            tags=data.tags,
-        )
+        try:
+            stats = await active_ingester.ingest(
+                doc_id=data.document_id,
+                title=data.title,
+                text=data.text,
+                tags=data.tags,
+            )
+        except DocumentExistsError as e:
+            raise HTTPException(status_code=HTTP_409_CONFLICT, detail=str(e)) from e
 
         return IngestResponse(
             document_id=data.document_id,

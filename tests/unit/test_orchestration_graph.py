@@ -20,8 +20,6 @@ def mock_dependencies():
     semantic_cache.put = MagicMock()
 
     fallback_cache = MagicMock()
-    fallback_cache.circuit_status = "closed"
-    fallback_cache.call_with_breaker = AsyncMock()
     fallback_cache.find_closest_fallback = AsyncMock(return_value="Cached FAQ fallback answer.")
 
     retrieval_pipeline = MagicMock()
@@ -30,6 +28,7 @@ def mock_dependencies():
     mock_ret_result.graph_context = MagicMock()
     mock_ret_result.graph_context.nodes = [{"node_id": 1, "name": "NodeA"}]
     mock_ret_result.graph_context.edges = []
+    mock_ret_result.low_grounding = False
     retrieval_pipeline.execute = AsyncMock(return_value=mock_ret_result)
 
     groq = MagicMock()
@@ -91,7 +90,6 @@ async def test_orchestrator_chitchat_route(mock_dependencies):
 @pytest.mark.asyncio
 async def test_orchestrator_standard_groq_generation(mock_dependencies):
     deps = mock_dependencies
-    deps["fallback_cache"].call_with_breaker.return_value = "Groq synthesized answer."
 
     orchestrator = RAGOrchestrator(**deps)
     result = await orchestrator.run("Explain LatticeDB HNSW search")
@@ -100,7 +98,7 @@ async def test_orchestrator_standard_groq_generation(mock_dependencies):
     assert result.answer == "Groq synthesized answer."
     assert result.degraded is False
     deps["retrieval_pipeline"].execute.assert_awaited_once()
-    deps["fallback_cache"].call_with_breaker.assert_awaited_once()
+    deps["groq"].synthesize.assert_awaited_once()
     deps["semantic_cache"].put.assert_called_once()
 
 
@@ -108,7 +106,7 @@ async def test_orchestrator_standard_groq_generation(mock_dependencies):
 async def test_orchestrator_failover_to_gemini(mock_dependencies):
     deps = mock_dependencies
     # Groq fails under breaker
-    deps["fallback_cache"].call_with_breaker.side_effect = RuntimeError("Groq 429 Rate Limit")
+    deps["groq"].synthesize.side_effect = RuntimeError("Groq 429 Rate Limit")
     deps["gemini"].synthesize.return_value = "Gemini fallback answer."
 
     orchestrator = RAGOrchestrator(**deps)
@@ -123,7 +121,7 @@ async def test_orchestrator_failover_to_gemini(mock_dependencies):
 async def test_orchestrator_double_failover_to_redis_faq(mock_dependencies):
     deps = mock_dependencies
     # Groq and Gemini both fail
-    deps["fallback_cache"].call_with_breaker.side_effect = RuntimeError("Groq Outage")
+    deps["groq"].synthesize.side_effect = RuntimeError("Groq Outage")
     deps["gemini"].synthesize.side_effect = RuntimeError("Gemini Outage")
     deps["fallback_cache"].find_closest_fallback.return_value = "Redis FAQ Answer"
 
