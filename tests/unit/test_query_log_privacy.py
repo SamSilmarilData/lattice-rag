@@ -7,6 +7,7 @@ boundaries (Jev client, LatticeDB store, embeddings, LLM providers) are faked.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -26,6 +27,7 @@ from lattice_rag.api.controllers.eval import EvalController
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.config import AppConfig
+from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.eval.runner import EvalRunner
 from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
@@ -93,13 +95,14 @@ def _build_app(
         orchestrator=orchestrator,
         evaluator=JevEvaluator(client=eval_client or AsyncMock()),
     )
+    eval_jobs = EvalJobManager(runner)
     return Litestar(
         route_handlers=[QueryController, EvalController],
         # Keep Litestar from replacing the root handlers that caplog installs
         logging_config=None,
         dependencies={
             "orchestrator": Provide(lambda: orchestrator, sync_to_thread=False),
-            "eval_runner": Provide(lambda: runner, sync_to_thread=False),
+            "eval_jobs": Provide(lambda: eval_jobs, sync_to_thread=False),
         },
         state=State(
             {
@@ -138,13 +141,22 @@ def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "base.json").write_text(json.dumps({"metrics": {}}))
 
 
-async def _post_eval(app: Litestar) -> Any:
+async def _run_eval_job(app: Litestar) -> Any:
+    """Start an Eval Job and poll its handle until it finishes; returns the job body."""
     async with AsyncTestClient(app=app) as client:
-        return await client.post(
-            "/api/v1/eval/run",
+        started = await client.post(
+            "/api/v1/eval/jobs",
             params={"dataset": "ds.json", "baseline": "base.json", "use_temp_db": "false"},
             headers=ADMIN_HEADERS,
         )
+        assert started.status_code == 202
+        job_url = f"/api/v1/eval/jobs/{started.json()['jobId']}"
+        for _ in range(500):
+            job = (await client.get(job_url, headers=ADMIN_HEADERS)).json()
+            if job["status"] != "running":
+                return job
+            await asyncio.sleep(0.01)
+        raise AssertionError("eval job never finished")
 
 
 @pytest.mark.parametrize("endpoint", ["/api/v1/query", "/api/v1/query/stream"])
@@ -185,8 +197,8 @@ async def test_eval_execution_failure_does_not_log_query(capture, tmp_path, monk
         eval_client=AsyncMock(system_one=AsyncMock(return_value=_eval_response(0.05))),
         store_error=RuntimeError("store unavailable"),
     )
-    resp = await _post_eval(app)
-    assert resp.status_code == 201
+    job = await _run_eval_job(app)
+    assert job["status"] == "succeeded"
     assert any(r.levelno >= logging.ERROR for r in capture.records)
     _assert_query_absent_above_debug(capture)
 
@@ -198,9 +210,9 @@ async def test_eval_scoring_failure_does_not_log_query(capture, tmp_path, monkey
         router_client=AsyncMock(system_one=AsyncMock(return_value=_route_response("hybrid"))),
         eval_client=AsyncMock(system_one=AsyncMock(side_effect=RuntimeError("jev down"))),
     )
-    resp = await _post_eval(app)
-    assert resp.status_code == 201
-    assert resp.json()["results"][0]["passed"] is False
+    job = await _run_eval_job(app)
+    assert job["status"] == "succeeded"
+    assert job["report"]["results"][0]["passed"] is False
     assert any(r.levelno >= logging.ERROR for r in capture.records)
     _assert_query_absent_above_debug(capture)
 
@@ -212,7 +224,7 @@ async def test_eval_contradiction_veto_does_not_log_query(capture, tmp_path, mon
         router_client=AsyncMock(system_one=AsyncMock(return_value=_route_response("hybrid"))),
         eval_client=AsyncMock(system_one=AsyncMock(return_value=_eval_response(0.9))),
     )
-    resp = await _post_eval(app)
-    assert resp.status_code == 201
+    job = await _run_eval_job(app)
+    assert job["status"] == "succeeded"
     assert any(r.levelno >= logging.WARNING for r in capture.records)
     _assert_query_absent_above_debug(capture)
