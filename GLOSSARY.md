@@ -33,3 +33,16 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Exact Cache Shortcut**: An $O(1)$ fast-path in Tier 1 cache that bypasses dense embedding generation and Jev Noul verification on exact query string matches, returning in $< 0.5$ms at zero API cost.
 - **Document Bundle**: An atomic single-transaction ingestion payload committing Document, Chunk, Entity, and Relation graph nodes and edges into LatticeDB in a single WAL disk sync.
 
+
+---
+
+### Evaluation Subsystem
+
+- **Gold Set**: The curated evaluation dataset: a small corpus of Documents plus queries, each with a reference answer and the verbatim passages that justify it.
+- **Gold Passage**: A verbatim quote from a Gold Set Document that a correct retrieval must surface. It is resolved to the Chunk(s) containing it when the corpus is seeded.
+- **Slice**: A tag grouping Gold Set queries by kind (`factoid`, `multihop`, `unanswerable`, `chitchat`, `long_context`) so results can be broken down.
+- **Hermetic Tier**: The evaluation tier that needs no API keys and, once the local embedding models are cached, no network. It checks retrieval against Gold Passages and validates the Gold Set itself, and gates every PR.
+- **Live Tier**: The evaluation tier that runs the full pipeline and has Jev judge faithfulness, context precision, answer relevance and answer correctness. It needs API keys and is advisory, not a PR gate.
+- **Answer Correctness**: How well an answer agrees with the Gold Set query's reference answer. Unlike faithfulness, which compares an answer to the evidence it was given, it catches answers that are well-grounded but wrong.
+- **Unverified Answer**: An answer produced while a Jev check (routing, guardrail, or cache verification) was unavailable, so its grounding was not confirmed. It is flagged to the caller and never stored in Tier 1, like a degraded answer.
+- **Seeded Database**: The knowledge base baked into a deployment at build time. A deployed instance treats it as read-only; documents ingested at runtime are not expected to survive a restart.
