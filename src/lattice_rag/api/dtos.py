@@ -202,24 +202,36 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
 
 
 class EvalQueryResult(msgspec.Struct, rename="camel"):
-    """Result of an evaluation query."""
+    """Result of one Gold Set query in the Live Tier.
+
+    A metric is ``None`` when it was not judged: either it does not apply to the
+    query's Slice, or the query failed (``error`` is set) and was never judged.
+    ``error`` is a fixed code (``pipeline_error`` / ``judge_error``), never exception text.
+    """
 
     query: str
-    faithfulness: float
-    context_precision: float
-    answer_relevance: float
     passed: bool
+    faithfulness: float | None = None
+    context_precision: float | None = None
+    answer_relevance: float | None = None
+    answer_correctness: float | None = None
+    error: str | None = None
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):
-    """Response DTO for an evaluation run."""
+    """Response DTO for an evaluation run.
+
+    Means are over the queries where the metric was judged (``None`` if none were).
+    """
 
     total_queries: int
-    mean_faithfulness: float
-    mean_context_precision: float
-    mean_answer_relevance: float
     passed_gate: bool
     regression_delta: float
+    mean_faithfulness: float | None = None
+    mean_context_precision: float | None = None
+    mean_answer_relevance: float | None = None
+    mean_answer_correctness: float | None = None
+    failed_queries: int = 0
     results: list[EvalQueryResult] = []
 
 

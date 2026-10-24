@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from typing import Any
 
+import msgspec
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
 from lattice_rag.api.dtos import EvalQueryResult
+from lattice_rag.eval.gate import (
+    DEFAULT_PASS_THRESHOLDS,
+    METRICS,
+    PassThresholds,
+    query_passes,
+)
 from lattice_rag.security import SecretStr, query_fingerprint
 
 logger = structlog.get_logger(__name__)
@@ -35,35 +43,52 @@ ANSWER_RELEVANCE_CRITERIA = [
     "5: Perfectly relevant; complete, direct, concise, and precisely tailored to the user's `query`.",
 ]
 
+ANSWER_CORRECTNESS_CRITERIA = [
+    "1: Incorrect; the `answer` contradicts the `reference_answer` or answers a different question.",
+    "2: Mostly incorrect; the `answer` gets the central fact of the `reference_answer` wrong but shares minor details.",
+    "3: Partially correct; the `answer` agrees with part of the `reference_answer` but misses or misstates a key fact.",
+    "4: Mostly correct; the `answer` agrees with every key fact of the `reference_answer`, with minor omissions.",
+    "5: Fully correct; the `answer` states the same facts and conclusion as the `reference_answer`.",
+]
+
 CONTRADICTION_INSTRUCTIONS = (
     "Does the generated `answer` make any claim, fact, number, or assertion that "
     "directly contradicts the facts stated in the source `context`?"
 )
 
-_EVAL_QUESTIONS: dict[str, Any] = {
+_METRIC_QUESTIONS: dict[str, Score] = {
     "faithfulness": Score(
         instructions="Rate the factual faithfulness of the `answer` based strictly on the provided `context`.",
         criteria=FAITHFULNESS_CRITERIA,
     ),
     "context_precision": Score(
-        instructions="Rate how precisely the retrieved `context` contains the exact facts necessary to answer the `query` according to the `ground_truth`.",
+        instructions="Rate how precisely the retrieved `context` contains the exact facts necessary to answer the `query` according to the `reference_answer`.",
         criteria=CONTEXT_PRECISION_CRITERIA,
     ),
     "answer_relevance": Score(
         instructions="Rate how directly, completely, and appropriately the `answer` addresses the specific question asked in the `query`.",
         criteria=ANSWER_RELEVANCE_CRITERIA,
     ),
-    "contradiction": Noul(
-        instructions=CONTRADICTION_INSTRUCTIONS,
+    "answer_correctness": Score(
+        instructions=(
+            "Rate how well the facts and conclusion of the `answer` agree with the "
+            "`reference_answer` for the `query`, regardless of what the `context` says."
+        ),
+        criteria=ANSWER_CORRECTNESS_CRITERIA,
     ),
 }
+
+# Vetoes faithfulness, so it is asked only when faithfulness is judged
+_CONTRADICTION_QUESTION = Noul(instructions=CONTRADICTION_INSTRUCTIONS)
+CONTRADICTION_VETO = 0.40
 
 
 class JevEvaluator:
     """TypeSafe AI Jev System One evaluation engine.
 
-    Evaluates RAG Triad dimensions (Faithfulness, Context Precision, Answer Relevance)
-    using calibrated expected-value Score primitives and applies a boolean Noul contradiction veto.
+    Judges faithfulness, context precision, answer relevance and Answer Correctness
+    (agreement with the reference answer) with calibrated expected-value Score
+    primitives, and applies a Noul contradiction veto to faithfulness.
     """
 
     def __init__(
@@ -105,8 +130,18 @@ class JevEvaluator:
         retrieved_chunks: list[dict[str, Any]] | list[str],
         generated_answer: str,
         ground_truth: str,
+        metrics: Sequence[str] = METRICS,
+        thresholds: PassThresholds = DEFAULT_PASS_THRESHOLDS,
     ) -> EvalQueryResult:
-        """Evaluate a single query-answer-context tuple against ground truth."""
+        """Judge one answer on ``metrics``; ``ground_truth`` is the Gold Set reference answer.
+
+        Metrics not in ``metrics`` are left ``None``. Pass/fail applies ``thresholds``
+        to every judged metric.
+        """
+        unknown = set(metrics) - set(METRICS)
+        if unknown or not metrics:
+            raise ValueError(f"Unknown or empty metrics: {sorted(unknown)}")
+
         # Format context chunks
         context_parts: list[str] = []
         for i, c in enumerate(retrieved_chunks):
@@ -120,54 +155,50 @@ class JevEvaluator:
             "query": query,
             "context": context_text,
             "answer": generated_answer,
-            "ground_truth": ground_truth,
+            "reference_answer": ground_truth,
         }
+        questions: dict[str, Any] = {m: _METRIC_QUESTIONS[m] for m in METRICS if m in metrics}
+        if "faithfulness" in questions:
+            questions["contradiction"] = _CONTRADICTION_QUESTION
 
-        response = await self._client.system_one(state=state, questions=_EVAL_QUESTIONS)
+        response = await self._client.system_one(state=state, questions=questions)
 
-        raw_faith = response.scores["faithfulness"].score
-        raw_prec = response.scores["context_precision"].score
-        raw_rel = response.scores["answer_relevance"].score
-        contradiction_prob = response.nouls["contradiction"].noul
+        scores: dict[str, float | None] = dict.fromkeys(METRICS)
+        for m in metrics:
+            scores[m] = self._normalize_score(response.scores[m].score)
 
-        faith_score = self._normalize_score(raw_faith)
-        prec_score = self._normalize_score(raw_prec)
-        rel_score = self._normalize_score(raw_rel)
+        # Hard Zero Contradiction Veto: a contradiction of the context zeroes faithfulness
+        contradiction_prob: float | None = None
+        if "contradiction" in questions:
+            contradiction_prob = response.nouls["contradiction"].noul
+            if contradiction_prob >= CONTRADICTION_VETO:
+                logger.warning(
+                    "factual_contradiction_veto_triggered",
+                    **query_fingerprint(query),
+                    contradiction_prob=contradiction_prob,
+                    previous_faithfulness=scores["faithfulness"],
+                )
+                scores["faithfulness"] = 0.0
 
-        # Hard Zero Contradiction Veto:
-        # If contradiction probability >= 0.40, force faithfulness to 0.0
-        vetoed = False
-        if contradiction_prob >= 0.40:
-            logger.warning(
-                "factual_contradiction_veto_triggered",
-                **query_fingerprint(query),
-                contradiction_prob=contradiction_prob,
-                previous_faithfulness=faith_score,
-            )
-            faith_score = 0.0
-            vetoed = True
-
-        passed = (
-            (faith_score >= 0.70) and (prec_score >= 0.65) and (rel_score >= 0.70) and not vetoed
+        rounded = {m: (round(v, 4) if v is not None else None) for m, v in scores.items()}
+        result = EvalQueryResult(
+            query=query,
+            passed=False,
+            faithfulness=rounded["faithfulness"],
+            context_precision=rounded["context_precision"],
+            answer_relevance=rounded["answer_relevance"],
+            answer_correctness=rounded["answer_correctness"],
         )
+        result = msgspec.structs.replace(result, passed=query_passes(result, thresholds))
 
         logger.info(
             "jev_evaluation_completed",
             **query_fingerprint(query),
-            faithfulness=round(faith_score, 4),
-            context_precision=round(prec_score, 4),
-            answer_relevance=round(rel_score, 4),
-            contradiction_prob=round(contradiction_prob, 4),
-            passed=passed,
+            **rounded,
+            contradiction_prob=contradiction_prob,
+            passed=result.passed,
         )
-
-        return EvalQueryResult(
-            query=query,
-            faithfulness=round(faith_score, 4),
-            context_precision=round(prec_score, 4),
-            answer_relevance=round(rel_score, 4),
-            passed=passed,
-        )
+        return result
 
     async def aclose(self) -> None:
         """Close underlying TypeSafe client if owned."""

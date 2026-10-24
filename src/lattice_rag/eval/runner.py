@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import tempfile
 from pathlib import Path
 
 import structlog
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.eval.gate import (
+    METRICS,
+    Baseline,
+    judged_scores,
+    load_baseline,
+    metrics_for_slice,
+)
+from lattice_rag.eval.gate import format_metric as _fmt
 from lattice_rag.eval.gold_set import GoldQuery, load_gold_set
 from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
@@ -19,6 +26,10 @@ from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
 
 logger = structlog.get_logger(__name__)
+
+# Fixed failure codes on EvalQueryResult.error; exception text stays in the logs
+PIPELINE_ERROR = "pipeline_error"
+JUDGE_ERROR = "judge_error"
 
 
 class EvalRunner:
@@ -50,14 +61,9 @@ class EvalRunner:
         if not ds_file.exists():
             raise FileNotFoundError(f"Evaluation dataset not found at: {ds_file}")
 
-        base_file = Path(baseline_path)
-        if not base_file.exists():
-            raise FileNotFoundError(f"Evaluation baseline not found at: {base_file}")
-
         gold_set = load_gold_set(ds_file)
-
-        with open(base_file, encoding="utf-8") as f:
-            baseline_data = json.load(f)
+        baseline = load_baseline(baseline_path)
+        pass_thresholds = baseline.gate_thresholds.pass_thresholds
 
         queries_data: list[GoldQuery] = list(gold_set.queries)
         corpus_data = gold_set.corpus
@@ -122,44 +128,37 @@ class EvalRunner:
                         await asyncio.sleep(1.8)
 
                     query = item.query
-                    ground_truth = item.reference_answer
 
                     try:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
-                        answer = pipeline_state.answer
-                        chunks = pipeline_state.filtered_chunks
                     except Exception as e:
+                        # A pipeline error fails the query; it is never judged as an answer
                         logger.error(
                             "eval_query_execution_failed",
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        answer = f"ERROR: {e}"
-                        chunks = []
+                        return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
                     try:
                         return await self.evaluator.evaluate_query(
                             query=query,
-                            retrieved_chunks=chunks,
-                            generated_answer=answer,
-                            ground_truth=ground_truth,
+                            retrieved_chunks=pipeline_state.filtered_chunks,
+                            generated_answer=pipeline_state.answer,
+                            ground_truth=item.reference_answer,
+                            metrics=metrics_for_slice(item.slice),
+                            thresholds=pass_thresholds,
                         )
                     except Exception as e:
-                        # Score the query as a hard failure rather than aborting the run
+                        # Fail the query rather than aborting the run
                         logger.error(
                             "eval_query_scoring_failed",
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        return EvalQueryResult(
-                            query=query,
-                            faithfulness=0.0,
-                            context_precision=0.0,
-                            answer_relevance=0.0,
-                            passed=False,
-                        )
+                        return EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
@@ -174,59 +173,7 @@ class EvalRunner:
                 with contextlib.suppress(Exception):
                     temp_dir_obj.cleanup()
 
-        # Calculate mean scores
-        total = len(results)
-        mean_faith = sum(r.faithfulness for r in results) / total
-        mean_prec = sum(r.context_precision for r in results) / total
-        mean_rel = sum(r.answer_relevance for r in results) / total
-
-        # Baseline comparison
-        base_metrics = baseline_data.get("metrics", {})
-        base_faith = base_metrics.get("faithfulness", 0.88)
-        base_prec = base_metrics.get("context_precision", 0.85)
-        base_rel = base_metrics.get("answer_relevance", 0.90)
-
-        delta_faith = mean_faith - base_faith
-        delta_prec = mean_prec - base_prec
-        delta_rel = mean_rel - base_rel
-
-        gate_thresholds = baseline_data.get("gate_thresholds", {})
-        max_allowed_drop = gate_thresholds.get("max_regression_delta", 0.03)
-        min_query_floor = gate_thresholds.get("min_query_floor", 0.50)
-
-        # Non-regression: PR score cannot drop by more than max_allowed_drop (e.g. -0.03)
-        faith_passed = delta_faith >= -max_allowed_drop
-        prec_passed = delta_prec >= -max_allowed_drop
-        rel_passed = delta_rel >= -max_allowed_drop
-
-        # Safety floor: no individual query should drop below critical floor
-        floor_passed = all(r.faithfulness >= min_query_floor for r in results)
-
-        passed_gate = faith_passed and prec_passed and rel_passed and floor_passed
-        min_delta = min(delta_faith, delta_prec, delta_rel)
-
-        logger.info(
-            "eval_suite_completed",
-            total_queries=total,
-            mean_faithfulness=round(mean_faith, 4),
-            mean_context_precision=round(mean_prec, 4),
-            mean_answer_relevance=round(mean_rel, 4),
-            delta_faithfulness=round(delta_faith, 4),
-            delta_context_precision=round(delta_prec, 4),
-            delta_answer_relevance=round(delta_rel, 4),
-            passed_gate=passed_gate,
-            floor_passed=floor_passed,
-        )
-
-        return EvalRunResponse(
-            total_queries=total,
-            mean_faithfulness=round(mean_faith, 4),
-            mean_context_precision=round(mean_prec, 4),
-            mean_answer_relevance=round(mean_rel, 4),
-            passed_gate=passed_gate,
-            regression_delta=round(min_delta, 4),
-            results=list(results),
-        )
+        return _apply_gate(list(results), baseline)
 
     @staticmethod
     def format_markdown_report(report: EvalRunResponse) -> str:
@@ -236,22 +183,25 @@ class EvalRunner:
             f"# Evaluation Gate Audit Report: {status_badge}",
             "",
             f"- **Total Queries**: {report.total_queries}",
-            f"- **Mean Faithfulness**: {report.mean_faithfulness:.4f}",
-            f"- **Mean Context Precision**: {report.mean_context_precision:.4f}",
-            f"- **Mean Answer Relevance**: {report.mean_answer_relevance:.4f}",
+            f"- **Failed Queries** (not judged): {report.failed_queries}",
+            f"- **Mean Faithfulness**: {_fmt(report.mean_faithfulness)}",
+            f"- **Mean Context Precision**: {_fmt(report.mean_context_precision)}",
+            f"- **Mean Answer Relevance**: {_fmt(report.mean_answer_relevance)}",
+            f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
             "## Query Breakdown",
             "",
-            "| Query | Faithfulness | Precision | Relevance | Passed |",
-            "| :--- | :---: | :---: | :---: | :---: |",
+            "| Query | Faithfulness | Precision | Relevance | Correctness | Passed |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: |",
         ]
         for res in report.results:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
-            passed_emoji = "✅" if res.passed else "❌"
+            status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {res.faithfulness:.3f} | {res.context_precision:.3f} | {res.answer_relevance:.3f} | {passed_emoji} |"
+                f"| {q_short} | {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
+                f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
         return "\n".join(lines)
 
@@ -267,3 +217,55 @@ class EvalRunner:
         out.write_bytes(payload)
         logger.info("eval_report_exported", path=str(out))
         return out
+
+
+def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunResponse:
+    """Apply the baseline file's gate rules to per-query results.
+
+    The gate fails when any query failed (pipeline or judge error), when any judged
+    metric of any query is below ``min_query_floor``, or when a mean drops more than
+    ``max_regression_delta`` below its baseline. A metric without a baseline mean is
+    reported but not regression-checked.
+    """
+    rules = baseline.gate_thresholds
+    judged = [r for r in results if r.error is None]
+    failed = len(results) - len(judged)
+
+    means: dict[str, float | None] = {}
+    for metric in METRICS:
+        values = [v for r in judged if (v := judged_scores(r).get(metric)) is not None]
+        means[metric] = round(sum(values) / len(values), 4) if values else None
+
+    deltas = {
+        m: round(mean - baseline.metrics[m], 4)
+        for m, mean in means.items()
+        if mean is not None and m in baseline.metrics
+    }
+    regression_passed = all(d >= -rules.max_regression_delta for d in deltas.values())
+    floor_passed = all(
+        score >= rules.min_query_floor for r in judged for score in judged_scores(r).values()
+    )
+    passed_gate = failed == 0 and regression_passed and floor_passed
+    min_delta = min(deltas.values(), default=0.0)
+
+    logger.info(
+        "eval_suite_completed",
+        total_queries=len(results),
+        failed_queries=failed,
+        **{f"mean_{m}": v for m, v in means.items()},
+        **{f"delta_{m}": d for m, d in deltas.items()},
+        passed_gate=passed_gate,
+        floor_passed=floor_passed,
+    )
+
+    return EvalRunResponse(
+        total_queries=len(results),
+        passed_gate=passed_gate,
+        regression_delta=min_delta,
+        mean_faithfulness=means["faithfulness"],
+        mean_context_precision=means["context_precision"],
+        mean_answer_relevance=means["answer_relevance"],
+        mean_answer_correctness=means["answer_correctness"],
+        failed_queries=failed,
+        results=results,
+    )
