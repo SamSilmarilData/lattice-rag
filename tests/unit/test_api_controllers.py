@@ -163,6 +163,7 @@ async def test_api_query_endpoint(mock_controllers_app):
         assert data["sources"][0]["documentId"] == "doc1"
         assert len(data["timings"]) == 1
         assert data["graphPath"]["nodes"][0]["name"] == "LatticeDB"
+        assert data["unverified"] is False
 
 
 @pytest.mark.asyncio
@@ -191,6 +192,42 @@ async def test_api_query_stream_sse(mock_controllers_app):
         assert done["graphPath"]["nodes"][0]["nodeId"] == 1
         assert done["timings"][0] == {"stage": "retrieval", "durationMs": 2.0}
         assert "latency_ms" not in done_line
+
+
+@pytest.mark.asyncio
+async def test_api_query_reports_unverified_answer(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["orchestrator"].run = AsyncMock(
+        return_value=PipelineState(
+            query="q", route="hybrid", answer="Unchecked answer.", unverified=True
+        )
+    )
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query", json={"query": "What is LatticeDB?"})
+        assert resp.json()["unverified"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_query_stream_done_reports_unverified_answer(mock_controllers_app):
+    app, mocks = mock_controllers_app
+
+    async def unverified_stream(q):
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "Unchecked answer.",
+                "route": "hybrid",
+                "cached": False,
+                "latency_ms": 1.0,
+                "unverified": True,
+            },
+        }
+
+    mocks["orchestrator"].stream_query = unverified_stream
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query/stream", json={"query": "What is LatticeDB?"})
+        done_line = resp.text.split("event: done", 1)[1].split("data: ", 1)[1].splitlines()[0]
+        assert json.loads(done_line)["unverified"] is True
 
 
 @pytest.mark.asyncio

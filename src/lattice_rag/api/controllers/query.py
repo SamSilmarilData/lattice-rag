@@ -58,6 +58,7 @@ def stream_event_payload(event: dict[str, Any]) -> msgspec.Struct:
             timings=_timings(data.get("timings", [])),
             degraded=data.get("degraded", False),
             low_grounding=data.get("low_grounding", False),
+            unverified=data.get("unverified", False),
         )
     return StreamStage(
         stage=data["stage"],
@@ -94,6 +95,7 @@ class QueryController(Controller):
             timings=_timings(state.timings),
             degraded=state.degraded,
             low_grounding=state.low_grounding,
+            unverified=state.unverified,
         )
 
     @post("/query/stream")
