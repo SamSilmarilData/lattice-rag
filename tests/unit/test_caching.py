@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -196,3 +197,52 @@ def test_semantic_cache_eviction_stays_consistent_with_duplicates():
     # Matrix rows line up with the surviving entries
     for i, entry in enumerate(cache._cache):
         assert np.allclose(cache._embeddings_matrix[i], entry.query_embedding)
+
+
+def _rand_unit(rng: np.random.Generator, dim: int = 16) -> np.ndarray:
+    v = rng.standard_normal(dim).astype(np.float32)
+    return v / np.linalg.norm(v)
+
+
+@pytest.mark.asyncio
+async def test_semantic_cache_lookups_stay_correct_under_eviction_churn():
+    """After many replacements and evictions every surviving query still finds its own answer."""
+    ts_client = AsyncMock()
+    ts_client.system_one.return_value = SimpleNamespace(
+        nouls={"equivalent": SimpleNamespace(noul=0.99)}
+    )
+    cache = SemanticCache(ts_client=ts_client, max_size=5, vector_dimensions=16)
+    rng = np.random.default_rng(7)
+    vectors: dict[str, np.ndarray] = {}
+    for step in range(40):
+        key = f"q{rng.integers(0, 12)}"
+        vectors[key] = _rand_unit(rng)
+        cache.put(key, vectors[key], {"answer": key, "step": step})
+        if step % 3 == 0:
+            cache.get_exact(f"q{rng.integers(0, 12)}")  # refresh LRU order
+
+    assert len(cache) == 5
+    survivors = {e.query_text for e in cache._cache}
+    assert len(survivors) == 5
+    for key in survivors:
+        hit = await cache.get(f"paraphrase of {key}", vectors[key])
+        assert hit is not None and hit["answer"] == key
+
+
+def test_semantic_cache_put_cost_does_not_grow_with_cache_size():
+    """Writing to a full cache (eviction, then replacement) must not scan every entry."""
+
+    def put_cost(size: int) -> float:
+        cache = SemanticCache(ts_client=AsyncMock(), max_size=size, vector_dimensions=8)
+        for i in range(size):
+            cache.put(f"query number {i}", _unit(i), {"answer": i})
+        best = float("inf")
+        for i in range(size, size + 50):
+            start = time.perf_counter()
+            cache.put(f"query number {i}", _unit(i), {"answer": i})  # evicts the LRU entry
+            cache.put(f"query number {i}", _unit(i + 1), {"answer": -i})  # replaces it
+            best = min(best, time.perf_counter() - start)
+        return best
+
+    small, large = put_cost(10), put_cost(50_000)
+    assert large < small * 20, f"put on 50k entries took {large / small:.0f}x a 10-entry put"
