@@ -56,7 +56,7 @@ class RAGOrchestrator:
 
     Pipeline flow::
 
-        query -> triage (exact cache | concurrent route + embed -> semantic cache)
+        query -> triage (exact cache | embed -> semantic cache | Jev route on a miss)
               -> chitchat | retrieval (stages 1-2-3 + guardrail)
               -> generation (circuit breaker cascade) -> Tier 1 write rule
               -> done
@@ -249,17 +249,25 @@ class RAGOrchestrator:
         )
 
     async def _triage(self, query: str, *, use_cache: bool) -> _Triage:
-        """Front door: O(1) exact match, else concurrent Jev routing + embedding, then semantic."""
+        """Front door: exact match, then embed + semantic match, and only on a miss the route.
+
+        Tier 1 is consulted before Jev routing so a hit (exact or semantic) never pays for a
+        routing call. Routing starts only after the embedding succeeded, so a failed
+        embedding leaves no routing task behind.
+        """
         if use_cache:
             exact_hit = self.semantic_cache.get_exact(query)
             if isinstance(exact_hit, dict):
                 return _Triage(cached=exact_hit)
 
-        route_task = asyncio.create_task(self.router.route_query(query))
         query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
-        cached = await self.semantic_cache.get(query, query_embedding) if use_cache else None
-        decision = await route_task
-        return _Triage(cached=cached, query_embedding=query_embedding, decision=decision)
+        if use_cache:
+            cached = await self.semantic_cache.get(query, query_embedding)
+            if cached is not None:
+                return _Triage(cached=cached, query_embedding=query_embedding)
+
+        decision = await self.router.route_query(query)
+        return _Triage(query_embedding=query_embedding, decision=decision)
 
     async def _generate(
         self,
