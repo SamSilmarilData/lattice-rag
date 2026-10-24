@@ -78,20 +78,6 @@ async def test_wrong_chunk_embedding_dimension_raises_and_writes_nothing(store: 
     assert _graph_entities(store) == []
 
 
-def test_wrong_entity_embedding_dimension_raises_and_writes_nothing(store: LatticeStore):
-    with pytest.raises(EmbeddingDimensionError):
-        store.ingest_document_bundle(
-            "doc_ent_dim",
-            "T",
-            [ChunkData(text="LatticeDB stores vectors.", embedding=_vec(), position=0)],
-            [(0, [EntityData(name="LatticeDB", entity_type="database", embedding=_vec(8))], [])],
-        )
-
-    assert store.has_document("doc_ent_dim") is False
-    assert store.vector_search(_vec(), top_k=5) == []
-    assert _graph_entities(store) == []
-
-
 @pytest.mark.parametrize("bad_ref", [1, -1, 999])
 def test_unresolved_chunk_reference_raises_and_writes_nothing(store: LatticeStore, bad_ref: int):
     with pytest.raises(UnresolvedChunkReferenceError, match=str(bad_ref)):

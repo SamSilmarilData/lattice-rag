@@ -113,7 +113,7 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
 3. **Subgraph Snapshot Export**:
    Export graph knowledge as JSON via the REST API:
    ```bash
-   curl -s "http://localhost:8000/api/v1/graph/subgraph?limit=5000" > backup_graph.json
+   curl -s -H "X-Admin-Key: $ADMIN_API_KEY" "http://localhost:8000/api/v1/graph/subgraph?limit=500" > backup_graph.json
    ```
 
 ### 3.2 Restoration Procedure
@@ -162,7 +162,7 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
    - The sanitized exception is logged server-side under the same `requestId`.
 
 4. **Access Control**:
-   - Ingest, eval and benchmark require `X-Admin-Key` (`ADMIN_API_KEY`); query endpoints are rate-limited per client; request sizes are bounded. See `docs/security.md` §3.4.
+   - Ingest, graph snapshot, cache stats, eval and benchmark require `X-Admin-Key` (`ADMIN_API_KEY`); query endpoints are rate-limited per client; request sizes are bounded. See `docs/security.md` §3.4.
 
 5. **Static Secret Scanning in CI/CD**:
    - Automated git test scans all tracked repository files to guarantee no accidental commits of `apikeys.md`, `.env`, or hardcoded API tokens.

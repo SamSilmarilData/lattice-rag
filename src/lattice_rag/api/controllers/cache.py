@@ -7,6 +7,7 @@ from litestar.di import NamedDependency
 from litestar.params import SkipValidation
 
 from lattice_rag.api.dtos import CacheStatsResponse
+from lattice_rag.api.guards import require_admin_key
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.orchestration.graph import RAGOrchestrator
@@ -15,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class CacheController(Controller):
-    """Litestar controller for cache statistics and monitoring."""
+    """Litestar controller for cache statistics and monitoring (admin-only)."""
 
     path = "/api/v1/cache"
+    guards = [require_admin_key]
 
     @get("/stats")
     async def get_stats(
