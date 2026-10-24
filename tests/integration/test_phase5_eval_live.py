@@ -41,9 +41,10 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
         full_ds = json.load(f)
 
     mini_dataset = {
-        "version": full_ds.get("version", "1.0.0"),
-        "corpus": full_ds.get("corpus", [])[:2],  # First 2 documents
-        "queries": full_ds.get("queries", [])[:2],  # First 2 queries
+        "version": full_ds["version"],
+        "domain": full_ds["domain"],
+        "corpus": full_ds["corpus"][:2],  # First 2 documents
+        "queries": full_ds["queries"][:2],  # First 2 queries (cite only doc 1)
     }
     mini_baseline = {
         "version": "0.4.0",

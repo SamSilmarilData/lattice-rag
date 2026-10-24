@@ -5,11 +5,11 @@ import contextlib
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
 
 import structlog
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.eval.gold_set import GoldQuery, load_gold_set
 from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -54,14 +54,13 @@ class EvalRunner:
         if not base_file.exists():
             raise FileNotFoundError(f"Evaluation baseline not found at: {base_file}")
 
-        with open(ds_file, encoding="utf-8") as f:
-            dataset_data = json.load(f)
+        gold_set = load_gold_set(ds_file)
 
         with open(base_file, encoding="utf-8") as f:
             baseline_data = json.load(f)
 
-        queries_data: list[dict[str, Any]] = dataset_data.get("queries", [])
-        corpus_data: list[dict[str, Any]] = dataset_data.get("corpus", [])
+        queries_data: list[GoldQuery] = list(gold_set.queries)
+        corpus_data = gold_set.corpus
 
         if not queries_data:
             raise ValueError(f"No queries found in dataset: {ds_file}")
@@ -93,10 +92,7 @@ class EvalRunner:
 
                 # Seed documents using batched DocumentIngester
                 for doc in corpus_data:
-                    doc_id = doc.get("document_id", "doc_eval")
-                    title = doc.get("title", "Evaluation Document")
-                    text = doc.get("text", "")
-                    await ingester.ingest(doc_id=doc_id, title=title, text=text)
+                    await ingester.ingest(doc_id=doc.document_id, title=doc.title, text=doc.text)
 
                 # Build ephemeral retrieval pipeline and orchestrator
                 ephemeral_retrieval = RetrievalPipeline(
@@ -120,13 +116,13 @@ class EvalRunner:
             effective_concurrency = 1 if len(queries_data) > 5 else max_concurrency
             semaphore = asyncio.Semaphore(effective_concurrency)
 
-            async def _eval_single(item: dict[str, Any], idx: int) -> EvalQueryResult:
+            async def _eval_single(item: GoldQuery, idx: int) -> EvalQueryResult:
                 async with semaphore:
                     if idx > 0 and len(queries_data) > 5:
                         await asyncio.sleep(1.8)
 
-                    query = item["query"]
-                    ground_truth = item.get("ground_truth", "")
+                    query = item.query
+                    ground_truth = item.reference_answer
 
                     try:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
