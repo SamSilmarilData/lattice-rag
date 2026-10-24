@@ -70,6 +70,81 @@ def test_bm25_full_text_search(temp_store: LatticeStore):
     assert "Quantum" in results[0].text
 
 
+_KEYWORD_CORPUS = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Quantum computing utilizes qubits for superposition.",
+    "Granian serves the Litestar application over HTTP.",
+    "Reranking runs a cross-encoder on every candidate.",
+]
+
+
+def _count_fts_calls(store: LatticeStore, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every full-text call LatticeStore makes against the database."""
+    calls: list[str] = []
+    for name in ("fts_search", "fts_search_fuzzy"):
+        real = getattr(store.db, name)
+
+        def spy(*args, _real=real, _name=name, **kwargs):
+            calls.append(_name)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(store.db, name, spy)
+    return calls
+
+
+def test_bm25_keyword_fallback_is_one_query(
+    temp_store: LatticeStore, monkeypatch: pytest.MonkeyPatch
+):
+    """No Chunk holds every keyword: the fallback finds each Chunk holding any of them,
+    with one store call for the fallback however many keywords the query has."""
+    vec = np.zeros(384, dtype=np.float32)
+    chunks = [ChunkData(text=t, embedding=vec, position=i) for i, t in enumerate(_KEYWORD_CORPUS)]
+    temp_store.ingest_document(doc_id="kw", title="Keywords", chunks=chunks)
+    calls = _count_fts_calls(temp_store, monkeypatch)
+
+    results = temp_store.bm25_search("How does the brown qubits Granian reranking work?", top_k=10)
+
+    assert {r.text for r in results} == {
+        _KEYWORD_CORPUS[0],
+        _KEYWORD_CORPUS[1],
+        _KEYWORD_CORPUS[2],
+        _KEYWORD_CORPUS[3],
+    }
+    assert len(calls) == 2  # the conjunctive query, then one keyword query
+
+
+def test_bm25_keyword_fallback_respects_top_k_and_skips_unmatched(temp_store: LatticeStore):
+    vec = np.zeros(384, dtype=np.float32)
+    chunks = [ChunkData(text=t, embedding=vec, position=i) for i, t in enumerate(_KEYWORD_CORPUS)]
+    temp_store.ingest_document(doc_id="kw", title="Keywords", chunks=chunks)
+
+    results = temp_store.bm25_search("brown fox qubits", top_k=1)
+    assert len(results) == 1
+    both = temp_store.bm25_search("brown qubits", top_k=10)
+    assert {r.text for r in both} == {_KEYWORD_CORPUS[0], _KEYWORD_CORPUS[1]}
+    assert temp_store.bm25_search("zebra xylophone", top_k=10) == []
+
+
+def test_bm25_search_failure_is_logged_not_swallowed(
+    temp_store: LatticeStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """A failing full-text call degrades to no BM25 hits and leaves a WARNING record."""
+    from latticedb import LatticeError
+
+    def boom(*_args, **_kwargs):
+        raise LatticeError("index unavailable")
+
+    monkeypatch.setattr(temp_store.db, "fts_search", boom)
+    monkeypatch.setattr(temp_store.db, "fts_search_fuzzy", boom)
+
+    with caplog.at_level("WARNING", logger="lattice_rag.storage.db"):
+        assert temp_store.bm25_search("brown qubits", top_k=5) == []
+
+    failures = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(failures) == 2  # the conjunctive query and the keyword fallback
+    assert all(r.name == "lattice_rag.storage.db" for r in failures)
+
+
 def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
     """Verify entity node creation, CONTAINS edge, RELATION edge, and multi-hop traversal."""
     vec = np.ones(384, dtype=np.float32)
