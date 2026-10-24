@@ -66,9 +66,9 @@ class RetrievalPipeline:
 
         Stage 1: HNSW vector search + BM25 keyword recall with RRF fusion
             (top_k + RERANK_HEADROOM candidates).
-        Stage 2: 1-to-2 hop graph traversal from the entities in those candidates.
         Stage 3: Cross-encoder reranking of every Stage 1 candidate down to top_k.
         Optional: TypeSafe Jev Noul context guardrail pruning.
+        Stage 2: 1-to-2 hop graph traversal from the entities of the final chunks only.
 
         ``query_embedding`` lets callers that already embedded the query skip re-embedding.
         """
@@ -90,18 +90,12 @@ class RetrievalPipeline:
                 low_grounding=True,
             )
 
-        anchor_ids = [res.node_id for res in stage1_results]
         stage1_chunks: list[dict[str, Any]] = []
         for res in stage1_results:
             # Source metadata (doc_id, position) travels with the chunk for citations
             chunk_dict: dict[str, Any] = {**(res.metadata or {})}
             chunk_dict.update(node_id=res.node_id, score=res.score, text=res.text)
             stage1_chunks.append(chunk_dict)
-
-        # ── Stage 2: Graph Traversal ─────────────────────────────────────────
-        t0 = time.perf_counter()
-        graph_context = await self.traverser.traverse(anchor_ids, route, budget=budget)
-        timings["stage2_traverse"] = (time.perf_counter() - t0) * 1000.0
 
         # ── Stage 3: Cross-Encoder Precision Reranking ───────────────────────
         t0 = time.perf_counter()
@@ -127,6 +121,15 @@ class RetrievalPipeline:
                     str(e),
                 )
                 final_chunks = stage3_results
+
+        # ── Stage 2: Graph Traversal ─────────────────────────────────────────
+        # Runs last so the graph context only holds entities of the chunks that
+        # survived reranking and the guardrail; the LLM never sees relations
+        # reachable only from rejected candidates.
+        t0 = time.perf_counter()
+        anchor_ids = [chunk["node_id"] for chunk in final_chunks if "node_id" in chunk]
+        graph_context = await self.traverser.traverse(anchor_ids, route, budget=budget)
+        timings["stage2_traverse"] = (time.perf_counter() - t0) * 1000.0
 
         return RetrievalResult(
             final_chunks=final_chunks,
