@@ -482,6 +482,7 @@ async def _play(scenario: str, entry_point: str) -> dict:
     return {
         "answers": answers,
         "retrievals": c["pipeline"].execute.await_count,
+        "routing_calls": c["router"].route_query.await_count,
         "cache_size": len(cache),
     }
 
@@ -523,6 +524,8 @@ async def test_cache_effects_follow_the_tier1_write_rule(scenario, entry_point):
     assert repeat["cached"] is cacheable
     assert paraphrase["cached"] is cacheable
     assert outcome["cache_size"] == (1 if cacheable else 0)
+    # A Tier 1 hit (exact or semantic) is served without paying for a Jev routing call
+    assert outcome["routing_calls"] == (1 if cacheable else 3)
     if scenario != "chitchat":
         assert outcome["retrievals"] == (1 if cacheable else 3)
 
@@ -538,3 +541,46 @@ async def test_massive_context_answer_is_cached_and_served_on_repeat(entry_point
     assert paraphrase["cached"] is True
     assert paraphrase["answer"] == "Summary."
     assert outcome["retrievals"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+@pytest.mark.parametrize("routing", ["slow", "failing"])
+async def test_failed_embedding_leaves_no_routing_task_behind(
+    mock_orchestrator_components, entry_point, routing
+):
+    """An embedding failure surfaces as an error; no routing work is left pending or unread."""
+    import asyncio
+    import gc
+
+    c = mock_orchestrator_components
+    c["embed_svc"].embed_query = MagicMock(side_effect=RuntimeError("ONNX session crashed"))
+
+    async def _slow_route(query):
+        await asyncio.Event().wait()  # a Jev call that never returns on its own
+
+    async def _failing_route(query):
+        raise RuntimeError("Jev 503")
+
+    c["router"].route_query = _slow_route if routing == "slow" else _failing_route
+    orchestrator = _orchestrator(c)
+
+    loop = asyncio.get_running_loop()
+    unhandled: list[dict] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    try:
+        with pytest.raises(RuntimeError, match="ONNX session crashed"):
+            if entry_point == "run":
+                await orchestrator.run("Explain LatticeDB")
+            else:
+                _ = [e async for e in orchestrator.stream_query("Explain LatticeDB")]
+
+        await asyncio.sleep(0)
+        leftover = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        gc.collect()
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+    assert leftover == []
+    assert unhandled == []
