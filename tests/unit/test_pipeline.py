@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
 
 from lattice_rag.retrieval.embeddings import EmbeddingService, RerankResult
 from lattice_rag.retrieval.pipeline import RERANK_HEADROOM, RetrievalPipeline, RetrievalResult
 from lattice_rag.routing.guardrail import GuardrailResult
-from lattice_rag.storage.db import SearchResult, SubgraphResult
+from lattice_rag.storage.db import (
+    ChunkData,
+    EntityData,
+    LatticeStore,
+    RelationData,
+    SearchResult,
+    SubgraphResult,
+)
 
 
 @pytest.mark.asyncio
@@ -142,3 +150,87 @@ async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embeddi
     assert result.final_chunks[0]["doc_id"] == f"d{last}"
     assert result.final_chunks[0]["position"] == last
     mock_embed.embed_query.assert_not_called()
+
+
+# ── Graph context follows the final chunks (real store) ───────────────────────
+
+
+class _RejectingGuardrail:
+    """Keeps only chunks whose text does not contain ``reject``."""
+
+    def __init__(self, reject: str) -> None:
+        self.reject = reject
+
+    async def filter_chunks(self, query: str, chunks: list[dict]) -> GuardrailResult:
+        kept = [c for c in chunks if self.reject not in c["text"]]
+        return GuardrailResult(chunks=kept, low_grounding=False)
+
+
+def _passthrough_embedder() -> MagicMock:
+    """Embedder whose reranker keeps every candidate in Stage 1 order."""
+    embed = MagicMock(spec=EmbeddingService)
+    embed.embed_query.return_value = np.ones(384, dtype=np.float32)
+    embed.rerank.side_effect = lambda q, texts, top_k=5: [
+        RerankResult(index=i, score=10.0 - i, text=t) for i, t in enumerate(texts[:top_k])
+    ]
+    return embed
+
+
+@pytest.fixture
+def two_topic_store(tmp_path):
+    """A store with two chunks, each holding its own entities and relation."""
+    store = LatticeStore(db_path=tmp_path / "graph_ctx.db", vector_dimensions=384)
+    vec = np.ones(384, dtype=np.float32) / np.sqrt(384)
+    store.ingest_document_bundle(
+        "doc_graph",
+        "Graph",
+        [
+            ChunkData(text="Kept: FastEmbed uses ONNX.", embedding=vec, position=0),
+            ChunkData(text="Rejected: Paris is in France.", embedding=vec, position=1),
+        ],
+        [
+            (
+                0,
+                [
+                    EntityData(name="FastEmbed", entity_type="tech"),
+                    EntityData(name="ONNX", entity_type="tech"),
+                ],
+                [
+                    RelationData(
+                        source_name="FastEmbed", target_name="ONNX", relation_type="USES_RUNTIME"
+                    )
+                ],
+            ),
+            (
+                1,
+                [
+                    EntityData(name="Paris", entity_type="place"),
+                    EntityData(name="France", entity_type="place"),
+                ],
+                [
+                    RelationData(
+                        source_name="Paris", target_name="France", relation_type="LOCATED_IN"
+                    )
+                ],
+            ),
+        ],
+    )
+    yield store
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_context_excludes_relations_of_guardrail_rejected_chunks(two_topic_store):
+    """A relation reachable only from a chunk the guardrail rejected is not in the graph."""
+    pipeline = RetrievalPipeline(
+        two_topic_store, _passthrough_embedder(), router_guardrail=_RejectingGuardrail("Rejected")
+    )
+
+    result = await pipeline.retrieve("FastEmbed Paris", route="graph_relational")
+
+    assert [c["text"] for c in result.final_chunks] == ["Kept: FastEmbed uses ONNX."]
+    relations = {e["relation_type"] for e in result.graph_context.edges}
+    names = {n["name"] for n in result.graph_context.nodes}
+    assert "USES_RUNTIME" in relations
+    assert "LOCATED_IN" not in relations
+    assert names.isdisjoint({"Paris", "France"})
