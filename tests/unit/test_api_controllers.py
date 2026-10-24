@@ -233,7 +233,7 @@ async def test_api_ingest_endpoint(mock_controllers_app):
 async def test_api_cache_stats_endpoint(mock_controllers_app):
     app, mocks = mock_controllers_app
     async with AsyncTestClient(app=app) as client:
-        resp = await client.get("/api/v1/cache/stats")
+        resp = await client.get("/api/v1/cache/stats", headers={ADMIN_KEY_HEADER: "admin-secret"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["tier1Hits"] == 5
@@ -329,3 +329,25 @@ async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
         )
         assert resp.status_code == 409
         mocks["store"].ingest_document_bundle.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headers", [{}, {ADMIN_KEY_HEADER: "wrong-key"}])
+async def test_api_cache_stats_requires_admin_key(mock_controllers_app, headers):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.get("/api/v1/cache/stats", headers=headers)
+        assert resp.status_code == 401
+        assert "tier1Hits" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_public_endpoints_need_no_admin_key(mock_controllers_app):
+    """Health, query and streaming query stay reachable without X-Admin-Key."""
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        assert (await client.get("/health")).status_code == 200
+        assert (await client.post("/api/v1/query", json={"query": "q"})).status_code == 201
+        stream = await client.post("/api/v1/query/stream", json={"query": "q"})
+        assert stream.status_code == 201
+        assert "event: done" in stream.text

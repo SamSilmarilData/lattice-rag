@@ -31,7 +31,7 @@ echo "Deploying $SERVICE_NAME to Google Cloud Run (Region: $REGION, Project: $PR
 # The LatticeDB file lives on the instance's ephemeral filesystem. Pin to a single instance so
 # every request sees the same graph; documents ingested at runtime are lost on restart or
 # redeploy (the image ships pre-seeded with the golden corpus).
-# The service is publicly reachable; /api/v1/ingest, /eval and /benchmark require X-Admin-Key.
+# The service is publicly reachable; /api/v1/ingest, /eval, /benchmark, /graph and /cache require X-Admin-Key.
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
   --project "$PROJECT_ID" \
