@@ -9,6 +9,7 @@ from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.graph_traversal import GraphTraverser
 from lattice_rag.retrieval.reranker import PrecisionReranker
 from lattice_rag.retrieval.vector_search import HybridSearcher
+from lattice_rag.security import query_fingerprint
 from lattice_rag.storage.db import SubgraphResult
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class RetrievalPipeline:
         timings["stage1_search"] = (time.perf_counter() - t0) * 1000.0
 
         if not stage1_results:
-            logger.info("stage1_empty_results", extra={"query": query})
+            logger.info("stage1_empty_results", extra=query_fingerprint(query))
             return RetrievalResult(
                 final_chunks=[],
                 graph_context=SubgraphResult(nodes=[], edges=[]),

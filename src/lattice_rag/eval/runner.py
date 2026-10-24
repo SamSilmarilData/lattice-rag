@@ -14,6 +14,7 @@ from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
+from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
 
@@ -134,7 +135,11 @@ class EvalRunner:
                         answer = pipeline_state.answer
                         chunks = pipeline_state.filtered_chunks
                     except Exception as e:
-                        logger.error("eval_query_execution_failed", query=query, error=str(e))
+                        logger.error(
+                            "eval_query_execution_failed",
+                            **query_fingerprint(query),
+                            error=sanitize_error_detail(str(e)),
+                        )
                         answer = f"ERROR: {e}"
                         chunks = []
 
@@ -147,7 +152,11 @@ class EvalRunner:
                         )
                     except Exception as e:
                         # Score the query as a hard failure rather than aborting the run
-                        logger.error("eval_query_scoring_failed", query=query, error=str(e))
+                        logger.error(
+                            "eval_query_scoring_failed",
+                            **query_fingerprint(query),
+                            error=sanitize_error_detail(str(e)),
+                        )
                         return EvalQueryResult(
                             query=query,
                             faithfulness=0.0,
