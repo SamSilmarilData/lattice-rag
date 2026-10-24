@@ -183,24 +183,12 @@ def test_lattice_store_atomic_document_bundle(tmp_path):
     extractions = [
         (
             0,
-            [
-                EntityData(
-                    name="LatticeDB",
-                    entity_type="Database",
-                    embedding=np.ones(384, dtype=np.float32),
-                )
-            ],
+            [EntityData(name="LatticeDB", entity_type="Database")],
             [],
         ),
         (
             1,
-            [
-                EntityData(
-                    name="FastEmbed",
-                    entity_type="Technology",
-                    embedding=np.ones(384, dtype=np.float32),
-                )
-            ],
+            [EntityData(name="FastEmbed", entity_type="Technology")],
             [RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES")],
         ),
     ]

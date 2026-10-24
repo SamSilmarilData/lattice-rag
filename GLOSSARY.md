@@ -8,7 +8,7 @@ This document defines the ubiquitous language and domain concepts for the `latti
 
 - **Document**: A cohesive body of text ingested into the knowledge base, uniquely identified by a `doc_id` and human-readable `title`.
 - **Chunk**: A contiguous segment of text (typically ~512 characters with sentence-aware overlap) extracted from a Document. Each chunk possesses a dense vector embedding for HNSW similarity and raw text for BM25 search.
-- **Entity**: A named entity identified within a chunk by GLiNER (e.g., person, organization, technology, concept, database). Each entity node carries a name, entity type, and dense embedding.
+- **Entity**: A named entity identified within a chunk by GLiNER (e.g., person, organization, technology, concept, database). Each entity node carries a name and entity type; entities have no embedding (only chunks are vector-indexed).
 - **Relation**: A typed, directed relationship between two entities co-occurring in the same chunk context (e.g., `[:USES]`, `[:IMPLEMENTS]`, `[:RELATES_TO]`).
 - **Subgraph**: A traversed neighborhood of Entity and Chunk nodes connected by Relation edges, providing structured multi-hop relational context.
 

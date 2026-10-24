@@ -143,7 +143,8 @@ async def test_document_ingester_single_chunk():
 
 
 @pytest.mark.asyncio
-async def test_document_ingester_batch_entity_embedding_efficiency():
+async def test_document_ingester_embeds_chunks_only_in_one_batch():
+    """Entity names are never embedded: one embedding batch, holding exactly the chunk texts."""
     store = FakeStore()
     embed_svc = FakeEmbeddingService()
     extractor = FakeExtractor()
@@ -154,7 +155,7 @@ async def test_document_ingester_batch_entity_embedding_efficiency():
         extractor=extractor,
     )
 
-    # Text that generates 2 chunks
+    # Text that generates 2 chunks, both mentioning entities
     p1 = "LatticeDB combines HNSW vector similarity with BM25 full-text indexing in a single file."
     p2 = "LatticeDB also provides Cypher property-graph traversals on HNSW indices."
     text = f"{p1}\n\n{p2}"
@@ -168,15 +169,9 @@ async def test_document_ingester_batch_entity_embedding_efficiency():
     )
 
     assert stats.chunk_count >= 2
-    # Verify entity embeddings were batched across the entire document
-    # Calls: 1 for chunks batch, 1 for all unique entity names batch
-    assert len(embed_svc.batch_calls) == 2
-    chunk_call = embed_svc.batch_calls[0]
-    entity_call = embed_svc.batch_calls[1]
-    assert len(chunk_call) == stats.chunk_count
-    # Unique entities: LatticeDB and HNSW
-    assert "LatticeDB" in entity_call
-    assert "HNSW" in entity_call
+    assert stats.entity_count == 2
+    stored_chunks = store.documents["doc_multi"]["chunks"]
+    assert embed_svc.batch_calls == [[c.text for c in stored_chunks]]
 
 
 @pytest.mark.asyncio

@@ -144,12 +144,8 @@
         <text x="730" y="156" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">string</text>
         <text x="800" y="156" font-family="'Geist Mono', monospace" font-size="7.5" fill="#4338ca">TAXONOMY</text>
 
-        <text x="632" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">embedding</text>
-        <text x="730" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">vec[384]</text>
-        <text x="795" y="178" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490">HNSW &lt;=&gt;</text>
-
-        <text x="632" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">mention_count</text>
-        <text x="730" y="200" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">int</text>
+        <text x="632" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">mention_count</text>
+        <text x="730" y="178" font-family="'Geist Mono', monospace" font-size="8.5" fill="#0e7490">int</text>
 
         <!-- ========================================== -->
         <!-- ENTITY 4: :IndexCatalog (Virtual Catalog)  -->
