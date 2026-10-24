@@ -10,6 +10,14 @@ on:
   schedule:
     - cron: "17 3 * * *" # nightly, 03:17 UTC
   workflow_dispatch:
+    inputs:
+      guardrail_skip_rerank_score:
+        description: >-
+          Trial value for GUARDRAIL_SKIP_RERANK_SCORE (rerank logit at or above which chunks
+          skip the Noul guardrail). Empty keeps the shipped default: off. See
+          docs/production-readiness.md section 6.
+        required: false
+        default: ""
 
 concurrency:
   # One live run at a time: runs share the provider rate limits
@@ -66,6 +74,8 @@ jobs:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Empty on the nightly schedule, so the gate stays off unless a manual run sets it
+          GUARDRAIL_SKIP_RERANK_SCORE: ${{ inputs.guardrail_skip_rerank_score }}
         run: |
           lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json \
             --output live_tier_report.json

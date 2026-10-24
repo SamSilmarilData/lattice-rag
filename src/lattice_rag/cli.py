@@ -57,7 +57,7 @@ async def _build_harness() -> dict[str, Any]:
     from lattice_rag.orchestration.graph import RAGOrchestrator
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
-    from lattice_rag.routing.guardrail import ContextGuardrail
+    from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
     from lattice_rag.routing.router import QueryRouter
     from lattice_rag.storage.db import LatticeStore
 
@@ -70,7 +70,9 @@ async def _build_harness() -> dict[str, Any]:
         onnx_reranker_revision=config.reranker_onnx_revision,
     )
     router = QueryRouter()
-    guardrail = ContextGuardrail(threshold=0.5)
+    guardrail = with_rerank_skip(
+        ContextGuardrail(threshold=0.5), config.guardrail_skip_rerank_score
+    )
     sem_cache = SemanticCache()
     fb_cache = FallbackCache(config.redis_url)
     await fb_cache.connect()

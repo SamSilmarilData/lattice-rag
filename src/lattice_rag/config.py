@@ -40,6 +40,10 @@ class AppConfig:
     # Reverse proxies in front of the app whose X-Forwarded-For entries are trusted.
     # 0 identifies clients by the socket peer and ignores the header.
     trusted_proxy_hops: int = 0
+    # Chunks whose cross-encoder rerank_score (raw logit) is at or above this value skip the
+    # Jev Noul guardrail. None (the default) sends every chunk to Noul. Enable only with
+    # Live Tier results; see docs/production-readiness.md.
+    guardrail_skip_rerank_score: float | None = None
     # True when the app booted without TYPESAFE_API_KEY and runs in degraded hermetic mode
     using_mock_keys: bool = False
 
@@ -55,6 +59,10 @@ class AppConfig:
 
 def _split_csv(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _optional_float(raw: str | None) -> float | None:
+    return float(raw) if raw and raw.strip() else None
 
 
 def load_config(require_typesafe: bool = True) -> AppConfig:
@@ -88,6 +96,7 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         cors_allow_origins=_split_csv(os.environ.get("CORS_ALLOW_ORIGINS", "")),
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
         trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),
+        guardrail_skip_rerank_score=_optional_float(os.environ.get("GUARDRAIL_SKIP_RERANK_SCORE")),
     )
 
 
