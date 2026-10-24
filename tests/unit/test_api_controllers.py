@@ -14,6 +14,7 @@ from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers import (
     CacheController,
+    DocumentController,
     HealthController,
     IngestController,
     QueryController,
@@ -111,6 +112,7 @@ def mock_controllers_app():
         route_handlers=[
             QueryController,
             IngestController,
+            DocumentController,
             CacheController,
             HealthController,
         ],
@@ -329,6 +331,53 @@ async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
         )
         assert resp.status_code == 409
         mocks["store"].ingest_document_bundle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_response_states_runtime_documents_are_ephemeral(mock_controllers_app):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_eph", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 201
+        assert "ephemeral" in resp.json()["persistence"].lower()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_document_clears_tier1(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].delete_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete(
+            "/api/v1/documents/doc_arch", headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 204
+        mocks["store"].delete_document.assert_called_once_with("doc_arch")
+        mocks["semantic_cache"].clear.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_unknown_document_returns_404(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].delete_document.return_value = False
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete(
+            "/api/v1/documents/missing", headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 404
+        mocks["semantic_cache"].clear.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headers", [{}, {ADMIN_KEY_HEADER: "wrong"}])
+async def test_api_delete_document_requires_admin_key(mock_controllers_app, headers):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete("/api/v1/documents/doc_arch", headers=headers)
+        assert resp.status_code == 401
+        mocks["store"].delete_document.assert_not_called()
 
 
 @pytest.mark.asyncio

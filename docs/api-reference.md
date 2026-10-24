@@ -20,7 +20,8 @@ http://localhost:8000/schema/scalar
 | `GET` | `/` | — | — | `text/html` | Studio SPA (or fallback landing page). |
 | `POST` | `/api/v1/query` | rate-limited | `QueryRequest` | `QueryResponse` | Synchronous RAG query. |
 | `POST` | `/api/v1/query/stream` | rate-limited | `QueryRequest` | `text/event-stream` | SSE stream of stage, token, error and done events. |
-| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. |
+| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. Runtime documents are ephemeral on the deployed instance (see §2.2). |
+| `DELETE` | `/api/v1/documents/{documentId}` | **admin** | — | `204`, no body | Delete a document, its chunks and their edges, and every entity no remaining chunk references; then clear Tier 1. `404` if `documentId` is not stored. |
 | `GET` | `/api/v1/graph/subgraph` | **admin** | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |
 | `GET` | `/api/v1/cache/stats` | **admin** | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |
 | `POST` | `/api/v1/eval/jobs` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `202` `EvalJobResponse` | Start an evaluation run in the background and return its handle immediately. `409` if a run is already in progress. |
@@ -36,6 +37,9 @@ http://localhost:8000/schema/scalar
 - **Validation** failures return `400` problem details: `query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB.
 - **Eval runs are serialized.** Only one Eval Job runs at a time per server process; a start request while one is running is rejected with `409` (it is not queued), so parallel requests cannot multiply judge and LLM API cost. Poll `GET /api/v1/eval/jobs/{jobId}` until `status` leaves `running`. The 20 most recent jobs are kept in memory and are lost on restart. A failed job's `error` carries only a reference id for the server logs. The `lattice-rag eval` CLI runs in its own process and does not go through this queue.
 - **Unexpected errors** return `500` with a generic `detail` and a `requestId` to correlate with server logs; exception text is never returned.
+
+### 2.2 Runtime Documents Are Ephemeral
+The deployed instance serves a **Seeded Database** from the container's ephemeral disk ([ADR-0001](adr/0001-seeded-database-single-instance.md)). Documents added with `POST /api/v1/ingest` (and removals made with `DELETE /api/v1/documents/{documentId}`) apply only to the running instance and are lost on restart or redeploy. Durable content goes through `lattice-rag seed` at build time. Every `IngestResponse` repeats this in its `persistence` field.
 
 ---
 
@@ -109,6 +113,7 @@ interface IngestResponse {
   chunkCount: number;      // Number of chunks stored in LatticeDB
   entityCount: number;     // Number of entities extracted by GLiNER
   relationCount: number;   // Number of relationships established
+  persistence: string;     // States that runtime documents are ephemeral on the deployed instance
 }
 ```
 

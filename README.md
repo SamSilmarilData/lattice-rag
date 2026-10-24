@@ -246,7 +246,8 @@ lattice-rag serve
 | `GET` | `/` | Root Embedded Visual Playground & Studio SPA (or graceful fallback). |
 | `POST` | `/api/v1/query` | Standard JSON query endpoint returning answer, sources, graph path, and latency breakdown. |
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
-| `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). |
+| `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). On the deployed instance runtime documents are ephemeral: they do not survive a restart or redeploy (ADR-0001). |
+| `DELETE` | `/api/v1/documents/{documentId}` | **Admin key.** Deletes a document, its chunks, and entities no other document references, then clears Tier 1 (`404` if unknown). |
 | `GET` | `/api/v1/graph/subgraph` | **Admin key.** Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
 | `GET` | `/api/v1/cache/stats` | **Admin key.** Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
 | `POST` | `/api/v1/eval/jobs` | **Admin key.** Starts an evaluation run in the background and returns a job handle (`202`); `409` while another run is in progress (dataset/baseline must be `*.json` files in the project root). |
