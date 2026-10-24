@@ -110,12 +110,8 @@ def test_lattice_store_get_subgraph_snapshot():
         chunk_id = stats.chunk_ids[0]
 
         entities = [
-            EntityData(
-                name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)
-            ),
-            EntityData(
-                name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)
-            ),
+            EntityData(name="LatticeDB", entity_type="Database"),
+            EntityData(name="FastEmbed", entity_type="Library"),
         ]
         relations = [
             RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES"),

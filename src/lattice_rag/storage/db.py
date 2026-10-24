@@ -12,6 +12,11 @@ from latticedb import Database
 
 logger = logging.getLogger(__name__)
 
+# LatticeDB's default HNSW ef_search; raised to k when over-fetching so k results are reachable
+_DEFAULT_EF_SEARCH = 64
+# Upper bound on one vector_search fetch while widening past legacy Entity vectors
+_MAX_VECTOR_FETCH = 4096
+
 
 class ChunkData(msgspec.Struct, rename="camel"):
     """Represents a text chunk to be stored in LatticeDB with its embedding."""
@@ -23,11 +28,10 @@ class ChunkData(msgspec.Struct, rename="camel"):
 
 
 class EntityData(msgspec.Struct, rename="camel"):
-    """Represents an extracted entity node."""
+    """Represents an extracted entity node. Entities carry no vector; only Chunks are embedded."""
 
     name: str
     entity_type: str
-    embedding: np.ndarray | None = None
 
 
 class RelationData(msgspec.Struct, rename="camel"):
@@ -193,8 +197,6 @@ class LatticeStore:
                         properties={"name": ent.name, "entity_type": ent.entity_type},
                     )
                     ent_id = ent_node.id
-                    if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
-                        txn.set_vector(ent_id, "embedding", ent.embedding)
                     pending[norm_name] = ent_id
 
                 txn.create_edge(chunk_id, ent_id, "CONTAINS")
@@ -289,11 +291,6 @@ class LatticeStore:
                             properties={"name": ent.name, "entity_type": ent.entity_type},
                         )
                         ent_id = ent_node.id
-                        if (
-                            ent.embedding is not None
-                            and len(ent.embedding) == self.vector_dimensions
-                        ):
-                            txn.set_vector(ent_id, "embedding", ent.embedding)
                         pending[norm_name] = ent_id
                         total_entities += 1
 
@@ -338,9 +335,31 @@ class LatticeStore:
         elif query_embedding.dtype != np.float32:
             query_embedding = query_embedding.astype(np.float32)
 
-        # Retrieve a broader candidate pool to filter out non-chunk nodes (e.g. Entity nodes sharing vector index)
+        if top_k <= 0:
+            return []
+
+        # Databases seeded before entity vectors were dropped still hold Entity vectors in the
+        # shared HNSW index. Over-fetch, and widen the fetch until top_k Chunks are found or the
+        # index is exhausted, so those vectors cannot crowd Chunks out.
         fetch_k = max(top_k * 3, 20)
-        raw_results = self.db.vector_search(query_embedding, k=fetch_k)
+        while True:
+            search_results, exhausted = self._chunk_hits(query_embedding, fetch_k, top_k)
+            if len(search_results) >= top_k or exhausted or fetch_k >= _MAX_VECTOR_FETCH:
+                return search_results
+            fetch_k = min(fetch_k * 4, _MAX_VECTOR_FETCH)
+
+    def _chunk_hits(
+        self, query_embedding: np.ndarray, fetch_k: int, top_k: int
+    ) -> tuple[list[SearchResult], bool]:
+        """Return up to top_k Chunk hits among the fetch_k nearest vectors.
+
+        The flag is True when the index returned fewer than fetch_k vectors, so a wider fetch
+        cannot find more.
+        """
+        raw_results = self.db.vector_search(
+            query_embedding, k=fetch_k, ef_search=max(_DEFAULT_EF_SEARCH, fetch_k)
+        )
+        exhausted = len(raw_results) < fetch_k
 
         search_results: list[SearchResult] = []
         with self.db.read() as txn:
@@ -371,7 +390,7 @@ class LatticeStore:
                 if len(search_results) >= top_k:
                     break
 
-        return search_results
+        return search_results, exhausted
 
     def bm25_search(
         self,
