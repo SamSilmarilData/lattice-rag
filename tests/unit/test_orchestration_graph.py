@@ -1,4 +1,4 @@
-"""Unit tests for LangGraph RAGOrchestrator and failover cascades."""
+"""Unit tests for RAGOrchestrator and failover cascades."""
 
 from __future__ import annotations
 

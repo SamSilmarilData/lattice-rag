@@ -355,3 +355,186 @@ async def test_verified_answer_is_cached_and_served_on_repeat(
     assert first == {"unverified": False, "cached": False}
     assert second == {"unverified": False, "cached": True}
     assert c["pipeline"].execute.await_count == 1
+
+
+# ── Seam 2 contract: one scenario table, both entry points ─────────────────────
+
+
+def _scenario_components(scenario: str) -> dict:
+    """Fresh fakes for one scenario; only external boundaries are faked."""
+    from lattice_rag.retrieval.pipeline import RetrievalResult
+
+    route = {"chitchat": "chitchat", "massive_context": "massive_context"}.get(scenario, "hybrid")
+    router = MagicMock()
+    router.route_query = AsyncMock(
+        return_value=RouteDecision(
+            route=route,
+            confidence=0.5 if scenario == "routing_fallback" else 0.9,
+            verified=scenario != "routing_fallback",
+        )
+    )
+
+    fallback_cache = MagicMock()
+    fallback_cache.find_closest_fallback = AsyncMock(return_value="Cached FAQ")
+
+    pipeline = MagicMock()
+    pipeline.execute = AsyncMock(
+        return_value=RetrievalResult(
+            final_chunks=[]
+            if scenario == "low_grounding"
+            else [{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
+            graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
+            low_grounding=scenario == "low_grounding",
+            unverified=scenario == "guardrail_unavailable",
+        )
+    )
+
+    groq = MagicMock()
+    gemini = MagicMock()
+    if scenario == "degraded":
+        groq.synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
+
+        async def _groq_stream(q, ch, g):
+            raise RuntimeError("Groq 503")
+            yield "never"  # pragma: no cover
+
+    else:
+        groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
+
+        async def _groq_stream(q, ch, g):
+            for tok in ["Grounded", " answer", " from", " Groq."]:
+                yield tok
+
+    gemini_answer = "Summary." if scenario == "massive_context" else "Gemini answer."
+    gemini.synthesize = AsyncMock(return_value=gemini_answer)
+
+    async def _gemini_stream(q, ch, g):
+        yield gemini_answer
+
+    groq.stream = _groq_stream
+    gemini.stream = _gemini_stream
+
+    chitchat = MagicMock()
+    chitchat.handle = AsyncMock(return_value="Hello! I am lattice-rag.")
+
+    embed_svc = MagicMock()
+    embed_svc.embed_query = MagicMock(return_value=np.ones(384, dtype=np.float32))
+
+    return {
+        "router": router,
+        "fallback_cache": fallback_cache,
+        "pipeline": pipeline,
+        "groq": groq,
+        "gemini": gemini,
+        "chitchat": chitchat,
+        "embed_svc": embed_svc,
+    }
+
+
+async def _observe(orchestrator: RAGOrchestrator, entry_point: str, query: str) -> dict:
+    """Everything a caller can see about one answer, from either entry point."""
+    if entry_point == "run":
+        state = await orchestrator.run(query)
+        return {
+            "answer": state.answer,
+            "route": state.route,
+            "cached": state.cache_hit,
+            "degraded": state.degraded,
+            "low_grounding": state.low_grounding,
+            "unverified": state.unverified,
+            "sources": state.filtered_chunks,
+            "graph_path": state.graph_context,
+        }
+    events = [e async for e in orchestrator.stream_query(query)]
+    done = events[-1]
+    assert done["event"] == "done"
+    tokens = "".join(e["data"]["delta"] for e in events if e["event"] == "token")
+    assert tokens == done["data"]["answer"]
+    data = done["data"]
+    return {
+        "answer": data["answer"],
+        "route": data["route"],
+        "cached": data["cached"],
+        "degraded": data["degraded"],
+        "low_grounding": data["low_grounding"],
+        "unverified": data["unverified"],
+        "sources": data["sources"],
+        "graph_path": data["graph_path"],
+    }
+
+
+async def _play(scenario: str, entry_point: str) -> dict:
+    """Ask, repeat verbatim (exact tier), then paraphrase (semantic tier: same embedding)."""
+    from lattice_rag.caching.semantic_cache import SemanticCache
+
+    c = _scenario_components(scenario)
+    # Jev Noul agrees the paraphrase asks the same thing
+    noul = MagicMock()
+    noul.system_one = AsyncMock(return_value=MagicMock(nouls={"equivalent": MagicMock(noul=0.97)}))
+    cache = SemanticCache(ts_client=noul)
+    orchestrator = _orchestrator(c, semantic_cache=cache)
+    first_query = "hi there" if scenario == "chitchat" else "Explain LatticeDB"
+    answers = [
+        await _observe(orchestrator, entry_point, first_query),
+        await _observe(orchestrator, entry_point, first_query),
+        await _observe(orchestrator, entry_point, "Please explain LatticeDB"),
+    ]
+    return {
+        "answers": answers,
+        "retrievals": c["pipeline"].execute.await_count,
+        "cache_size": len(cache),
+    }
+
+
+# scenario -> (first answer, is it cached so later asks are served from Tier 1?)
+_SCENARIOS = {
+    "hybrid": ("Grounded answer from Groq.", True),
+    "massive_context": ("Summary.", True),
+    "chitchat": ("Hello! I am lattice-rag.", False),
+    "degraded": ("Gemini answer.", False),
+    "low_grounding": ("Grounded answer from Groq.", False),
+    "guardrail_unavailable": ("Grounded answer from Groq.", False),
+    "routing_fallback": ("Grounded answer from Groq.", False),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", list(_SCENARIOS))
+async def test_run_and_stream_query_agree_on_every_scenario(scenario):
+    """Same answer, route, flags and cache effects from both entry points."""
+    buffered = await _play(scenario, "run")
+    streamed = await _play(scenario, "stream_query")
+
+    assert buffered == streamed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", list(_SCENARIOS))
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_cache_effects_follow_the_tier1_write_rule(scenario, entry_point):
+    """Only non-degraded, grounded, verified answers are stored and served on repeat."""
+    expected_answer, cacheable = _SCENARIOS[scenario]
+
+    outcome = await _play(scenario, entry_point)
+    first, repeat, paraphrase = outcome["answers"]
+
+    assert first["answer"] == expected_answer
+    assert first["cached"] is False
+    assert repeat["cached"] is cacheable
+    assert paraphrase["cached"] is cacheable
+    assert outcome["cache_size"] == (1 if cacheable else 0)
+    if scenario != "chitchat":
+        assert outcome["retrievals"] == (1 if cacheable else 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_massive_context_answer_is_cached_and_served_on_repeat(entry_point):
+    outcome = await _play("massive_context", entry_point)
+    first, repeat, paraphrase = outcome["answers"]
+
+    assert first["route"] == "massive_context"
+    assert repeat == first | {"cached": True}
+    assert paraphrase["cached"] is True
+    assert paraphrase["answer"] == "Summary."
+    assert outcome["retrievals"] == 1

@@ -106,8 +106,8 @@ lattice-rag/
 │   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
 │   ├── orchestration/
-│   │   ├── state.py             # LangGraph typed PipelineState
-│   │   └── graph.py             # RAGOrchestrator StateGraph pipeline
+│   │   ├── state.py             # PipelineState (buffered run() result)
+│   │   └── graph.py             # RAGOrchestrator: one core for run() and stream_query()
 │   └── eval/
 │       ├── triage_gate.py       # TypeSafe AI Jev Score & Noul continuous evaluation engine
 │       └── runner.py            # Ephemeral isolated database evaluation runner & regression gate
