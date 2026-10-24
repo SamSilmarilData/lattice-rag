@@ -30,6 +30,7 @@ def mock_dependencies():
     mock_ret_result.graph_context.nodes = [{"node_id": 1, "name": "NodeA"}]
     mock_ret_result.graph_context.edges = []
     mock_ret_result.low_grounding = False
+    mock_ret_result.unverified = False
     retrieval_pipeline.execute = AsyncMock(return_value=mock_ret_result)
 
     groq = MagicMock()

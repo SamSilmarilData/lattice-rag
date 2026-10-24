@@ -142,3 +142,61 @@ async def test_pipeline_reranks_all_candidates_keeps_metadata_and_reuses_embeddi
     assert result.final_chunks[0]["doc_id"] == f"d{last}"
     assert result.final_chunks[0]["position"] == last
     mock_embed.embed_query.assert_not_called()
+
+
+def _one_hit_pipeline(guardrail):
+    hit = SearchResult(node_id=1, score=0.9, text="Chunk 1 content", metadata={})
+    mock_store = MagicMock()
+    mock_store.vector_search.return_value = [hit]
+    mock_store.bm25_search.return_value = []
+    mock_store.get_entities_for_chunks.return_value = []
+    mock_embed = MagicMock(spec=EmbeddingService)
+    mock_embed.embed_query.return_value = [0.0] * 384
+    mock_embed.rerank.return_value = [RerankResult(index=0, score=9.0, text="Chunk 1 content")]
+    return RetrievalPipeline(mock_store, mock_embed, router_guardrail=guardrail)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_guardrail_jev_failure_is_unverified():
+    """When Jev Noul is unreachable the candidates are kept, but grounding is unverified."""
+    from lattice_rag.routing.guardrail import ContextGuardrail
+
+    failing_client = AsyncMock()
+    failing_client.system_one.side_effect = RuntimeError("503 Service Unavailable")
+    pipeline = _one_hit_pipeline(ContextGuardrail(ts_client=failing_client))
+
+    result = await pipeline.execute("Explain LatticeDB", route="hybrid")
+
+    assert [c["node_id"] for c in result.final_chunks] == [1]
+    assert result.unverified is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_guardrail_unexpected_error_is_unverified():
+    broken = AsyncMock()
+    broken.filter_chunks.side_effect = ValueError("boom")
+    pipeline = _one_hit_pipeline(broken)
+
+    result = await pipeline.execute("Explain LatticeDB", route="hybrid")
+
+    assert result.unverified is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_without_guardrail_is_unverified():
+    """No guardrail configured (mock-key mode) means grounding was never checked."""
+    result = await _one_hit_pipeline(None).execute("Explain LatticeDB", route="hybrid")
+
+    assert result.unverified is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_guardrail_verdict_is_verified():
+    ok = AsyncMock()
+    ok.filter_chunks.return_value = GuardrailResult(
+        chunks=[{"node_id": 1, "text": "Chunk 1 content", "grounding_score": 0.9}],
+        low_grounding=False,
+    )
+    result = await _one_hit_pipeline(ok).execute("Explain LatticeDB", route="hybrid")
+
+    assert result.unverified is False

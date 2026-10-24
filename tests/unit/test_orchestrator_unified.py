@@ -31,6 +31,7 @@ def mock_orchestrator_components():
             graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
             timings={"stage1_search": 1.0},
             low_grounding=False,
+            unverified=False,
         )
     )
 
@@ -208,6 +209,7 @@ async def test_unified_orchestrator_low_grounding_is_reported_and_not_cached(
             graph_context=SubgraphResult(nodes=[], edges=[]),
             timings={},
             low_grounding=True,
+            unverified=False,
         )
     )
 
@@ -261,3 +263,95 @@ async def test_massive_context_retrieves_more_evidence_in_both_paths(mock_orches
 
     for call in c["pipeline"].execute.await_args_list:
         assert call.kwargs["top_k"] == MASSIVE_CONTEXT_TOP_K
+
+
+def _orchestrator(c, semantic_cache=None):
+    return RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=semantic_cache if semantic_cache is not None else c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+
+async def _ask(orchestrator: RAGOrchestrator, entry_point: str, query: str) -> dict:
+    """Run one query through either entry point and return the flags the caller sees."""
+    if entry_point == "run":
+        state = await orchestrator.run(query)
+        return {"unverified": state.unverified, "cached": state.cache_hit}
+    events = [e async for e in orchestrator.stream_query(query)]
+    done = events[-1]
+    assert done["event"] == "done"
+    return {"unverified": done["data"]["unverified"], "cached": done["data"]["cached"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_guardrail_unavailable_answer_is_unverified_and_recomputed(
+    mock_orchestrator_components, entry_point
+):
+    """An answer whose guardrail could not run is flagged and never served from Tier 1."""
+    from lattice_rag.caching.semantic_cache import SemanticCache
+    from lattice_rag.retrieval.pipeline import RetrievalResult
+
+    c = mock_orchestrator_components
+    c["pipeline"].execute = AsyncMock(
+        return_value=RetrievalResult(
+            final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
+            graph_context=SubgraphResult(nodes=[], edges=[]),
+            unverified=True,
+        )
+    )
+    orchestrator = _orchestrator(c, semantic_cache=SemanticCache(ts_client=None))
+
+    first = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+    second = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+
+    assert first == {"unverified": True, "cached": False}
+    assert second == {"unverified": True, "cached": False}
+    assert c["pipeline"].execute.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_routing_fallback_answer_is_unverified_and_recomputed(
+    mock_orchestrator_components, entry_point
+):
+    """When Jev routing could not run, the answer is flagged and never served from Tier 1."""
+    from lattice_rag.caching.semantic_cache import SemanticCache
+
+    c = mock_orchestrator_components
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="hybrid", confidence=0.5, verified=False)
+    )
+    orchestrator = _orchestrator(c, semantic_cache=SemanticCache(ts_client=None))
+
+    first = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+    second = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+
+    assert first == {"unverified": True, "cached": False}
+    assert second == {"unverified": True, "cached": False}
+    assert c["pipeline"].execute.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_verified_answer_is_cached_and_served_on_repeat(
+    mock_orchestrator_components, entry_point
+):
+    """Control case: a fully verified answer is stored and the repeat is a cache hit."""
+    from lattice_rag.caching.semantic_cache import SemanticCache
+
+    c = mock_orchestrator_components
+    orchestrator = _orchestrator(c, semantic_cache=SemanticCache(ts_client=None))
+
+    first = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+    second = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+
+    assert first == {"unverified": False, "cached": False}
+    assert second == {"unverified": False, "cached": True}
+    assert c["pipeline"].execute.await_count == 1

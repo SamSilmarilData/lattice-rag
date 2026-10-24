@@ -16,6 +16,8 @@ class GuardrailResult:
 
     chunks: list[dict[str, Any]]
     low_grounding: bool
+    # False when Jev Noul could not run and the candidates were passed through unchecked
+    verified: bool = True
 
 
 class ContextGuardrail:
@@ -116,7 +118,7 @@ class ContextGuardrail:
                 c_copy = dict(c)
                 c_copy["grounding_score"] = float(c.get("rerank_score", c.get("score", 1.0)))
                 fallback_chunks.append(c_copy)
-            return GuardrailResult(chunks=fallback_chunks, low_grounding=False)
+            return GuardrailResult(chunks=fallback_chunks, low_grounding=False, verified=False)
 
     async def aclose(self) -> None:
         """Closes the underlying TypeSafe AI client."""

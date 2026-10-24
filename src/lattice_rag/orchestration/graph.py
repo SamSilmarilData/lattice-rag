@@ -170,6 +170,9 @@ class RAGOrchestrator:
             updates["filtered_chunks"] = cache_result.get("sources", [])
             updates["graph_context"] = cache_result.get("graph_path")
             logger.info("Cache HIT for query (route=%s)", route_decision.route)
+        else:
+            # A Tier 1 entry was verified when stored; a miss inherits the routing verdict
+            updates["unverified"] = not route_decision.verified
 
         return updates
 
@@ -197,6 +200,7 @@ class RAGOrchestrator:
             "filtered_chunks": result.final_chunks,
             "graph_context": graph_dict,
             "low_grounding": result.low_grounding,
+            "unverified": state.unverified or result.unverified,
             "timings": state.timings + [{"stage": "retrieval", "duration_ms": elapsed}],
         }
 
@@ -219,6 +223,7 @@ class RAGOrchestrator:
             state.use_cache
             and not degraded
             and not state.low_grounding
+            and not state.unverified
             and state.query_embedding is not None
         ):
             self.semantic_cache.put(
@@ -262,6 +267,7 @@ class RAGOrchestrator:
             "answer": synth.answer,
             "degraded": synth.degraded,
             "low_grounding": result.low_grounding,
+            "unverified": state.unverified or result.unverified,
             "filtered_chunks": result.final_chunks,
             "graph_context": graph_dict,
             "timings": state.timings + [{"stage": "massive_context", "duration_ms": elapsed}],
@@ -344,6 +350,7 @@ class RAGOrchestrator:
                     "latency_ms": total_elapsed,
                     "degraded": False,
                     "low_grounding": False,
+                    "unverified": False,
                 },
             }
             return
@@ -374,6 +381,7 @@ class RAGOrchestrator:
                     "latency_ms": total_elapsed,
                     "degraded": False,
                     "low_grounding": False,
+                    "unverified": False,
                 },
             }
             return
@@ -400,6 +408,7 @@ class RAGOrchestrator:
                     "latency_ms": total_elapsed,
                     "degraded": False,
                     "low_grounding": False,
+                    "unverified": False,
                 },
             }
             return
@@ -446,7 +455,13 @@ class RAGOrchestrator:
         full_answer = "".join(full_tokens)
 
         # Cache only primary-provider answers grounded in evidence that passed the guardrail
-        if not degraded and not ret_result.low_grounding and query_embedding is not None:
+        unverified = not route_decision.verified or ret_result.unverified
+        if (
+            not degraded
+            and not ret_result.low_grounding
+            and not unverified
+            and query_embedding is not None
+        ):
             self.semantic_cache.put(
                 query,
                 query_embedding,
@@ -471,5 +486,6 @@ class RAGOrchestrator:
                 "latency_ms": total_elapsed,
                 "degraded": degraded,
                 "low_grounding": ret_result.low_grounding,
+                "unverified": unverified,
             },
         }
