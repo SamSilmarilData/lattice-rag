@@ -559,5 +559,38 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str 
         sys.exit(1)
 
 
+@main.command(name="measure-baseline")
+@click.argument("reports", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--baseline", default="eval_baseline.json", help="Baseline file to update")
+def measure_baseline(reports: tuple[str, ...], baseline: str) -> None:
+    """Set baseline means and tolerance from repeated `eval --output` reports.
+
+    Run the Live Tier three times on unchanged code, then pass the three reports here.
+    """
+    from datetime import UTC, datetime
+
+    import msgspec
+
+    from lattice_rag.api.dtos import EvalRunResponse
+    from lattice_rag.eval.gate import BaselineError, format_metric, measure, write_measurement
+
+    runs = [msgspec.json.decode(Path(p).read_bytes(), type=EvalRunResponse) for p in reports]
+    sizes = {r.total_queries for r in runs}
+    if len(sizes) != 1:
+        raise click.ClickException(f"Reports cover different query counts: {sorted(sizes)}")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        measurement = measure(runs, measured_at=stamp)
+        write_measurement(baseline, measurement, total_queries=sizes.pop())
+    except BaselineError as e:
+        raise click.ClickException(str(e)) from e
+
+    for metric, mean in measurement.means.items():
+        click.echo(
+            f"{metric:<20} mean {format_metric(mean)}  sd {format_metric(measurement.stdev[metric])}"
+        )
+    click.echo(f"max_regression_delta -> {measurement.tolerance:.2f} (written to {baseline})")
+
+
 if __name__ == "__main__":
     main()

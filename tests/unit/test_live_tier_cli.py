@@ -79,3 +79,80 @@ def test_eval_without_a_live_key_fails_and_names_it(mocked_live_eval, monkeypatc
     assert result.exit_code != 0
     assert missing in result.output
     mocked_live_eval.run_evaluation.assert_not_called()
+
+
+# --- Baseline measurement from repeated Live Tier runs ---------------------------------
+
+_BASELINE = {
+    "version": "2.0.0",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "total_queries": 3,
+    "metrics": {"faithfulness": 0.5},
+    "gate_thresholds": {
+        "max_regression_delta": 0.03,
+        "min_query_floor": 0.5,
+        "pass_thresholds": {
+            "faithfulness": 0.7,
+            "context_precision": 0.65,
+            "answer_relevance": 0.7,
+            "answer_correctness": 0.7,
+        },
+    },
+}
+
+
+def _run_file(tmp_path: Path, name: str, faithfulness: float, precision: float) -> str:
+    report = EvalRunResponse(
+        total_queries=3,
+        passed_gate=False,
+        regression_delta=0.0,
+        mean_faithfulness=faithfulness,
+        mean_context_precision=precision,
+        mean_answer_relevance=0.9,
+        mean_answer_correctness=None,  # never judged in any run
+    )
+    path = tmp_path / name
+    path.write_bytes(msgspec.json.encode(report))
+    return str(path)
+
+
+def test_measure_baseline_sets_means_and_two_sigma_tolerance(tmp_path: Path):
+    """Faithfulness 0.80/0.84/0.88 has mean 0.84 and sample sd 0.04, so 2 sd = 0.08,
+    the widest of the metrics; precision is constant (sd 0)."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = [
+        _run_file(tmp_path, "r1.json", 0.80, 0.70),
+        _run_file(tmp_path, "r2.json", 0.84, 0.70),
+        _run_file(tmp_path, "r3.json", 0.88, 0.70),
+    ]
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    loaded = load_baseline(baseline)
+    assert loaded.metrics == pytest.approx(
+        {"faithfulness": 0.84, "context_precision": 0.70, "answer_relevance": 0.9}
+    )
+    assert loaded.gate_thresholds.max_regression_delta == pytest.approx(0.08)
+    # Floor and per-query thresholds are policy, not measurements: untouched
+    assert loaded.gate_thresholds.min_query_floor == 0.5
+    assert loaded.gate_thresholds.pass_thresholds.faithfulness == 0.7
+    assert loaded.measurement is not None
+    assert [r["faithfulness"] for r in loaded.measurement.runs] == [0.80, 0.84, 0.88]
+    assert loaded.measurement.stdev["faithfulness"] == pytest.approx(0.04)
+    assert "2" in loaded.measurement.tolerance_rule
+
+
+def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    run = _run_file(tmp_path, "r1.json", 0.8, 0.7)
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", run, "--baseline", str(baseline)])
+
+    assert result.exit_code != 0
+    assert "at least two" in result.output
+    assert json.loads(baseline.read_text()) == _BASELINE
