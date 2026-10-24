@@ -10,7 +10,7 @@ logger = structlog.get_logger(__name__)
 
 
 class GraphTraverser:
-    """Stage 2: Dynamic 1-to-2 hop Cypher / pointer graph traversal."""
+    """Stage 2: 1-to-2 hop graph traversal over LatticeDB edges (in-process pointer walk)."""
 
     def __init__(self, store: LatticeStore):
         """Initialize GraphTraverser.
@@ -40,23 +40,9 @@ class GraphTraverser:
         max_hops = 2 if route == "graph_relational" else 1
 
         # Extract entity IDs from anchor chunks in rank order
-        if hasattr(type(self.store), "get_entities_for_chunks"):
-            entity_ids = await asyncio.to_thread(
-                self.store.get_entities_for_chunks, anchor_node_ids, budget
-            )
-        else:
-            entity_ids = []
-            seen_eids: set[int] = set()
-            for chunk_id in anchor_node_ids:
-                c_entities = await asyncio.to_thread(self.store.get_entities_for_chunk, chunk_id)
-                for eid in c_entities:
-                    if eid not in seen_eids:
-                        seen_eids.add(eid)
-                        entity_ids.append(eid)
-                    if len(entity_ids) >= budget:
-                        break
-                if len(entity_ids) >= budget:
-                    break
+        entity_ids = await asyncio.to_thread(
+            self.store.get_entities_for_chunks, anchor_node_ids, budget
+        )
 
         if not entity_ids:
             logger.debug("no_entities_found_for_anchors", anchor_ids=anchor_node_ids)

@@ -10,7 +10,9 @@ import click
 @click.group()
 def main() -> None:
     """lattice-rag: In-process Hybrid GraphRAG engine."""
-    pass
+    from lattice_rag.security import configure_logging
+
+    configure_logging()
 
 
 @main.command()
@@ -35,14 +37,13 @@ def setup_keys() -> None:
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0", help="Server host")
-@click.option("--port", default=8000, type=int, help="Server port")
-def serve(host: str, port: int) -> None:
+@click.option("--host", default=None, help="Server host (default: HOST env or 0.0.0.0)")
+@click.option("--port", default=None, type=int, help="Server port (default: PORT env or 8000)")
+def serve(host: str | None, port: int | None) -> None:
     """Start the Granian ASGI server."""
-    click.echo(f"Starting lattice-rag on {host}:{port}")
     from lattice_rag.server import main as server_main
 
-    server_main()
+    server_main(host=host, port=port)
 
 
 async def _build_harness() -> dict[str, Any]:
@@ -62,7 +63,12 @@ async def _build_harness() -> dict[str, Any]:
 
     config = get_config()
     store = LatticeStore(config.latticedb_path)
-    embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+    embed_svc = EmbeddingService(
+        config.embed_model,
+        config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
+    )
     router = QueryRouter()
     guardrail = ContextGuardrail(threshold=0.5)
     sem_cache = SemanticCache()
@@ -72,6 +78,7 @@ async def _build_harness() -> dict[str, Any]:
     groq = GroqSynthesizer(
         api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
         model=config.groq_model,
+        max_tokens=config.llm_max_tokens,
     )
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
@@ -122,8 +129,12 @@ def query(text: str, stream: bool) -> None:
 
     async def _run() -> None:
         h = await _build_harness()
-        orchestrator = h["orchestrator"]
+        try:
+            await _query(h["orchestrator"])
+        finally:
+            await _close_harness(h)
 
+    async def _query(orchestrator: Any) -> None:
         click.echo(f"Query: {text}\n")
         if stream:
             click.echo("--- Streaming Response ---")
@@ -144,8 +155,6 @@ def query(text: str, stream: bool) -> None:
                 f"Latency: {state.total_latency_ms:.1f}ms (Cached: {state.cache_hit}, Degraded: {state.degraded})"
             )
 
-        await _close_harness(h)
-
     asyncio.run(_run())
 
 
@@ -157,8 +166,9 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     """Ingest a text file into the knowledge graph."""
     import asyncio
 
-    from lattice_rag.config import get_config
+    from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
+    from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
@@ -167,17 +177,26 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     click.echo(f"Ingesting: {path.name} as doc_id='{doc_id or path.stem}'")
 
     async def _ingest() -> None:
-        config = get_config()
+        config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        embed_svc = EmbeddingService(
+            config.embed_model,
+            config.reranker_model,
+            onnx_reranker_repo=config.reranker_onnx_repo,
+            onnx_reranker_revision=config.reranker_onnx_revision,
+        )
         extractor = EntityExtractor()
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
-        stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+        try:
+            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+        except DocumentExistsError as e:
+            raise click.ClickException(f"{e}. Use a different --doc-id.") from e
+        finally:
+            store.close()
         click.echo(
             f"✓ Ingestion complete: {stats.chunk_count} chunks, {stats.entity_count} entities, {stats.relation_count} relations."
         )
-        store.close()
 
     asyncio.run(_ingest())
 
@@ -189,8 +208,9 @@ def seed(dataset: str) -> None:
     import asyncio
     import json
 
-    from lattice_rag.config import get_config
+    from lattice_rag.config import load_config
     from lattice_rag.ingestion import DocumentIngester
+    from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.storage.db import LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
@@ -209,9 +229,14 @@ def seed(dataset: str) -> None:
     click.echo(f"Seeding LatticeDB with {len(corpus)} corpus documents from {dataset}...")
 
     async def _seed() -> None:
-        config = get_config()
+        config = load_config(require_typesafe=False)
         store = LatticeStore(config.latticedb_path)
-        embed_svc = EmbeddingService(config.embed_model, config.reranker_model)
+        embed_svc = EmbeddingService(
+            config.embed_model,
+            config.reranker_model,
+            onnx_reranker_repo=config.reranker_onnx_repo,
+            onnx_reranker_revision=config.reranker_onnx_revision,
+        )
         extractor = EntityExtractor()
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
@@ -219,8 +244,11 @@ def seed(dataset: str) -> None:
             d_id = doc.get("document_id", "doc")
             d_title = doc.get("title", d_id)
             d_text = doc.get("text", "")
-            click.echo(f"  Ingesting '{d_title}' ({len(d_text)} chars)...")
-            await ingester.ingest(d_id, d_title, d_text)
+            try:
+                await ingester.ingest(d_id, d_title, d_text)
+                click.echo(f"  Ingested '{d_title}' ({len(d_text)} chars)")
+            except DocumentExistsError:
+                click.echo(f"  Skipped '{d_title}' (already seeded)")
 
         click.echo("✓ LatticeDB pre-seeding complete!")
         store.close()
@@ -358,7 +386,6 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     import asyncio
 
     from lattice_rag.eval import EvalRunner, JevEvaluator
-    from lattice_rag.orchestration.pool import shutdown_pool
     from lattice_rag.storage.extract import EntityExtractor
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
@@ -408,8 +435,6 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
         finally:
             await evaluator.close()
             await _close_harness(h)
-
-            shutdown_pool()
 
     passed = asyncio.run(_run())
     if fail_on_regression and not passed:

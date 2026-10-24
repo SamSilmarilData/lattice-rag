@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Zap, GitBranch, Layers, ShieldCheck, ChevronDown, ChevronRight, FileText } from 'lucide-react';
-import { QueryResponse, SubgraphDTO, SourceChunk } from '../types';
+import { Send, Zap, GitBranch, Layers, ShieldCheck, ShieldAlert, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { QueryResponse, SubgraphDTO, SourceChunk, StreamEvent } from '../types';
 import { TraceWaterfall } from './TraceWaterfall';
 
 interface QueryStudioProps {
@@ -13,7 +13,7 @@ const PRESET_QUERIES = [
   'Compare the caching layers in Lattice RAG.',
   'How does LatticeDB handle vector search and graph relations together?',
   'What is the role of TypeSafe Jev Choice in query routing?',
-  'Explain the multi-hop Cypher traversal process from entity anchors.',
+  'Explain the multi-hop graph traversal process from entity anchors.',
   'What fallback mechanisms ensure zero-downtime during API outages?',
 ];
 
@@ -31,6 +31,9 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
   const [sources, setSources] = useState<SourceChunk[]>([]);
   const [timings, setTimings] = useState<QueryResponse['timings']>([]);
   const [expandedSource, setExpandedSource] = useState<number | null>(null);
+  const [degraded, setDegraded] = useState(false);
+  const [lowGrounding, setLowGrounding] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   // Dynamic Token Velocity Meter State
   const [tokenCount, setTokenCount] = useState(0);
@@ -60,6 +63,9 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
     setLatencyMs(null);
     setSources([]);
     setTimings([]);
+    setDegraded(false);
+    setLowGrounding(false);
+    setStreamError(null);
     setTokenCount(0);
     setTokenVelocity(null);
     tokenCountRef.current = 0;
@@ -69,7 +75,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
       const response = await fetch('/api/v1/query/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed, stream: true }),
+        body: JSON.stringify({ query: trimmed }),
       });
 
       if (!response.ok) {
@@ -102,15 +108,13 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
             if (!jsonStr) continue;
 
             try {
-              const parsed = JSON.parse(jsonStr);
-              const eventType = parsed.event || currentEvent;
-              const payload = parsed.data !== undefined ? parsed.data : parsed;
+              const evt = { event: currentEvent, data: JSON.parse(jsonStr) } as StreamEvent;
 
-              if (eventType === 'token' && payload?.delta) {
+              if (evt.event === 'token') {
                 if (!synthesisStartTimeRef.current) {
                   synthesisStartTimeRef.current = performance.now();
                 }
-                setAnswer((prev) => prev + payload.delta);
+                setAnswer((prev) => prev + evt.data.delta);
                 tokenCountRef.current += 1;
                 setTokenCount(tokenCountRef.current);
 
@@ -118,57 +122,21 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 if (elapsedSec > 0.05) {
                   setTokenVelocity(parseFloat((tokenCountRef.current / elapsedSec).toFixed(1)));
                 }
-              } else if (eventType === 'stage') {
-                if (payload?.stage === 'triage' && payload?.route) {
-                  setRoute(payload.route);
-                }
-              } else if (eventType === 'done') {
-                const d = payload;
-                if (d.answer) setAnswer(d.answer);
-                if (d.route) setRoute(d.route);
-                if (d.cached !== undefined) setCached(d.cached);
-                const latency = d.latencyMs ?? d.latency_ms;
-                if (latency !== undefined) setLatencyMs(latency);
-
-                if (d.sources && Array.isArray(d.sources)) {
-                  const normSources = d.sources.map((s: any, idx: number) => ({
-                    chunkId: s.chunkId ?? s.node_id ?? s.chunk_id ?? idx,
-                    documentId: s.documentId ?? s.doc_id ?? s.document_id ?? 'unknown',
-                    text: s.text ?? '',
-                    score: s.score ?? 0,
-                    position: s.position ?? idx,
-                    rerankScore: s.rerankScore ?? s.rerank_score,
-                    groundingScore: s.groundingScore ?? s.grounding_score,
-                    lowGroundingFlag: s.lowGroundingFlag ?? s.low_grounding_flag ?? false,
-                  }));
-                  setSources(normSources);
-                }
-
-                if (d.timings && Array.isArray(d.timings)) {
-                  const normTimings = d.timings.map((t: any) => ({
-                    stage: t.stage ?? 'stage',
-                    durationMs: t.durationMs ?? t.duration_ms ?? 0,
-                  }));
-                  setTimings(normTimings);
-                }
-
-                const graph = d.graphPath ?? d.graph_path;
-                if (graph) {
-                  const normGraph = {
-                    nodes: (graph.nodes || []).map((n: any, idx: number) => ({
-                      nodeId: n.nodeId ?? n.node_id ?? n.id ?? idx,
-                      name: n.name ?? '',
-                      label: n.label ?? 'Entity',
-                      properties: n.properties ?? {},
-                    })),
-                    edges: (graph.edges || []).map((e: any) => ({
-                      sourceId: e.sourceId ?? e.source_id,
-                      targetId: e.targetId ?? e.target_id,
-                      relationType: e.relationType ?? e.relation_type ?? 'RELATION',
-                    })),
-                  };
-                  onGraphUpdate(normGraph);
-                }
+              } else if (evt.event === 'stage') {
+                if (evt.data.route) setRoute(evt.data.route);
+              } else if (evt.event === 'error') {
+                setStreamError(evt.data.detail);
+              } else if (evt.event === 'done') {
+                const d = evt.data;
+                setAnswer(d.answer);
+                setRoute(d.route);
+                setCached(d.cached);
+                setLatencyMs(d.latencyMs);
+                setSources(d.sources);
+                setTimings(d.timings);
+                setDegraded(d.degraded);
+                setLowGrounding(d.lowGrounding);
+                if (d.graphPath) onGraphUpdate(d.graphPath);
               }
             } catch (parseErr) {
               console.warn('Error parsing SSE event chunk:', parseErr, jsonStr);
@@ -260,6 +228,24 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 {cached ? '⚡ TIER-1 CACHE HIT' : 'CACHE MISS'}
               </div>
             )}
+
+            {degraded && (
+              <div
+                className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-950/60 text-amber-400 border border-amber-800/40"
+                title="The primary model was unavailable; this answer came from a fallback model or the closest pre-computed FAQ answer."
+              >
+                DEGRADED · FALLBACK ANSWER
+              </div>
+            )}
+
+            {lowGrounding && (
+              <div
+                className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-rose-950/60 text-rose-400 border border-rose-800/40"
+                title="No retrieved evidence passed the relevance guardrail, so this answer is not grounded in your documents."
+              >
+                LOW GROUNDING
+              </div>
+            )}
           </div>
 
           {/* Dynamic Token Velocity Speedometer */}
@@ -292,6 +278,13 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
           )}
         </div>
 
+        {streamError && (
+          <div className="flex items-start space-x-1.5 text-[11px] text-amber-400 bg-amber-950/30 border border-amber-800/40 rounded-md px-2.5 py-1.5">
+            <ShieldAlert className="w-3.5 h-3.5 mt-px shrink-0" />
+            <span>{streamError}</span>
+          </div>
+        )}
+
         {answer ? (
           <div className="prose prose-invert max-w-none text-sm leading-relaxed text-gray-200 font-sans whitespace-pre-wrap">
             {answer}
@@ -320,10 +313,12 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
               <FileText className="w-3.5 h-3.5 text-cyan-400" />
               <span>Grounded Evidence ({sources.length} chunks)</span>
             </div>
-            <span className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
-              <ShieldCheck className="w-3 h-3" />
-              <span>Jev Guardrail Verified</span>
-            </span>
+            {lowGrounding ? null : (
+              <span className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
+                <ShieldCheck className="w-3 h-3" />
+                <span>Jev Guardrail Verified</span>
+              </span>
+            )}
           </div>
 
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -342,8 +337,10 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                       ) : (
                         <ChevronRight className="w-3 h-3 text-gray-500" />
                       )}
-                      <span className="text-cyan-400 font-medium">[Chunk {chunk.position}]</span>
-                      <span className="text-gray-500">Doc: {chunk.documentId}</span>
+                      <span className="text-cyan-400 font-medium">[Chunk {idx}]</span>
+                      <span className="text-gray-500">
+                        Doc: {chunk.documentId} · #{chunk.position}
+                      </span>
                     </div>
                     <span className="text-emerald-400">Score: {chunk.score.toFixed(3)}</span>
                   </div>

@@ -1,6 +1,20 @@
 import logging
+import os
 import re
 from pathlib import Path
+
+import structlog
+
+# Matches common API-key prefixes, bearer tokens, token query params, and URI credentials
+# (including password-only forms such as redis://:secret@host).
+REDACT_PATTERN = re.compile(
+    r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+"
+    r"|token=[a-zA-Z0-9_.-]+|://[^:/@\s]*:[^@\s]+@)"
+)
+
+_ENV_KEY_PATTERN = re.compile(
+    r"(TYPESAFE_API_KEY|GROQ_API_KEY|GEMINI_API_KEY|REDIS_URL|ADMIN_API_KEY)\s*[:=]\s*([^\s`]+)"
+)
 
 
 class SecretStr:
@@ -18,6 +32,10 @@ class SecretStr:
 
     def __repr__(self) -> str:
         return f"SecretStr('{self._mask()}')"
+
+    def __bool__(self) -> bool:
+        """Truthy only when a non-empty secret is present."""
+        return bool(self._value)
 
     def get_secret_value(self) -> str:
         """Returns the actual unmasked secret string."""
@@ -37,84 +55,111 @@ class SecretStr:
         return "[REDACTED]"
 
 
-class RedactingFilter(logging.Filter):
-    """
-    A logging filter that scans log records and redacts patterns matching API
-    key prefixes (sk-, gsk_, AIza, Bearer, token=) using regex substitution.
-    """
-
-    # Matches common token patterns and URI credentials
-    REDACT_PATTERN = re.compile(
-        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+|://[^:]+:[^@]+@)"
-    )
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = self.REDACT_PATTERN.sub("[REDACTED]", record.msg)
-
-        if record.args:
-            new_args: list[object] = []
-            for arg in record.args:
-                if isinstance(arg, str):
-                    new_args.append(self.REDACT_PATTERN.sub("[REDACTED]", arg))
-                else:
-                    new_args.append(arg)
-            record.args = tuple(new_args)
-
-        return True
-
-
-def migrate_apikeys_to_dotenv(apikeys_path: Path, dotenv_path: Path) -> bool:
-    """
-    Reads apikeys.md, extracts lines matching known key patterns,
-    writes them to .env file, sets file permissions to 0o600,
-    and deletes the apikeys.md file.
-
-    Returns:
-        bool: True if migration occurred, False otherwise.
-    """
-    if not apikeys_path.exists():
-        return False
-
-    content = apikeys_path.read_text(encoding="utf-8")
-
-    # Extract keys and their values
-    pattern = re.compile(
-        r"(TYPESAFE_API_KEY|GROQ_API_KEY|GEMINI_API_KEY|REDIS_URL)\s*[:=]\s*([^\s`]+)"
-    )
-    matches = pattern.findall(content)
-
-    if not matches:
-        # Still delete the file if it exists but no matches found?
-        # Specification says "extracts... writes... sets permissions... and deletes"
-        # We assume if the file exists we attempt migration.
-        apikeys_path.unlink()
-        return True
-
-    env_lines = []
-    for k, v in matches:
-        env_lines.append(f"{k}={v}")
-
-    # Write or append to dotenv
-    with dotenv_path.open("a", encoding="utf-8") as f:
-        f.write("\n" + "\n".join(env_lines) + "\n")
-
-    # Set permissions to 0o600
-    dotenv_path.chmod(0o600)
-
-    # Delete the old file
-    apikeys_path.unlink()
-
-    return True
-
-
 def sanitize_error_detail(detail: str) -> str:
     """
     Strips potential auth tokens/headers from error message strings.
     """
     if not detail:
         return detail
-    pattern = re.compile(
-        r"(?:sk-[a-zA-Z0-9_-]+|gsk_[a-zA-Z0-9_-]+|AIza[a-zA-Z0-9_-]+|Bearer\s+[a-zA-Z0-9_.-]+|token=[a-zA-Z0-9_.-]+|://[^:]+:[^@]+@)"
+    return REDACT_PATTERN.sub("[REDACTED]", detail)
+
+
+class RedactingFilter(logging.Filter):
+    """
+    A logging filter that scans log records and redacts patterns matching API
+    key prefixes (sk-, gsk_, AIza, Bearer, token=) and URI credentials.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = sanitize_error_detail(record.msg)
+
+        if record.args and isinstance(record.args, tuple):
+            record.args = tuple(
+                sanitize_error_detail(arg) if isinstance(arg, str) else arg for arg in record.args
+            )
+
+        return True
+
+
+class RedactingFormatter(logging.Formatter):
+    """Formatter that redacts secrets from the fully rendered line, including tracebacks."""
+
+    def __init__(
+        self,
+        fmt: str | None = "%(levelname)s - %(asctime)s - %(name)s - %(module)s - %(message)s",
+        datefmt: str | None = None,
+    ) -> None:
+        super().__init__(fmt=fmt, datefmt=datefmt)
+
+    def format(self, record: logging.LogRecord) -> str:
+        return sanitize_error_detail(super().format(record))
+
+
+def configure_structlog() -> None:
+    """Route structlog through stdlib logging so stdlib handlers and redaction apply to it."""
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.filter_by_level,
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.KeyValueRenderer(key_order=["event"]),
+        ],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
     )
-    return pattern.sub("[REDACTED]", detail)
+
+
+def configure_logging(level: int = logging.INFO) -> None:
+    """Install redacting stdlib logging plus structlog routing for CLI entry points.
+
+    The web app configures stdlib handlers through Litestar's LoggingConfig instead
+    (see ``app.py``) and only calls :func:`configure_structlog`.
+    """
+    root = logging.getLogger()
+    if not any(isinstance(h.formatter, RedactingFormatter) for h in root.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(RedactingFormatter())
+        handler.addFilter(RedactingFilter())
+        root.addHandler(handler)
+    root.setLevel(level)
+    configure_structlog()
+
+
+def migrate_apikeys_to_dotenv(apikeys_path: Path, dotenv_path: Path) -> bool:
+    """
+    Reads apikeys.md, extracts lines matching known key patterns, appends any keys
+    not already present to the .env file (created with 0o600 permissions), and
+    deletes apikeys.md.
+
+    Returns:
+        bool: True if migration occurred, False if there was nothing to migrate.
+        apikeys.md is left untouched when no keys are recognized.
+    """
+    if not apikeys_path.exists():
+        return False
+
+    matches = _ENV_KEY_PATTERN.findall(apikeys_path.read_text(encoding="utf-8"))
+    if not matches:
+        return False
+
+    existing_keys: set[str] = set()
+    if dotenv_path.exists():
+        for line in dotenv_path.read_text(encoding="utf-8").splitlines():
+            key, sep, _ = line.partition("=")
+            if sep:
+                existing_keys.add(key.strip())
+
+    env_lines = [f"{k}={v}" for k, v in matches if k not in existing_keys]
+
+    # Create with owner-only permissions from the start rather than chmod-after-write
+    fd = os.open(dotenv_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as f:
+        if env_lines:
+            f.write("\n" + "\n".join(env_lines) + "\n")
+    dotenv_path.chmod(0o600)
+
+    apikeys_path.unlink()
+    return True

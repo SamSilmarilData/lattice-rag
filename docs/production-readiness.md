@@ -37,7 +37,7 @@ This guide provides operational guidance for deploying, maintaining, monitoring,
 
 ## 2. Health Monitoring & Container Probes
 
-The service exposes an unauthenticated health probe at `/health`:
+The service exposes an unauthenticated health probe at `/health`. `status` is `degraded` when the database or Redis is unavailable, or when the server booted without `TYPESAFE_API_KEY` (hermetic mode, `typesafeConfigured: false`). The container image also declares a Docker `HEALTHCHECK` against this endpoint.
 
 ```bash
 curl -f http://localhost:8000/health
@@ -144,22 +144,27 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
    - `__str__` and `__repr__` automatically redact the value (`sk-****1234` or `[REDACTED]`).
    - Plaintext keys can only be retrieved by calling `.get_secret_value()`.
 
-2. **Streamed Log Redaction**:
-   - `RedactingFilter` scans all Python standard logging and `structlog` records before emission.
-   - Regex patterns automatically mask API keys (`sk-`, `gsk_`, `AIza`, `Bearer <token>`, and `://user:pass@host` database URIs).
+2. **Log Redaction**:
+   - `RedactingFormatter` redacts every rendered log line, tracebacks included. structlog is routed through stdlib logging so its events are covered too.
+   - The pattern masks API keys (`sk-`, `gsk_`, `AIza`), `Bearer <token>`, `token=` and URI credentials (`://user:pass@host`, `://:pass@host`).
 
 3. **RFC 9457 Problem Details Error Shielding**:
    - Production error handlers redact internal tracebacks, OS file paths, and database errors into client-safe problem JSON objects:
      ```json
      {
-       "type": "https://lattice-rag.io/errors/internal-error",
+       "type": "https://api.lattice-rag.io/errors/internal",
        "title": "Internal Server Error",
        "status": 500,
-       "detail": "An internal error occurred while processing the request."
+       "detail": "An internal error occurred. Reference: 3f2c…",
+       "requestId": "3f2c…"
      }
      ```
+   - The sanitized exception is logged server-side under the same `requestId`.
 
-4. **Static Secret Scanning in CI/CD**:
+4. **Access Control**:
+   - Ingest, eval and benchmark require `X-Admin-Key` (`ADMIN_API_KEY`); query endpoints are rate-limited per client; request sizes are bounded. See `docs/security.md` §3.4.
+
+5. **Static Secret Scanning in CI/CD**:
    - Automated git test scans all tracked repository files to guarantee no accidental commits of `apikeys.md`, `.env`, or hardcoded API tokens.
 
 ---
@@ -171,32 +176,32 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
 - **RAM**: Allocate at least 1 GB (recommended: 2 GB) to provide comfortable headroom for concurrent FastEmbed embedding batches and graph traversals.
 
 ### 5.2 Horizontal Scaling
-- **Stateless Replicas**: The application code, routing, and synthesis stages are completely stateless.
-- **Shared Storage**: Mount `data/lattice_rag.db` over a shared block volume with read-only replicas, or use an active-passive setup with primary write node and read replicas.
-- **External Redis Tier 2**: For multi-node deployments, set `REDIS_URL=redis://redis-cluster:6379/0` so that circuit breaker fallback caching is shared across all application instances.
+LatticeDB is an embedded, single-file database, so each process owns its own copy of the graph. Run **one** writable instance (the Cloud Run script pins `--max-instances 1`). Scaling out needs extra work that is not built in:
+- **Read replicas**: copy a seeded `lattice_rag.db` into each replica and route `/api/v1/ingest` to a single writer. Replicas only see new documents after the file is redistributed.
+- **Per-process state**: the Tier 1 semantic cache, the Groq circuit breaker and the rate-limit counters are in-memory per process.
+- **Shared FAQ store**: set `REDIS_URL=redis://redis-cluster:6379/0` so every instance serves the same Tier 2 fallback answers.
 
 ---
 
 ## 6. Continuous Integration & Quality Gates Pipeline
 
-`lattice-rag` enforces strict multi-stage quality gates on every push and pull request via GitHub Actions (`.github/workflows/eval-gate.yml`):
+`lattice-rag` runs quality gates on every push and pull request via GitHub Actions (`.github/workflows/eval-gate.yml`):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="diagrams/d10-cicd-pipeline-light.svg">
-  <img alt="Strict CI/CD Quality Gates & Release Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
+  <img alt="CI Quality Gates & Deploy Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
 </picture>
 
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d10-cicd-pipeline-dark.html">Dark Specimen</a> | <a href="diagrams/d10-cicd-pipeline-light.html">Light Specimen</a></sub>
 
 ### Gate Execution Sequence:
-1. **Parallel Quality Gates (Fail-Fast Verification)**:
-   - **Gate 01 (Ruff Lint & Format)**: Fast AST linting (`ruff check --select E,F,W,I,N,UP,B,A,C4,SIM`).
-   - **Gate 02 (Mypy Strict Typing)**: Enforces complete type safety with zero missing annotations across all modules (`mypy --strict src/`).
-   - **Gate 03 (Zero-Leakage Security Scan)**: Scans for credential exposures, verifies `SecretStr` masking, and confirms `.env` / `apikeys.md` git blocklists (`test_security_audit.py`).
-   - **Gate 04 (Hermetic Pytest Matrix)**: Executes 130+ unit tests under mocked environments with zero external network dependencies.
-2. **Golden Dataset Evaluation Gate**:
-   - Triggers `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json`.
-   - Validates multi-hop retrieval accuracy, groundedness scores, and verifies the Sub-Second SLA ($p95 < 1,000$ms).
-3. **Hermetic Docker Release**:
-   - Compiles and publishes signed container images to GitHub Container Registry (`ghcr.io/lattice-rag:latest`) upon all gates passing.
+1. **Parallel Quality Gates** (all actions pinned to commit SHAs):
+   - **`lint`**: `ruff check src tests` (rules `E,F,W,I,N,UP,B,A,C4,SIM`), `ruff format --check src tests` (ruff version pinned in `pyproject.toml`), and `mypy src` in strict mode.
+   - **`unit-tests`**: the hermetic `pytest tests/unit/` suite with mock keys and no network, including the security audit (`test_security_audit.py`: secret scan of tracked files, `SecretStr` masking, DTO field audit, log redaction, error shielding).
+   - **`frontend`**: `npm ci && npm run build` (`tsc -b` type-checks the studio against `types.ts`, then Vite builds it).
+2. **Golden Dataset Evaluation Gate** (after all three gates pass; skipped for fork PRs or without `TYPESAFE_API_KEY`):
+   - Runs `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json` on an ephemeral database.
+   - Fails on a mean regression above 0.03, any query's faithfulness below 0.50, or a Noul contradiction veto. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
+
+Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

@@ -131,11 +131,7 @@ class EntityExtractor:
                 results.append(entities)
         else:
             # Classic GLiNER
-            is_mock = (
-                hasattr(self._model, "_mock_return_value")
-                or self._model.__class__.__name__ == "MagicMock"
-            )
-            if not is_mock and hasattr(self._model, "batch_predict_entities"):
+            if hasattr(self._model, "batch_predict_entities"):
                 try:
                     batch_preds = self._model.batch_predict_entities(texts, labels=labels)
                 except Exception:
@@ -188,8 +184,7 @@ class EntityExtractor:
             present = [
                 e
                 for e in entities
-                if re.search(r"\b" + re.escape(e.name) + r"\b", sentence, re.IGNORECASE)
-                or e.name in sentence
+                if re.search(r"(?<!\w)" + re.escape(e.name) + r"(?!\w)", sentence, re.IGNORECASE)
             ]
             for i, ent1 in enumerate(present):
                 for ent2 in present[i + 1 :]:

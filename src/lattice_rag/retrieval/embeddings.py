@@ -18,7 +18,7 @@ class RerankResult:
     text: str
 
 
-_ONNX_CACHE: dict[tuple[str, str, int], tuple[Any, Any]] = {}
+_ONNX_CACHE: dict[tuple[str, str, int, str | None], tuple[Any, Any]] = {}
 
 
 class ONNXReranker:
@@ -29,16 +29,18 @@ class ONNXReranker:
         repo_id: str = "onnx-community/bge-reranker-v2-m3-ONNX",
         filename: str = "onnx/model_int8.onnx",
         max_length: int = 160,
+        revision: str | None = None,
     ) -> None:
         self.repo_id = repo_id
         self.filename = filename
         self.max_length = max_length
+        self.revision = revision
         self._session: Any = None
         self._tokenizer: Any = None
 
     def _ensure_loaded(self) -> None:
         if self._session is None or self._tokenizer is None:
-            cache_key = (self.repo_id, self.filename, self.max_length)
+            cache_key = (self.repo_id, self.filename, self.max_length, self.revision)
             if cache_key in _ONNX_CACHE:
                 self._session, self._tokenizer = _ONNX_CACHE[cache_key]
                 return
@@ -49,14 +51,20 @@ class ONNXReranker:
             from huggingface_hub import hf_hub_download
             from tokenizers import Tokenizer
 
-            logger.info("Loading INT8 ONNX reranker from %s", self.repo_id)
+            logger.info(
+                "Loading INT8 ONNX reranker from %s (revision=%s)",
+                self.repo_id,
+                self.revision or "latest",
+            )
             model_path = hf_hub_download(
                 repo_id=self.repo_id,
                 filename=self.filename,
+                revision=self.revision,
             )
             tok_path = hf_hub_download(
                 repo_id=self.repo_id,
                 filename="tokenizer.json",
+                revision=self.revision,
             )
             opts = ort.SessionOptions()
             cpu_count = os.cpu_count() or 4
@@ -106,12 +114,15 @@ class EmbeddingService:
         reranker_model: str = "BAAI/bge-reranker-v2-m3",
         embedder: Any = None,
         reranker: Any = None,
+        onnx_reranker_repo: str = "onnx-community/bge-reranker-v2-m3-ONNX",
+        onnx_reranker_revision: str | None = None,
     ):
         """Initialize the embedding service with lazy-loaded models.
 
         Args:
             embed_model: Name of the text embedding model.
-            reranker_model: Name of the cross-encoder model.
+            reranker_model: Name of the cross-encoder model. bge-reranker-v2-m3 is served from
+                its INT8 ONNX export (``onnx_reranker_repo``) instead of FastEmbed.
             embedder: Optional pre-initialized or mock embedder.
             reranker: Optional pre-initialized or mock reranker.
         """
@@ -119,6 +130,8 @@ class EmbeddingService:
         self.reranker_model_name = reranker_model
         self._embed_model = embedder
         self._reranker_model = reranker
+        self.onnx_reranker_repo = onnx_reranker_repo
+        self.onnx_reranker_revision = onnx_reranker_revision
 
     @property
     def embedder(self) -> Any:
@@ -135,8 +148,14 @@ class EmbeddingService:
         """Lazy-load the cross-encoder reranking model."""
         if self._reranker_model is None:
             if "v2-m3" in self.reranker_model_name.lower():
-                logger.info("Using INT8 ONNX reranker for %s", self.reranker_model_name)
-                self._reranker_model = ONNXReranker()
+                logger.info(
+                    "Using INT8 ONNX export %s for %s",
+                    self.onnx_reranker_repo,
+                    self.reranker_model_name,
+                )
+                self._reranker_model = ONNXReranker(
+                    repo_id=self.onnx_reranker_repo, revision=self.onnx_reranker_revision
+                )
             else:
                 from fastembed.rerank.cross_encoder import TextCrossEncoder
 

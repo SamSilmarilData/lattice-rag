@@ -109,7 +109,7 @@
   <main class="frame">
     <p class="eyebrow">Enterprise Fault Tolerance &amp; Reliability</p>
     <h1>3-Tier Resilient Circuit Breaker Cascade</h1>
-    <p class="lead">Finite state machine coordination (pybreaker) combined with automatic cascading fallback from high-throughput GroqCloud Llama 3.3 to Gemini 3.8 Flash, culminating in offline Redis FAQ hash lookups.</p>
+    <p class="lead">Finite state machine coordination (pybreaker) combined with automatic cascading fallback from GroqCloud to Gemini 3.8 Flash, culminating in offline Redis FAQ hash lookups. One breaker serves both buffered and streaming paths.</p>
 
     <div class="diagram-card">
       <svg role="img" viewBox="0 0 960 520" width="960" height="520" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d6-light-title d6-light-desc">
@@ -157,7 +157,7 @@
           <!-- 1. CLOSED -> OPEN -->
           <line x1="280" y1="97" x2="372" y2="97" stroke="#be123c" stroke-width="2" marker-end="url(#d6-light-arr-coral)"/>
           <rect x="295" y="87" width="64" height="20" rx="4" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
-          <text x="327" y="101" fill="#be123c" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="600" text-anchor="middle">3 fails / 429</text>
+          <text x="327" y="101" fill="#be123c" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="600" text-anchor="middle">3 failures</text>
 
           <!-- 2. OPEN -> HALF-OPEN -->
           <line x1="600" y1="97" x2="692" y2="97" stroke="#4338ca" stroke-width="2" marker-end="url(#d6-light-arr-indigo)"/>
@@ -264,12 +264,12 @@
 
           <line x1="74" y1="332" x2="260" y2="332" stroke="#e2e8f0" stroke-width="1"/>
 
-          <text x="74" y="352" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11.5" font-weight="500">1. Inspects breaker status</text>
-          <text x="74" y="372" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• If Closed → TIER 1 Groq</text>
-          <text x="74" y="390" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• If Open → Bypasses to TIER 2</text>
+          <text x="74" y="352" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11.5" font-weight="500">1. One breaker, both paths</text>
+          <text x="74" y="372" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• Closed → TIER 1 Groq</text>
+          <text x="74" y="390" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• Open → skips to TIER 2</text>
           <text x="74" y="415" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11.5" font-weight="500">2. Special Intent Handling</text>
           <text x="74" y="435" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• massive_context → Gemini direct</text>
-          <text x="74" y="465" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="10">Transparent SSE Streaming</text>
+          <text x="74" y="465" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="10">No cascade after 1st token</text>
         </g>
 
         <!-- NODE 5: TIER 1 GROQCLOUD PRIMARY (FOCAL ACCENT 2) -->
@@ -278,9 +278,9 @@
           <rect x="374" y="257" width="100" height="18" rx="4" fill="rgba(14, 116, 144, 0.12)"/>
           <text x="424" y="270" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9" font-weight="700" text-anchor="middle">TIER 1 • PRIMARY</text>
 
-          <text x="374" y="296" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">GroqCloud Llama 3.3</text>
-          <text x="374" y="314" fill="#475569" font-family="'Inter', sans-serif" font-size="11">llama-3.3-70b-versatile</text>
-          <text x="374" y="330" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="10">200+ tok/s • ~224ms TTFT</text>
+          <text x="374" y="296" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">GroqCloud (primary)</text>
+          <text x="374" y="314" fill="#475569" font-family="'Inter', sans-serif" font-size="11">GROQ_MODEL · qwen3.8-27b</text>
+          <text x="374" y="330" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="10">breaker: fail_max 3 · 30s</text>
         </g>
 
         <!-- NODE 6: TIER 2 GEMINI FALLBACK -->
@@ -291,7 +291,7 @@
 
           <text x="374" y="441" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">Google Gemini 3.8 Flash</text>
           <text x="374" y="459" fill="#475569" font-family="'Inter', sans-serif" font-size="11">Massive context &amp; API failover</text>
-          <text x="374" y="475" fill="#64748b" font-family="'Geist Mono', monospace" font-size="10">1M Token Window • ~850ms</text>
+          <text x="374" y="475" fill="#64748b" font-family="'Geist Mono', monospace" font-size="10">answers marked degraded</text>
         </g>
 
         <!-- NODE 7: CLIENT SSE STREAM (DESTINATION) -->

@@ -5,27 +5,26 @@ import logging
 from granian import Granian
 from granian.constants import Interfaces
 
-from lattice_rag.config import get_config
+from lattice_rag.config import load_config
 
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    """Start the high-throughput Granian Rust ASGI server runner."""
-    try:
-        config = get_config()
-        host = config.host
-        port = config.port
-    except Exception as e:
-        logger.warning("Could not read configuration, falling back to 0.0.0.0:8000: %s", e)
-        host = "0.0.0.0"
-        port = 8000
+def main(host: str | None = None, port: int | None = None) -> None:
+    """Start the high-throughput Granian Rust ASGI server runner.
 
-    print(f"🚀 Starting lattice-rag Granian ASGI server on http://{host}:{port}")
+    Explicit host/port (from the CLI) win over HOST/PORT from the environment. A missing
+    TYPESAFE_API_KEY does not stop the server: the app boots in degraded hermetic mode.
+    """
+    config = load_config(require_typesafe=False)
+    bind_host = host or config.host
+    bind_port = port or config.port
+
+    print(f"🚀 Starting lattice-rag Granian ASGI server on http://{bind_host}:{bind_port}")
     server = Granian(
         "lattice_rag.app:create_app",
-        address=host,
-        port=port,
+        address=bind_host,
+        port=bind_port,
         interface=Interfaces.ASGI,
         factory=True,
         workers=1,

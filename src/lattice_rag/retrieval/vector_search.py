@@ -24,12 +24,16 @@ class HybridSearcher:
         self.store = store
         self.embedding_service = embedding_service
 
-    async def search(self, query: str, top_k: int = 10) -> list[SearchResult]:
+    async def search(
+        self, query: str, top_k: int = 10, query_embedding: Any | None = None
+    ) -> list[SearchResult]:
         """Perform a hybrid search combining vector search and BM25 using RRF.
 
         Args:
             query: The search query.
             top_k: Number of final fused results to return.
+            query_embedding: Embedding already computed by the caller (e.g. triage); when
+                given, the query is not embedded a second time.
 
         Returns:
             List of SearchResult deduplicated by node_id.
@@ -37,11 +41,14 @@ class HybridSearcher:
         if not query or not query.strip():
             return []
 
-        # Concurrently execute CPU query embedding and BM25 full-text search
-        query_embedding, bm25_results = await asyncio.gather(
-            asyncio.to_thread(self.embedding_service.embed_query, query),
-            asyncio.to_thread(self.store.bm25_search, query, top_k=top_k * 2),
-        )
+        if query_embedding is None:
+            # Concurrently execute CPU query embedding and BM25 full-text search
+            query_embedding, bm25_results = await asyncio.gather(
+                asyncio.to_thread(self.embedding_service.embed_query, query),
+                asyncio.to_thread(self.store.bm25_search, query, top_k=top_k * 2),
+            )
+        else:
+            bm25_results = await asyncio.to_thread(self.store.bm25_search, query, top_k=top_k * 2)
 
         # Run vector search with ready embedding
         vector_results = await asyncio.to_thread(
@@ -49,18 +56,18 @@ class HybridSearcher:
         )
 
         # Merge using Reciprocal Rank Fusion (RRF)
-        # score = sum(1 / (k + rank)) for each document across both result lists, k=60
+        # score = sum(1 / (k + rank)) over both result lists, with 1-based ranks and k=60
         k = 60
         fused_scores: dict[int, float] = {}
         node_map: dict[int, SearchResult] = {}
 
-        for rank, res in enumerate(vector_results):
+        for rank, res in enumerate(vector_results, start=1):
             node_id = res.node_id
             fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
             if node_id not in node_map:
                 node_map[node_id] = res
 
-        for rank, res in enumerate(bm25_results):
+        for rank, res in enumerate(bm25_results, start=1):
             node_id = res.node_id
             fused_scores[node_id] = fused_scores.get(node_id, 0.0) + (1.0 / (k + rank))
             if node_id not in node_map:

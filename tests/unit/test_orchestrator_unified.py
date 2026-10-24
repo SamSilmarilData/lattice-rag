@@ -1,11 +1,12 @@
 """Unit tests verifying unified behavior between run() and stream_query() in RAGOrchestrator."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
-from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
@@ -22,27 +23,24 @@ def mock_orchestrator_components():
 
     mock_fb_cache = MagicMock()
     mock_fb_cache.find_closest_fallback = AsyncMock(return_value="Cached FAQ")
-    mock_fb_cache.circuit_status = "closed"
-    async def _call_breaker(fn, *args, **kwargs):
-        res = fn(*args, **kwargs)
-        if hasattr(res, "__await__"):
-            return await res
-        return res
-    mock_fb_cache.call_with_breaker = AsyncMock(side_effect=_call_breaker)
 
     mock_pipeline = MagicMock()
-    mock_pipeline.execute = AsyncMock(return_value=MagicMock(
-        final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
-        graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
-        timings={"stage1_search": 1.0},
-        low_grounding=False,
-    ))
+    mock_pipeline.execute = AsyncMock(
+        return_value=MagicMock(
+            final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
+            graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
+            timings={"stage1_search": 1.0},
+            low_grounding=False,
+        )
+    )
 
     mock_groq = MagicMock()
     mock_groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
+
     async def _groq_stream(q, c, g):
         for tok in ["Grounded", " ", "answer", " ", "from", " ", "Groq."]:
             yield tok
+
     mock_groq.stream = _groq_stream
 
     mock_gemini = MagicMock()
@@ -69,7 +67,9 @@ def mock_orchestrator_components():
 @pytest.mark.asyncio
 async def test_unified_orchestrator_chitchat_parity(mock_orchestrator_components):
     c = mock_orchestrator_components
-    c["router"].route_query = AsyncMock(return_value=RouteDecision(route="chitchat", confidence=0.99))
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="chitchat", confidence=0.99)
+    )
 
     orchestrator = RAGOrchestrator(
         router=c["router"],
@@ -157,3 +157,107 @@ async def test_unified_orchestrator_standard_query_parity(mock_orchestrator_comp
     assert tokens == state.answer
     assert done_evt["data"]["answer"] == state.answer
     assert done_evt["data"]["route"] == state.route
+
+
+@pytest.mark.asyncio
+async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestrator_components):
+    """When Groq is down, both paths report degraded=True and neither caches the answer."""
+    c = mock_orchestrator_components
+    c["groq"].synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
+
+    async def _groq_stream_fail(q, ch, g):
+        raise RuntimeError("Groq 503")
+        yield "never"  # pragma: no cover
+
+    async def _gemini_stream(q, ch, g):
+        yield "Gemini answer."
+
+    c["groq"].stream = _groq_stream_fail
+    c["gemini"].stream = _gemini_stream
+
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    state = await orchestrator.run("Explain LatticeDB")
+    stream_events = [evt async for evt in orchestrator.stream_query("Explain LatticeDB")]
+    done_evt = [e for e in stream_events if e["event"] == "done"][0]
+
+    assert state.degraded is True
+    assert done_evt["data"]["degraded"] is True
+    assert done_evt["data"]["answer"] == state.answer == "Gemini answer."
+    c["semantic_cache"].put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unified_orchestrator_low_grounding_is_reported_and_not_cached(
+    mock_orchestrator_components,
+):
+    """Answers built on evidence the guardrail rejected are flagged and never cached."""
+    c = mock_orchestrator_components
+    c["pipeline"].execute = AsyncMock(
+        return_value=MagicMock(
+            final_chunks=[],
+            graph_context=SubgraphResult(nodes=[], edges=[]),
+            timings={},
+            low_grounding=True,
+        )
+    )
+
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    state = await orchestrator.run("Unanswerable question")
+    stream_events = [evt async for evt in orchestrator.stream_query("Unanswerable question")]
+    done_evt = [e for e in stream_events if e["event"] == "done"][0]
+
+    assert state.low_grounding is True
+    assert done_evt["data"]["low_grounding"] is True
+    c["semantic_cache"].put.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_massive_context_retrieves_more_evidence_in_both_paths(mock_orchestrator_components):
+    from lattice_rag.orchestration.graph import MASSIVE_CONTEXT_TOP_K
+
+    c = mock_orchestrator_components
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="massive_context", confidence=0.9)
+    )
+    c["gemini"].synthesize = AsyncMock(return_value="Summary.")
+
+    async def _gemini_stream(q, ch, g):
+        yield "Summary."
+
+    c["gemini"].stream = _gemini_stream
+    orchestrator = RAGOrchestrator(
+        router=c["router"],
+        semantic_cache=c["semantic_cache"],
+        fallback_cache=c["fallback_cache"],
+        retrieval_pipeline=c["pipeline"],
+        groq=c["groq"],
+        gemini=c["gemini"],
+        chitchat=c["chitchat"],
+        embedding_service=c["embed_svc"],
+    )
+
+    await orchestrator.run("Summarize everything about caching")
+    _ = [e async for e in orchestrator.stream_query("Summarize everything about caching")]
+
+    for call in c["pipeline"].execute.await_args_list:
+        assert call.kwargs["top_k"] == MASSIVE_CONTEXT_TOP_K

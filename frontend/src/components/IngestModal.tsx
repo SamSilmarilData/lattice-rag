@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, UploadCloud, CheckCircle2, Sparkles } from 'lucide-react';
 import { IngestResponse } from '../types';
+import { adminFetch } from '../adminKey';
 
 interface IngestModalProps {
   isOpen: boolean;
@@ -17,7 +18,7 @@ const PRESET_DOCUMENTS = [
   {
     id: 'doc_fastembed_reranking',
     title: 'FastEmbed Quantized Embeddings and Cross-Encoder Reranking',
-    text: `FastEmbed provides CPU-quantized dense and sparse vector generation without requiring GPU hardware. The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity. For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding. During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context.`,
+    text: `FastEmbed provides CPU-quantized dense and sparse vector generation without requiring GPU hardware. The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity. For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding. The cross-encoder scores every Stage 1 candidate on its own chunk text; graph paths traversed in LatticeDB are linearized into triples formatted as 'Entity1 --[RELATION]--> Entity2' and passed to the answer-generation prompt as relational context.`,
   },
   {
     id: 'doc_gliner_extraction',
@@ -63,7 +64,7 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose, onIng
     setError(null);
 
     try {
-      const res = await fetch('/api/v1/ingest', {
+      const res = await adminFetch('/api/v1/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -73,6 +74,9 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose, onIng
         }),
       });
 
+      if (res.status === 409) {
+        throw new Error(`Document ID "${docId.trim()}" already exists. Choose a different ID.`);
+      }
       if (!res.ok) {
         throw new Error(`Ingest failed with status ${res.status}: ${res.statusText}`);
       }

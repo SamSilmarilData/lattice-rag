@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from lattice_rag.orchestration.pool import get_process_pool
+from lattice_rag.orchestration.graph import RAGOrchestrator
 
-__all__ = ["get_process_pool"]
+__all__ = ["RAGOrchestrator"]

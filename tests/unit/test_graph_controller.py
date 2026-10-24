@@ -1,9 +1,11 @@
 """Unit tests for GraphController and LatticeStore.get_subgraph_snapshot."""
+
 from __future__ import annotations
 
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 from litestar import Litestar
@@ -57,6 +59,16 @@ async def test_get_subgraph_endpoint(mock_graph_app):
         mock_store.get_subgraph_snapshot.assert_called_once_with(limit=25)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -5, 501])
+async def test_get_subgraph_rejects_out_of_range_limit(mock_graph_app, limit):
+    app, mock_store = mock_graph_app
+    async with AsyncTestClient(app) as client:
+        response = await client.get(f"/api/v1/graph/subgraph?limit={limit}")
+        assert response.status_code == 400
+        mock_store.get_subgraph_snapshot.assert_not_called()
+
+
 def test_lattice_store_get_subgraph_snapshot():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test_snapshot.db"
@@ -64,14 +76,22 @@ def test_lattice_store_get_subgraph_snapshot():
 
         # Ingest a document and some entities with relations
         chunks = [
-            ChunkData(text="LatticeDB is an embedded database.", embedding=np.zeros(384, dtype=np.float32), position=0)
+            ChunkData(
+                text="LatticeDB is an embedded database.",
+                embedding=np.zeros(384, dtype=np.float32),
+                position=0,
+            )
         ]
         stats = store.ingest_document("doc1", "Doc 1", chunks)
         chunk_id = stats.chunk_ids[0]
 
         entities = [
-            EntityData(name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)),
-            EntityData(name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)),
+            EntityData(
+                name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)
+            ),
+            EntityData(
+                name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)
+            ),
         ]
         relations = [
             RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES"),

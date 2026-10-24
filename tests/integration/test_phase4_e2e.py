@@ -3,14 +3,15 @@
 Runs full ingestion and query flow through Litestar AsyncTestClient using real in-process
 LatticeDB, real FastEmbed embeddings, and live GroqCloud qwen/qwen3.8-27b generation.
 """
+
 from __future__ import annotations
 
-import os
+import contextlib
 from pathlib import Path
+
 import pytest
 from litestar import Litestar
 from litestar.di import Provide
-from litestar.params import SkipValidation
 from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers import (
@@ -21,7 +22,7 @@ from lattice_rag.api.controllers import (
 )
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
-from lattice_rag.config import AppConfig, get_config
+from lattice_rag.config import get_config
 from lattice_rag.generation.chitchat import ChitchatHandler
 from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
@@ -40,7 +41,9 @@ async def live_app(tmp_path: Path):
     db_path = tmp_path / "live_e2e.db"
     store = LatticeStore(db_path)
 
-    embed_svc = EmbeddingService(embed_model="BAAI/bge-small-en-v1.5", reranker_model="BAAI/bge-reranker-v2-m3")
+    embed_svc = EmbeddingService(
+        embed_model="BAAI/bge-small-en-v1.5", reranker_model="BAAI/bge-reranker-v2-m3"
+    )
     extractor = EntityExtractor()
     router = QueryRouter()
     guardrail = ContextGuardrail(threshold=0.50)
@@ -96,26 +99,16 @@ async def live_app(tmp_path: Path):
 
     yield app
 
-    try:
+    with contextlib.suppress(Exception):
         await fb_cache.close()
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         await sem_cache.close()
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         await router.close()
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         await guardrail.close()
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         store.close()
-    except Exception:
-        pass
 
 
 @pytest.mark.integration
@@ -148,12 +141,18 @@ async def test_live_phase4_end_to_end_flow(live_app):
         assert ingest_data["chunkCount"] >= 1
 
         # 3. Live Query with Groq Synthesis
-        query_payload = {"query": "What search capabilities does LatticeDB unite in a single binary?"}
+        query_payload = {
+            "query": "What search capabilities does LatticeDB unite in a single binary?"
+        }
         query_resp = await client.post("/api/v1/query", json=query_payload)
-        assert query_resp.status_code == 201, f"Query failed with {query_resp.status_code}: {query_resp.text}"
+        assert query_resp.status_code == 201, (
+            f"Query failed with {query_resp.status_code}: {query_resp.text}"
+        )
         query_data = query_resp.json()
 
-        print(f"\n[Live Groq Generation Result]:\nRoute: {query_data['route']}\nAnswer: {query_data['answer']}")
+        print(
+            f"\n[Live Groq Generation Result]:\nRoute: {query_data['route']}\nAnswer: {query_data['answer']}"
+        )
         assert len(query_data["answer"]) > 10
         assert query_data["cached"] is False
         # Degraded is False when live Groq succeeds, True when firewall/sandbox trips circuit breaker

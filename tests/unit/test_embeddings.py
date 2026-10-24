@@ -1,12 +1,12 @@
 """Unit tests for EmbeddingService and ONNXReranker."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
-from lattice_rag.retrieval.embeddings import EmbeddingService, ONNXReranker, RerankResult
+from lattice_rag.retrieval.embeddings import EmbeddingService, ONNXReranker
 
 
 def test_embedding_service_with_injected_mocks():

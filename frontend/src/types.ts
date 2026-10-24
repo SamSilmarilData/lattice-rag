@@ -41,8 +41,6 @@ export interface StageTiming {
 
 export interface QueryRequest {
   query: string;
-  stream?: boolean;
-  filterTags?: string[];
 }
 
 export interface QueryResponse {
@@ -54,6 +52,7 @@ export interface QueryResponse {
   graphPath?: SubgraphDTO | null;
   timings: StageTiming[];
   degraded: boolean;
+  lowGrounding: boolean;
 }
 
 export interface IngestRequest {
@@ -105,22 +104,29 @@ export interface EvalRunResponse {
   results: EvalQueryResult[];
 }
 
+// SSE payloads of POST /api/v1/query/stream (mirror the Stream* DTOs in api/dtos.py)
+export interface StreamStage {
+  stage: string;
+  status?: string;
+  route?: string;
+  chunksCount?: number;
+}
+
+export interface StreamToken {
+  delta: string;
+}
+
+export type StreamDone = QueryResponse;
+
+export interface StreamError {
+  detail: string;
+}
+
 export type StreamEvent =
-  | { event: 'stage'; data: { stage: string; status: string; durationMs?: number } }
-  | { event: 'token'; data: { delta: string } }
-  | {
-      event: 'done';
-      data: {
-        answer: string;
-        route: string;
-        latencyMs: number;
-        sources?: SourceChunk[];
-        graphPath?: SubgraphDTO;
-        timings?: StageTiming[];
-        cached?: boolean;
-      };
-    }
-  | { event: 'error'; data: { detail: string } };
+  | { event: 'stage'; data: StreamStage }
+  | { event: 'token'; data: StreamToken }
+  | { event: 'done'; data: StreamDone }
+  | { event: 'error'; data: StreamError };
 
 export interface StageBenchmarkDTO {
   stage: string;

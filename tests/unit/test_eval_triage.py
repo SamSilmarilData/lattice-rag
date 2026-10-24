@@ -1,7 +1,9 @@
 """Hermetic unit tests for JevEvaluator and RAG Triad scoring."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from lattice_rag.api.dtos import EvalQueryResult

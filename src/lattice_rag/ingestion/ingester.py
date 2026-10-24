@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 _SENTENCE_SPLITTER = re.compile(r"(?<=[.!?])\s+")
 
 
+class DocumentExistsError(ValueError):
+    """Raised when ingesting a doc_id that is already stored (ingest is not an upsert)."""
+
+    def __init__(self, doc_id: str) -> None:
+        super().__init__(f"Document {doc_id!r} already exists")
+        self.doc_id = doc_id
+
+
 def chunk_text(text: str, target_size: int = 512, overlap: int = 64) -> list[str]:
     """Paragraph and sentence-aware chunking targeting ~512 chars with 64 overlap."""
     if not text or not text.strip():
@@ -89,6 +97,9 @@ class DocumentIngester:
         self.cache = cache
         self.target_chunk_size = target_chunk_size
         self.chunk_overlap = chunk_overlap
+        # Serializes the duplicate check with the write so concurrent ingests of one doc_id
+        # cannot both pass the check
+        self._write_lock = asyncio.Lock()
 
     async def ingest(
         self,
@@ -99,7 +110,14 @@ class DocumentIngester:
         target_chunk_size: int | None = None,
         chunk_overlap: int | None = None,
     ) -> IngestStats:
-        """Ingest a text document: chunk, embed, extract entities/relations, and commit to LatticeDB."""
+        """Ingest a text document: chunk, embed, extract entities/relations, and commit to LatticeDB.
+
+        Raises:
+            DocumentExistsError: if ``doc_id`` is already stored.
+        """
+        if await asyncio.to_thread(self.store.has_document, doc_id):
+            raise DocumentExistsError(doc_id)
+
         t_size = target_chunk_size or self.target_chunk_size
         t_overlap = chunk_overlap or self.chunk_overlap
 
@@ -116,14 +134,9 @@ class DocumentIngester:
         ]
 
         # 2. Extract entities in batch off the event loop
-        if hasattr(self.extractor, "extract_entities_batch"):
-            chunk_entities_list = await asyncio.to_thread(
-                self.extractor.extract_entities_batch, text_chunks
-            )
-        else:
-            chunk_entities_list = await asyncio.to_thread(
-                lambda: [self.extractor.extract_entities(t) for t in text_chunks]
-            )
+        chunk_entities_list = await asyncio.to_thread(
+            self.extractor.extract_entities_batch, text_chunks
+        )
 
         chunk_extractions: list[tuple[int, list[EntityData], list[RelationData]]] = []
         all_entity_names: set[str] = set()
@@ -157,68 +170,26 @@ class DocumentIngester:
             ]
             prepared_chunk_extractions.append((i, embedded_entities, triples))
 
-        # 4. Atomic single-transaction ingestion if supported
-        use_bundle = hasattr(type(self.store), "ingest_document_bundle") or (
-            "ingest_document_bundle" in getattr(self.store, "__dict__", {})
-        )
-        if use_bundle:
-            ingest_stats = self.store.ingest_document_bundle(
+        # 4. Atomic single-transaction ingestion
+        async with self._write_lock:
+            if await asyncio.to_thread(self.store.has_document, doc_id):
+                raise DocumentExistsError(doc_id)
+            # The WAL write runs off the event loop so it does not stall other requests
+            ingest_stats: IngestStats = await asyncio.to_thread(
+                self.store.ingest_document_bundle,
                 doc_id=doc_id,
                 title=title,
                 chunks=chunk_data_list,
                 chunk_entities_relations=prepared_chunk_extractions,
+                tags=tags,
             )
-            raw_ent = getattr(ingest_stats, "entity_count", 0)
-            raw_rel = getattr(ingest_stats, "relation_count", 0)
-            raw_ids = getattr(ingest_stats, "chunk_ids", [])
-            total_entities = int(raw_ent) if isinstance(raw_ent, (int, float)) else 0
-            total_relations = int(raw_rel) if isinstance(raw_rel, (int, float)) else 0
-            chunk_node_ids = (
-                [int(cid) for cid in raw_ids if isinstance(cid, (int, float))]
-                if isinstance(raw_ids, list)
-                else []
-            )
-        else:
-            # Fallback for mock stores
-            ingest_stats = self.store.ingest_document(
-                doc_id=doc_id,
-                title=title,
-                chunks=chunk_data_list,
-            )
-            raw_ids = getattr(ingest_stats, "chunk_ids", [])
-            chunk_node_ids = (
-                [int(cid) for cid in raw_ids if isinstance(cid, (int, float))]
-                if isinstance(raw_ids, list)
-                else []
-            )
-            total_entities = 0
-            total_relations = 0
-
-            for i, chunk_node_id in enumerate(chunk_node_ids):
-                if i < len(prepared_chunk_extractions):
-                    _, embedded_entities, triples = prepared_chunk_extractions[i]
-                    if embedded_entities:
-                        ent_stats = self.store.ingest_entities(
-                            chunk_id=chunk_node_id,
-                            entities=embedded_entities,
-                            relations=triples,
-                        )
-                        raw_ent = getattr(ent_stats, "entity_count", 0)
-                        raw_rel = getattr(ent_stats, "relation_count", 0)
-                        total_entities += int(raw_ent) if isinstance(raw_ent, (int, float)) else 0
-                        total_relations += int(raw_rel) if isinstance(raw_rel, (int, float)) else 0
 
         # 5. Invalidate Tier 1 Semantic Cache to ensure stale answers are evicted
         if self.cache is not None:
             self.cache.clear()
             logger.info("tier1_cache_cleared_on_ingestion", extra={"doc_id": doc_id})
 
-        return IngestStats(
-            chunk_count=len(text_chunks),
-            entity_count=total_entities,
-            relation_count=total_relations,
-            chunk_ids=chunk_node_ids,
-        )
+        return ingest_stats
 
     async def ingest_file(
         self,

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
 
 if TYPE_CHECKING:
@@ -23,6 +24,24 @@ if TYPE_CHECKING:
     from lattice_rag.routing.router import QueryRouter
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TOP_K = 5
+# Cross-document synthesis goes to Gemini's large context window, so give it more evidence
+# (bounded because every retrieved candidate passes through the CPU cross-encoder)
+MASSIVE_CONTEXT_TOP_K = 12
+
+
+def top_k_for_route(route: str) -> int:
+    return MASSIVE_CONTEXT_TOP_K if route == "massive_context" else DEFAULT_TOP_K
+
+
+def subgraph_as_dict(graph_context: Any) -> dict[str, Any] | None:
+    """Convert a SubgraphResult (or an already-plain dict) into the dict stored on state."""
+    if not graph_context:
+        return None
+    if isinstance(graph_context, dict):
+        return graph_context
+    return {"nodes": graph_context.nodes, "edges": graph_context.edges}
 
 
 class RAGOrchestrator:
@@ -53,13 +72,10 @@ class RAGOrchestrator:
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
-        self.retrieval_pipeline = retrieval_pipeline
         self.groq = groq
         self.gemini = gemini
         self.chitchat = chitchat
         self.embedding_service = embedding_service
-        from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer
-
         self.synthesizer = ResilientSynthesizer(
             groq=self.groq,
             gemini=self.gemini,
@@ -117,11 +133,7 @@ class RAGOrchestrator:
         t0 = time.perf_counter()
 
         # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = (
-            self.semantic_cache.get_exact(state.query)
-            if hasattr(type(self.semantic_cache), "get_exact")
-            else None
-        )
+        exact_hit = self.semantic_cache.get_exact(state.query) if state.use_cache else None
         if isinstance(exact_hit, dict):
             elapsed = (time.perf_counter() - t0) * 1000
             logger.info("Exact cache HIT for query in O(1) time")
@@ -138,7 +150,9 @@ class RAGOrchestrator:
         # Step 2: Concurrently execute Jev routing and CPU embedding (offloaded to thread)
         route_task = asyncio.create_task(self.router.route_query(state.query))
         query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, state.query)
-        cache_result = await self.semantic_cache.get(state.query, query_embedding)
+        cache_result = (
+            await self.semantic_cache.get(state.query, query_embedding) if state.use_cache else None
+        )
         route_decision = await route_task
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -146,7 +160,6 @@ class RAGOrchestrator:
         updates: dict[str, Any] = {
             "query_embedding": query_embedding,
             "route": route_decision.route,
-            "route_confidence": route_decision.confidence,
             "timings": state.timings + [{"stage": "triage", "duration_ms": elapsed}],
         }
 
@@ -173,22 +186,17 @@ class RAGOrchestrator:
     async def _retrieve_node(self, state: PipelineState) -> dict[str, Any]:
         """Execute 3-stage retrieval pipeline with guardrail."""
         t0 = time.perf_counter()
-        result = await self.retrieval.execute(state.query, state.route)
+        result = await self.retrieval.execute(
+            state.query, state.route, query_embedding=state.query_embedding
+        )
         elapsed = (time.perf_counter() - t0) * 1000
 
-        graph_dict = None
-        if result.graph_context:
-            if hasattr(result.graph_context, "nodes") and hasattr(result.graph_context, "edges"):
-                graph_dict = {
-                    "nodes": result.graph_context.nodes,
-                    "edges": result.graph_context.edges,
-                }
-            elif isinstance(result.graph_context, dict):
-                graph_dict = result.graph_context
+        graph_dict = subgraph_as_dict(result.graph_context)
 
         return {
             "filtered_chunks": result.final_chunks,
             "graph_context": graph_dict,
+            "low_grounding": result.low_grounding,
             "timings": state.timings + [{"stage": "retrieval", "duration_ms": elapsed}],
         }
 
@@ -196,50 +204,23 @@ class RAGOrchestrator:
         """Generate answer with circuit breaker cascade: Groq -> Gemini -> Redis."""
         t0 = time.perf_counter()
 
-        if hasattr(self.fallback_cache, "call_with_breaker") and callable(
-            self.fallback_cache.call_with_breaker
-        ):
-            try:
-                res = self.fallback_cache.call_with_breaker(
-                    self.groq.synthesize,
-                    state.query,
-                    state.filtered_chunks,
-                    state.graph_context,
-                )
-                if hasattr(res, "__await__"):
-                    answer = await res
-                else:
-                    answer = res
-                degraded = False
-            except Exception as e:
-                logger.warning("Primary Groq synthesis failed under breaker, cascading: %s", e)
-                try:
-                    answer = await self.gemini.synthesize(
-                        state.query,
-                        state.filtered_chunks,
-                        state.graph_context,
-                    )
-                    degraded = True
-                except Exception as e2:
-                    logger.warning("Gemini fallback failed, using Redis FAQ: %s", e2)
-                    cached = await self.fallback_cache.find_closest_fallback(state.query)
-                    answer = (
-                        cached or "I'm sorry, all generation services are currently unavailable."
-                    )
-                    degraded = True
-        else:
-            synth = await self.synthesizer.synthesize(
-                query=state.query,
-                context_chunks=state.filtered_chunks,
-                graph_context=state.graph_context,
-                route=state.route,
-            )
-            answer = synth.answer
-            degraded = synth.degraded
+        synth = await self.synthesizer.synthesize(
+            query=state.query,
+            context_chunks=state.filtered_chunks,
+            graph_context=state.graph_context,
+            route=state.route,
+        )
+        answer = synth.answer
+        degraded = synth.degraded
         elapsed = (time.perf_counter() - t0) * 1000
 
-        # Cache the verified synthesis in Tier 1 Semantic Vector Cache
-        if not degraded and state.query_embedding is not None:
+        # Cache only primary-provider answers grounded in evidence that passed the guardrail
+        if (
+            state.use_cache
+            and not degraded
+            and not state.low_grounding
+            and state.query_embedding is not None
+        ):
             self.semantic_cache.put(
                 state.query,
                 state.query_embedding,
@@ -261,16 +242,13 @@ class RAGOrchestrator:
         """Handle massive context queries via Gemini failover cascade."""
         t0 = time.perf_counter()
 
-        result = await self.retrieval.execute(state.query, state.route)
-        graph_dict = None
-        if result.graph_context:
-            if hasattr(result.graph_context, "nodes") and hasattr(result.graph_context, "edges"):
-                graph_dict = {
-                    "nodes": result.graph_context.nodes,
-                    "edges": result.graph_context.edges,
-                }
-            elif isinstance(result.graph_context, dict):
-                graph_dict = result.graph_context
+        result = await self.retrieval.execute(
+            state.query,
+            state.route,
+            top_k=MASSIVE_CONTEXT_TOP_K,
+            query_embedding=state.query_embedding,
+        )
+        graph_dict = subgraph_as_dict(result.graph_context)
 
         synth = await self.synthesizer.synthesize(
             query=state.query,
@@ -283,6 +261,7 @@ class RAGOrchestrator:
         return {
             "answer": synth.answer,
             "degraded": synth.degraded,
+            "low_grounding": result.low_grounding,
             "filtered_chunks": result.final_chunks,
             "graph_context": graph_dict,
             "timings": state.timings + [{"stage": "massive_context", "duration_ms": elapsed}],
@@ -313,10 +292,14 @@ class RAGOrchestrator:
 
     # ── Public Interfaces ────────────────────────────────────────────────
 
-    async def run(self, query: str, stream: bool = False) -> PipelineState:
-        """Execute the full pipeline and return the final state."""
+    async def run(self, query: str, use_cache: bool = True) -> PipelineState:
+        """Execute the full pipeline and return the final state.
+
+        ``use_cache=False`` bypasses Tier 1 entirely (no lookup, no store), so evaluation
+        measures the live pipeline without touching the cache users are served from.
+        """
         t0 = time.perf_counter()
-        initial_state = PipelineState(query=query, stream=stream)
+        initial_state = PipelineState(query=query, use_cache=use_cache)
 
         result = await self._graph.ainvoke(initial_state)
 
@@ -340,11 +323,7 @@ class RAGOrchestrator:
         t_triage = time.perf_counter()
 
         # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = (
-            self.semantic_cache.get_exact(query)
-            if hasattr(type(self.semantic_cache), "get_exact")
-            else None
-        )
+        exact_hit = self.semantic_cache.get_exact(query)
         if isinstance(exact_hit, dict):
             cached_answer = exact_hit.get("answer", "")
             route_val = exact_hit.get("route", "vector_exact")
@@ -364,6 +343,7 @@ class RAGOrchestrator:
                     "timings": timings,
                     "latency_ms": total_elapsed,
                     "degraded": False,
+                    "low_grounding": False,
                 },
             }
             return
@@ -393,6 +373,7 @@ class RAGOrchestrator:
                     "timings": timings,
                     "latency_ms": total_elapsed,
                     "degraded": False,
+                    "low_grounding": False,
                 },
             }
             return
@@ -418,6 +399,7 @@ class RAGOrchestrator:
                     "timings": timings,
                     "latency_ms": total_elapsed,
                     "degraded": False,
+                    "low_grounding": False,
                 },
             }
             return
@@ -425,21 +407,16 @@ class RAGOrchestrator:
         # 2. Retrieval Stage
         yield {"event": "stage", "data": {"stage": "retrieval", "route": route_decision.route}}
         t_ret = time.perf_counter()
-        ret_result = await self.retrieval.execute(query, route_decision.route)
+        ret_result = await self.retrieval.execute(
+            query,
+            route_decision.route,
+            top_k=top_k_for_route(route_decision.route),
+            query_embedding=query_embedding,
+        )
         ret_elapsed = (time.perf_counter() - t_ret) * 1000
         timings.append({"stage": "retrieval", "duration_ms": ret_elapsed})
 
-        graph_dict = None
-        if ret_result.graph_context:
-            if hasattr(ret_result.graph_context, "nodes") and hasattr(
-                ret_result.graph_context, "edges"
-            ):
-                graph_dict = {
-                    "nodes": ret_result.graph_context.nodes,
-                    "edges": ret_result.graph_context.edges,
-                }
-            elif isinstance(ret_result.graph_context, dict):
-                graph_dict = ret_result.graph_context
+        graph_dict = subgraph_as_dict(ret_result.graph_context)
 
         # 3. Generation Stage
         yield {
@@ -448,24 +425,28 @@ class RAGOrchestrator:
         }
         t_gen = time.perf_counter()
         full_tokens: list[str] = []
+        outcome = StreamOutcome()
 
         async for tok in self.synthesizer.stream(
             query=query,
             context_chunks=ret_result.final_chunks,
             graph_context=graph_dict,
             route=route_decision.route,
+            outcome=outcome,
         ):
             full_tokens.append(tok)
             yield {"event": "token", "data": {"delta": tok}}
 
-        degraded = self.synthesizer.circuit_status != "closed"
+        degraded = outcome.degraded
+        if outcome.error:
+            yield {"event": "error", "data": {"detail": outcome.error}}
         gen_elapsed = (time.perf_counter() - t_gen) * 1000
         timings.append({"stage": "generation", "duration_ms": gen_elapsed})
 
         full_answer = "".join(full_tokens)
 
-        # Cache answer in Tier 1 Semantic Cache
-        if not degraded and query_embedding is not None:
+        # Cache only primary-provider answers grounded in evidence that passed the guardrail
+        if not degraded and not ret_result.low_grounding and query_embedding is not None:
             self.semantic_cache.put(
                 query,
                 query_embedding,
@@ -489,5 +470,6 @@ class RAGOrchestrator:
                 "timings": timings,
                 "latency_ms": total_elapsed,
                 "degraded": degraded,
+                "low_grounding": ret_result.low_grounding,
             },
         }

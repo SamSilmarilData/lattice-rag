@@ -30,7 +30,7 @@ const STAGE_CONFIG: Record<
     color: 'text-amber-400',
     bg: 'bg-amber-500',
     border: 'border-amber-500/30',
-    description: 'Dynamic 1-to-2 hop LatticeDB Cypher traversal expanding from retrieved entity anchors.',
+    description: '1-to-2 hop LatticeDB graph traversal expanding from the entities in retrieved chunks.',
   },
   stage_3_rerank: {
     label: 'Stage 3: Cross-Encoder Rerank',

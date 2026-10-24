@@ -1,10 +1,14 @@
 """Unit tests for Litestar API controllers using AsyncTestClient."""
+
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 from litestar import Litestar
+from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
@@ -14,7 +18,11 @@ from lattice_rag.api.controllers import (
     IngestController,
     QueryController,
 )
+from lattice_rag.api.guards import ADMIN_KEY_HEADER
+from lattice_rag.config import AppConfig
+from lattice_rag.ingestion.ingester import DocumentIngester
 from lattice_rag.orchestration.state import PipelineState
+from lattice_rag.security import SecretStr
 from lattice_rag.storage.db import IngestStats
 
 
@@ -28,24 +36,50 @@ def mock_controllers_app():
         cache_hit=False,
         answer="LatticeDB is an embedded database.",
         total_latency_ms=45.2,
-        filtered_chunks=[{"node_id": 1, "text": "LatticeDB text", "score": 0.88, "doc_id": "doc1", "position": 0}],
+        filtered_chunks=[
+            {"node_id": 1, "text": "LatticeDB text", "score": 0.88, "doc_id": "doc1", "position": 0}
+        ],
         graph_context={"nodes": [{"node_id": 1, "name": "LatticeDB"}], "edges": []},
         timings=[{"stage": "retrieval", "duration_ms": 20.0}],
     )
     mock_orchestrator.run = AsyncMock(return_value=mock_state)
+    mock_orchestrator.synthesizer.circuit_status = "closed"
 
     async def mock_stream_gen(q):
         yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
         yield {"event": "token", "data": {"delta": "LatticeDB"}}
-        yield {"event": "done", "data": {"answer": "LatticeDB", "route": "hybrid", "latency_ms": 10.0}}
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "LatticeDB",
+                "route": "hybrid",
+                "cached": False,
+                "latency_ms": 10.0,
+                "sources": [
+                    {
+                        "node_id": 7,
+                        "text": "t",
+                        "doc_id": "doc1",
+                        "position": 3,
+                        "rerank_score": 0.5,
+                    }
+                ],
+                "graph_path": {"nodes": [{"id": 1, "name": "LatticeDB"}], "edges": []},
+                "timings": [{"stage": "retrieval", "duration_ms": 2.0}],
+                "degraded": False,
+                "low_grounding": False,
+            },
+        }
 
     mock_orchestrator.stream_query = mock_stream_gen
 
     # Mock Store
     mock_store = MagicMock()
     mock_store.db.is_open = True
-    mock_store.ingest_document.return_value = IngestStats(chunk_count=1, entity_count=0, relation_count=0, chunk_ids=[101])
-    mock_store.ingest_entities.return_value = IngestStats(chunk_count=0, entity_count=1, relation_count=0)
+    mock_store.has_document.return_value = False
+    mock_store.ingest_document_bundle.return_value = IngestStats(
+        chunk_count=1, entity_count=0, relation_count=0, chunk_ids=[101]
+    )
 
     # Mock EmbeddingService
     mock_embed_svc = MagicMock()
@@ -53,18 +87,17 @@ def mock_controllers_app():
 
     # Mock Extractor
     mock_extractor = MagicMock()
-    mock_extractor.extract_entities.return_value = []
+    mock_extractor.extract_entities_batch.return_value = [[]]
     mock_extractor.extract_triples.return_value = []
 
     # Mock Caches
     mock_sem_cache = MagicMock()
     mock_sem_cache.stats = (5, 2)
-    mock_sem_cache._cache = [MagicMock()]
+    mock_sem_cache.__len__.return_value = 1
     mock_sem_cache.clear = MagicMock()
 
     mock_fb_cache = MagicMock()
     mock_fb_cache.redis = MagicMock()
-    mock_fb_cache.circuit_status = "closed"
     mock_fb_cache.cached_query_count = AsyncMock(return_value=50)
 
     # Mock Config
@@ -72,6 +105,7 @@ def mock_controllers_app():
     mock_config.typesafe_api_key.get_secret_value.return_value = "typesafe_key"
     mock_config.groq_api_key.get_secret_value.return_value = "groq_key"
     mock_config.gemini_api_key.get_secret_value.return_value = "gemini_key"
+    mock_config.using_mock_keys = False
 
     app = Litestar(
         route_handlers=[
@@ -83,12 +117,29 @@ def mock_controllers_app():
         dependencies={
             "orchestrator": Provide(lambda: mock_orchestrator, sync_to_thread=False),
             "store": Provide(lambda: mock_store, sync_to_thread=False),
-            "embedding_service": Provide(lambda: mock_embed_svc, sync_to_thread=False),
-            "extractor": Provide(lambda: mock_extractor, sync_to_thread=False),
+            "ingester": Provide(
+                lambda: DocumentIngester(
+                    store=mock_store,
+                    embedding_service=mock_embed_svc,
+                    extractor=mock_extractor,
+                    cache=mock_sem_cache,
+                ),
+                sync_to_thread=False,
+            ),
             "semantic_cache": Provide(lambda: mock_sem_cache, sync_to_thread=False),
             "fallback_cache": Provide(lambda: mock_fb_cache, sync_to_thread=False),
             "config": Provide(lambda: mock_config, sync_to_thread=False),
         },
+        state=State(
+            {
+                "config": AppConfig(
+                    typesafe_api_key=SecretStr("ts"),
+                    groq_api_key=SecretStr(""),
+                    gemini_api_key=SecretStr(""),
+                    admin_api_key=SecretStr("admin-secret"),
+                )
+            }
+        ),
     )
     return app, {
         "orchestrator": mock_orchestrator,
@@ -126,6 +177,38 @@ async def test_api_query_stream_sse(mock_controllers_app):
         assert "event: token" in text
         assert "event: done" in text
 
+        done_line = text.split("event: done", 1)[1].split("data: ", 1)[1].splitlines()[0]
+        done = json.loads(done_line)
+        assert done["latencyMs"] == 10.0
+        assert done["lowGrounding"] is False
+        assert done["sources"][0] == {
+            "chunkId": 7,
+            "text": "t",
+            "score": 0.5,
+            "documentId": "doc1",
+            "position": 3,
+        }
+        assert done["graphPath"]["nodes"][0]["nodeId"] == 1
+        assert done["timings"][0] == {"stage": "retrieval", "durationMs": 2.0}
+        assert "latency_ms" not in done_line
+
+
+@pytest.mark.asyncio
+async def test_api_query_stream_reports_failures_in_band(mock_controllers_app):
+    """A mid-stream exception becomes an SSE error event with no internal details."""
+    app, mocks = mock_controllers_app
+
+    async def failing_stream(q):
+        yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
+        raise RuntimeError("/srv/secret/path exploded")
+
+    mocks["orchestrator"].stream_query = failing_stream
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query/stream", json={"query": "q"})
+        assert "event: error" in resp.text
+        assert "Reference:" in resp.text
+        assert "/srv/secret" not in resp.text
+
 
 @pytest.mark.asyncio
 async def test_api_ingest_endpoint(mock_controllers_app):
@@ -136,7 +219,9 @@ async def test_api_ingest_endpoint(mock_controllers_app):
             "title": "Architecture Overview",
             "text": "LatticeDB operates as an in-process property-graph database. It supports HNSW vectors.",
         }
-        resp = await client.post("/api/v1/ingest", json=payload)
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["documentId"] == "doc_arch"
@@ -181,6 +266,7 @@ async def test_api_rfc9457_error_secret_sanitization(mock_controllers_app):
     )
 
     from lattice_rag.app import secret_sanitizing_exception_handler
+
     app.exception_handlers[Exception] = secret_sanitizing_exception_handler
 
     async with AsyncTestClient(app=app) as client:
@@ -192,3 +278,54 @@ async def test_api_rfc9457_error_secret_sanitization(mock_controllers_app):
         assert "secret_token_123" not in data["detail"]
         assert data["status"] == 500
         assert data["title"] == "Internal Server Error"
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_requires_admin_key(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_x", "title": "T", "text": "Some text."}
+        resp = await client.post("/api/v1/ingest", json=payload)
+        assert resp.status_code == 401
+        mocks["store"].ingest_document_bundle.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"documentId": "../etc/passwd", "title": "T", "text": "x"},
+        {"documentId": "doc", "title": "T", "text": ""},
+        {"documentId": "doc", "title": "T", "text": "x" * 200_001},
+    ],
+)
+async def test_api_ingest_rejects_invalid_payloads(mock_controllers_app, payload):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["", "x" * 2_001])
+async def test_api_query_rejects_empty_or_oversized_query(mock_controllers_app, query):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query", json={"query": query})
+        assert resp.status_code == 400
+        mocks["orchestrator"].run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].has_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_arch", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 409
+        mocks["store"].ingest_document_bundle.assert_not_called()

@@ -1,7 +1,7 @@
 """Integration tests for Phase 7 Benchmark Engine and SLA validation."""
+
 from __future__ import annotations
 
-from pathlib import Path
 import pytest
 from litestar.testing import AsyncTestClient
 
@@ -34,11 +34,17 @@ async def test_benchmark_engine_component_slas():
     ]
 
     try:
-        report = await engine.run_full_suite(queries=queries, iterations=4, warmup=2, live_llm=False)
+        report = await engine.run_full_suite(
+            queries=queries, iterations=4, warmup=2, live_llm=False
+        )
 
         # 1. Dual SLA validation
-        assert report.tier1_cache_sla_met is True, f"Tier 1 cache SLA failed: {report.stages['tier1_cache'].p95_ms}ms"
-        assert report.sub_second_sla_met is True, f"Sub-second SLA failed: {report.stages['e2e_pipeline'].p95_ms}ms"
+        assert report.tier1_cache_sla_met is True, (
+            f"Tier 1 cache SLA failed: {report.stages['tier1_cache'].p95_ms}ms"
+        )
+        assert report.sub_second_sla_met is True, (
+            f"Sub-second SLA failed: {report.stages['e2e_pipeline'].p95_ms}ms"
+        )
 
         # 2. Stage-by-stage latency budget checks
         cache_stats = report.stages["tier1_cache"]
@@ -60,6 +66,7 @@ async def test_benchmark_engine_component_slas():
         # 3. Clean string formatting check
         table_output = BenchmarkEngine.format_ascii_table(report)
         assert "Stage 1: Hybrid Retrieval" in table_output
+        assert "retrieval only" in table_output
         assert "[PASSED]" in table_output
     finally:
         store.close()
@@ -67,11 +74,14 @@ async def test_benchmark_engine_component_slas():
 
 
 @pytest.mark.asyncio
-async def test_benchmark_api_endpoint():
+async def test_benchmark_api_endpoint(monkeypatch):
     """Verify POST /api/v1/benchmark/run returns formatted BenchmarkRunResponse DTO."""
+    monkeypatch.setenv("ADMIN_API_KEY", "integration-admin")
     app = create_app()
     async with AsyncTestClient(app) as client:
-        response = await client.post("/api/v1/benchmark/run")
+        response = await client.post(
+            "/api/v1/benchmark/run", headers={"X-Admin-Key": "integration-admin"}
+        )
         assert response.status_code == 201 or response.status_code == 200
         data = response.json()
 

@@ -32,9 +32,9 @@ class HealthController(Controller):
         latticedb_ok = bool(store and hasattr(store, "db") and store.db.is_open)
         redis_ok = bool(fallback_cache and fallback_cache.redis is not None)
 
-        typesafe_ok = bool(config.typesafe_api_key and config.typesafe_api_key.get_secret_value())
-        groq_ok = bool(config.groq_api_key and config.groq_api_key.get_secret_value())
-        gemini_ok = bool(config.gemini_api_key and config.gemini_api_key.get_secret_value())
+        typesafe_ok = bool(config.typesafe_api_key) and not config.using_mock_keys
+        groq_ok = bool(config.groq_api_key)
+        gemini_ok = bool(config.gemini_api_key)
 
         overall_status = "healthy" if (latticedb_ok and redis_ok and typesafe_ok) else "degraded"
 

@@ -1,16 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import msgspec
+
+# Request size bounds: keep user-supplied text small enough that embedding,
+# GLiNER extraction, and LLM prompts stay bounded per request.
+MAX_QUERY_CHARS = 2_000
+MAX_DOCUMENT_CHARS = 200_000
+
+QueryText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_QUERY_CHARS)]
+DocumentId = Annotated[str, msgspec.Meta(pattern=r"^[\w.-]{1,128}$")]
+Title = Annotated[str, msgspec.Meta(min_length=1, max_length=512)]
+DocumentText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_DOCUMENT_CHARS)]
+Tag = Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
 
 
 class QueryRequest(msgspec.Struct, rename="camel"):
     """Request DTO for queries."""
 
-    query: str
-    stream: bool = False
-    filter_tags: list[str] = []
+    query: QueryText
 
 
 class SourceChunk(msgspec.Struct, rename="camel"):
@@ -121,15 +130,54 @@ class QueryResponse(msgspec.Struct, rename="camel"):
     graph_path: SubgraphDTO | None = None
     timings: list[StageTiming] = []
     degraded: bool = False
+    low_grounding: bool = False
+
+
+# ── Server-Sent Event payloads for POST /api/v1/query/stream ─────────────────
+
+
+class StreamStage(msgspec.Struct, rename="camel", omit_defaults=True):
+    """`stage` event: a pipeline stage started (triage, cache_hit, chitchat, retrieval, generation)."""
+
+    stage: str
+    status: str | None = None
+    route: str | None = None
+    chunks_count: int | None = None
+
+
+class StreamToken(msgspec.Struct, rename="camel"):
+    """`token` event: the next piece of answer text."""
+
+    delta: str
+
+
+class StreamDone(msgspec.Struct, rename="camel"):
+    """`done` event: the final answer with the same fields as QueryResponse."""
+
+    answer: str
+    route: str
+    cached: bool
+    latency_ms: float
+    sources: list[SourceChunk] = []
+    graph_path: SubgraphDTO | None = None
+    timings: list[StageTiming] = []
+    degraded: bool = False
+    low_grounding: bool = False
+
+
+class StreamError(msgspec.Struct, rename="camel"):
+    """`error` event: generation stopped early; the stream still ends with `done`, or ends here."""
+
+    detail: str
 
 
 class IngestRequest(msgspec.Struct, rename="camel"):
     """Request DTO for document ingestion."""
 
-    document_id: str
-    title: str
-    text: str
-    tags: list[str] = []
+    document_id: DocumentId
+    title: Title
+    text: DocumentText
+    tags: Annotated[list[Tag], msgspec.Meta(max_length=32)] = []
 
 
 class IngestResponse(msgspec.Struct, rename="camel"):

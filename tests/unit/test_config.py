@@ -1,8 +1,6 @@
 """Unit tests for configuration loading and validation."""
-from __future__ import annotations
 
-import os
-from unittest.mock import patch
+from __future__ import annotations
 
 import pytest
 
@@ -32,3 +30,33 @@ def test_load_config_missing_typesafe_key_raises_exit(monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit) as exc_info:
         load_config()
     assert "TYPESAFE_API_KEY" in str(exc_info.value)
+
+
+def test_load_config_without_typesafe_requirement(monkeypatch: pytest.MonkeyPatch):
+    """Storage-only commands (seed/ingest) can load config without a TypeSafe key."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+
+    cfg = load_config(require_typesafe=False)
+    assert not cfg.typesafe_api_key
+
+
+def test_load_config_admin_key_and_cors(monkeypatch: pytest.MonkeyPatch):
+    """Admin key and CORS origins are read from the environment."""
+    monkeypatch.setenv("ADMIN_API_KEY", "admin-secret")
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", "http://localhost:5173, https://studio.example.com")
+    monkeypatch.setenv("QUERY_RATE_LIMIT_PER_MINUTE", "30")
+
+    cfg = load_config()
+    assert cfg.admin_api_key.get_secret_value() == "admin-secret"
+    assert cfg.cors_allow_origins == ("http://localhost:5173", "https://studio.example.com")
+    assert cfg.query_rate_limit_per_minute == 30
+
+
+def test_load_config_defaults_are_locked_down(monkeypatch: pytest.MonkeyPatch):
+    """Without explicit settings there is no admin key and no cross-origin access."""
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+    monkeypatch.delenv("CORS_ALLOW_ORIGINS", raising=False)
+
+    cfg = load_config()
+    assert not cfg.admin_api_key
+    assert cfg.cors_allow_origins == ()

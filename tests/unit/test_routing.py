@@ -1,4 +1,5 @@
 """Unit tests for QueryRouter with TypeSafe AI Jev Choice routing."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -63,7 +64,9 @@ async def test_router_aclose_and_close():
 async def test_router_system_one_error_falls_back_to_hybrid():
     """Verify router catches system_one exceptions and gracefully returns hybrid decision."""
     mock_client = AsyncMock()
-    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+    mock_client.system_one.side_effect = RuntimeError(
+        "403 Forbidden: Request not allowed by policy"
+    )
 
     router = QueryRouter(ts_client=mock_client)
     decision = await router.route_query("Explain vector indexing")
@@ -72,3 +75,43 @@ async def test_router_system_one_error_falls_back_to_hybrid():
     assert decision.route == "hybrid"
     assert decision.confidence == 0.5
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "How does HNSW help recall?",
+        "Can you help me configure Redis eviction?",
+        "Thanks to the WAL, are writes durable?",
+        "Hi, what is LatticeDB's vector index?",
+        "Which tools assist entity extraction?",
+        "Summarize the morning standup notes",
+    ],
+)
+async def test_router_real_questions_with_chitchat_words_reach_jev(query: str):
+    """Questions that merely contain a chitchat keyword must not be short-circuited."""
+    mock_client = AsyncMock()
+    mock_client.system_one.return_value = SimpleNamespace(
+        choices={"route": SimpleNamespace(choice="hybrid", confidence=0.9)}
+    )
+    router = QueryRouter(ts_client=mock_client)
+
+    decision = await router.route_query(query)
+
+    assert decision.route == "hybrid"
+    mock_client.system_one.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    ["hi!", "Hello there", "thanks a lot", "bye for now", "what can you do?", "Good morning!"],
+)
+async def test_router_pure_chitchat_uses_fast_path(query: str):
+    mock_client = AsyncMock()
+    router = QueryRouter(ts_client=mock_client)
+
+    decision = await router.route_query(query)
+
+    assert decision.route == "chitchat"
+    mock_client.system_one.assert_not_awaited()

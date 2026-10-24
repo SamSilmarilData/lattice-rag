@@ -1,4 +1,5 @@
 """Unit tests for ContextGuardrail using TypeSafe AI Jev Noul."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from lattice_rag.routing.guardrail import ContextGuardrail
+from lattice_rag.routing.guardrail import ContextGuardrail, GuardrailResult
 
 
 @pytest.mark.asyncio
@@ -24,8 +25,7 @@ async def test_guardrail_empty_chunks():
     guardrail = ContextGuardrail(ts_client=mock_client)
 
     result = await guardrail.filter_chunks("What is LatticeDB?", [])
-    assert result == []
-    assert guardrail.low_grounding_flag is False
+    assert result == GuardrailResult(chunks=[], low_grounding=False)
     mock_client.system_one.assert_not_called()
 
 
@@ -50,24 +50,26 @@ async def test_guardrail_filtering_above_and_below_threshold():
         {"node_id": 3, "text": "BM25 index matches text via @@ operator.", "score": 0.88},
     ]
 
-    filtered = await guardrail.filter_chunks("How does LatticeDB search work?", chunks)
+    result = await guardrail.filter_chunks("How does LatticeDB search work?", chunks)
+    filtered = result.chunks
 
     assert len(filtered) == 2
     assert filtered[0]["node_id"] == 1
     assert filtered[0]["grounding_score"] == 0.85
-    assert filtered[0]["low_grounding_flag"] is False
 
     assert filtered[1]["node_id"] == 3
     assert filtered[1]["grounding_score"] == 0.60
-    assert filtered[1]["low_grounding_flag"] is False
 
-    assert guardrail.low_grounding_flag is False
+    assert result.low_grounding is False
     mock_client.system_one.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_guardrail_all_rejected_activates_low_grounding_flag():
-    """Verify when all candidate chunks fail threshold, low_grounding_flag is set and fallback injected."""
+    """When every chunk fails the threshold, no chunks pass and low_grounding is reported.
+
+    No placeholder chunk is injected: it would reach the LLM as evidence and users as a source.
+    """
     mock_client = AsyncMock()
     mock_response = SimpleNamespace(
         nouls={
@@ -83,13 +85,10 @@ async def test_guardrail_all_rejected_activates_low_grounding_flag():
         {"node_id": 11, "text": "Completely unrelated paragraph B.", "score": 0.2},
     ]
 
-    filtered = await guardrail.filter_chunks("Specific technical question", chunks)
+    result = await guardrail.filter_chunks("Specific technical question", chunks)
 
-    assert len(filtered) == 1
-    assert filtered[0]["low_grounding_flag"] is True
-    assert filtered[0]["node_id"] == -1
-    assert "INSUFFICIENT_EVIDENCE" in filtered[0]["text"]
-    assert guardrail.low_grounding_flag is True
+    assert result.chunks == []
+    assert result.low_grounding is True
 
 
 @pytest.mark.asyncio
@@ -109,7 +108,9 @@ async def test_guardrail_aclose_and_close():
 async def test_guardrail_system_one_error_graceful_fallback():
     """Verify guardrail catches system_one exceptions and gracefully preserves chunks."""
     mock_client = AsyncMock()
-    mock_client.system_one.side_effect = RuntimeError("403 Forbidden: Request not allowed by policy")
+    mock_client.system_one.side_effect = RuntimeError(
+        "403 Forbidden: Request not allowed by policy"
+    )
 
     guardrail = ContextGuardrail(threshold=0.50, ts_client=mock_client)
     chunks = [
@@ -117,13 +118,34 @@ async def test_guardrail_system_one_error_graceful_fallback():
         {"node_id": 2, "text": "Chunk text 2", "score": 0.75},
     ]
 
-    filtered = await guardrail.filter_chunks("Any query", chunks)
+    result = await guardrail.filter_chunks("Any query", chunks)
+    filtered = result.chunks
 
     assert len(filtered) == 2
     assert filtered[0]["node_id"] == 1
     assert filtered[0]["grounding_score"] == 0.88
-    assert filtered[0]["low_grounding_flag"] is False
     assert filtered[1]["node_id"] == 2
     assert filtered[1]["grounding_score"] == 0.75
-    assert guardrail.low_grounding_flag is False
+    assert result.low_grounding is False
 
+
+@pytest.mark.asyncio
+async def test_guardrail_concurrent_calls_do_not_share_grounding_state():
+    """One request's verdict must not leak into a concurrent request on the shared instance."""
+    import asyncio
+
+    async def _system_one(state, questions):
+        await asyncio.sleep(0)
+        prob = 0.9 if state["query"] == "good" else 0.1
+        return SimpleNamespace(nouls={k: SimpleNamespace(noul=prob) for k in questions})
+
+    mock_client = AsyncMock()
+    mock_client.system_one.side_effect = _system_one
+    guardrail = ContextGuardrail(threshold=0.5, ts_client=mock_client)
+    chunks = [{"node_id": 1, "text": "x"}]
+
+    good, bad = await asyncio.gather(
+        guardrail.filter_chunks("good", chunks), guardrail.filter_chunks("bad", chunks)
+    )
+    assert good.low_grounding is False
+    assert bad.low_grounding is True

@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import contextlib
-import os
+import dataclasses
+import logging
+import uuid
 from collections.abc import AsyncGenerator
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, cast
 
-from litestar import Litestar, MediaType, Request, Response, get
+from litestar import Litestar, MediaType, Request, Response, Router, get
 from litestar.config.app import AppConfig
 from litestar.config.cors import CORSConfig
 from litestar.datastructures import State
 from litestar.di import Provide
+from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
+from litestar.middleware.rate_limit import RateLimitConfig
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.plugins import ScalarRenderPlugin
 from litestar.plugins import InitPluginProtocol
 from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetailsPlugin
+from typesafe_sdk import AsyncTypeSafeClient
 
+from lattice_rag import __version__
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
@@ -29,39 +36,53 @@ from lattice_rag.api.controllers import (
 from lattice_rag.caching.fallback_cache import FallbackCache
 from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.config import AppConfig as LatticeAppConfig
-from lattice_rag.config import get_config
+from lattice_rag.config import get_config, load_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.generation.chitchat import ChitchatHandler
 from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
-from lattice_rag.orchestration.pool import shutdown_pool
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import ContextGuardrail
 from lattice_rag.routing.router import QueryRouter
-from lattice_rag.security import SecretStr, sanitize_error_detail
+from lattice_rag.security import SecretStr, configure_structlog, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
+
+logger = logging.getLogger(__name__)
+
+MAX_REQUEST_BODY_BYTES = 1_000_000
+
+
+def _resolve_config(config: LatticeAppConfig | None) -> LatticeAppConfig:
+    """Use the given config, else the env config, else hermetic mock keys (System 1 fallback)."""
+    if config is not None:
+        return config
+    try:
+        return get_config()
+    except SystemExit:
+        # Keep every other env setting (DB path, admin key, CORS); only the key is mocked
+        logger.warning(
+            "TYPESAFE_API_KEY is not set: starting in degraded mode (routing falls back to "
+            "hybrid, guardrail and semantic-cache verification are disabled)"
+        )
+        return dataclasses.replace(
+            load_config(require_typesafe=False),
+            typesafe_api_key=SecretStr("mock-typesafe-key-hermetic"),
+            using_mock_keys=True,
+        )
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     """Lifespan context manager for initializing and closing dependencies."""
-    config: LatticeAppConfig | None = getattr(app.state, "config", None)
-    if config is None:
-        try:
-            config = get_config()
-        except SystemExit:
-            config = LatticeAppConfig(
-                typesafe_api_key=SecretStr("mock-typesafe-key-hermetic"),
-                groq_api_key=SecretStr(""),
-                gemini_api_key=SecretStr(""),
-            )
+    config = _resolve_config(getattr(app.state, "config", None))
 
-    if not os.environ.get("TYPESAFE_API_KEY") and config.typesafe_api_key:
-        os.environ["TYPESAFE_API_KEY"] = config.typesafe_api_key.get_secret_value()
+    def typesafe_client() -> AsyncTypeSafeClient:
+        # Built from config rather than os.environ, so the mock key never leaks into the env
+        return AsyncTypeSafeClient(api_key=config.typesafe_api_key.get_secret_value())
 
     # 1. Embedded storage engine
     store = LatticeStore(config.latticedb_path)
@@ -70,15 +91,17 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     embedding_service = EmbeddingService(
         embed_model=config.embed_model,
         reranker_model=config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
     )
     extractor = EntityExtractor()
 
     # 3. Decision routing & context guardrail
-    router = QueryRouter()
-    guardrail = ContextGuardrail()
+    router = QueryRouter(ts_client=typesafe_client())
+    guardrail = ContextGuardrail(ts_client=typesafe_client())
 
-    # 4. Multi-tier caching
-    semantic_cache = SemanticCache()
+    # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
+    semantic_cache = SemanticCache(ts_client=None if config.using_mock_keys else typesafe_client())
     fallback_cache = FallbackCache(redis_url=config.redis_url)
     await fallback_cache.connect()
 
@@ -91,6 +114,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     groq = GroqSynthesizer(
         api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
         model=config.groq_model,
+        max_tokens=config.llm_max_tokens,
     )
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
@@ -149,14 +173,13 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
-        # Graceful shutdown of connections and worker pool
+        # Graceful shutdown of connections
         await evaluator.close()
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
         await guardrail.close()
         store.close()
-        shutdown_pool()
 
 
 # ── Dependency Providers ──────────────────────────────────────────────
@@ -204,18 +227,50 @@ def provide_eval_runner(state: State) -> EvalRunner:
 def secret_sanitizing_exception_handler(
     request: Request[Any, Any, Any], exc: Exception
 ) -> Response[Any]:
-    """Strip all auth credentials, tokens, and sensitive headers from error details."""
-    sanitized_detail = sanitize_error_detail(str(exc))
+    """RFC 9457 handler for unexpected errors.
+
+    HTTP exceptions keep their status and (sanitized) detail. Anything else is logged
+    server-side with a request id, and the client only receives that id, never the
+    exception text, which can carry file paths, queries, or upstream payloads.
+    """
+    if isinstance(exc, HTTPException):
+        return Response(
+            content={
+                "type": "about:blank",
+                "title": HTTPStatus(exc.status_code).phrase,
+                "status": exc.status_code,
+                "detail": sanitize_error_detail(str(exc.detail)),
+            },
+            status_code=exc.status_code,
+            media_type="application/problem+json",
+        )
+
+    request_id = uuid.uuid4().hex
+    logger.error(
+        "unhandled_exception request_id=%s path=%s error=%s",
+        request_id,
+        request.url.path,
+        sanitize_error_detail(f"{type(exc).__name__}: {exc}"),
+    )
     return Response(
         content={
             "type": "https://api.lattice-rag.io/errors/internal",
             "title": "Internal Server Error",
             "status": 500,
-            "detail": sanitized_detail,
+            "detail": f"An internal error occurred. Reference: {request_id}",
+            "requestId": request_id,
         },
         status_code=500,
         media_type="application/problem+json",
     )
+
+
+def client_identifier(request: Request[Any, Any, Any]) -> str:
+    """Rate-limit key: the address appended by the fronting proxy, else the socket peer."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
 
 
 @get("/", media_type=MediaType.HTML, include_in_schema=False)
@@ -252,13 +307,26 @@ async def fallback_landing() -> Response[Any]:
 class ApplicationCore(InitPluginProtocol):
     """Litestar application factory plugin using ApplicationCore pattern."""
 
+    def __init__(self, config: LatticeAppConfig) -> None:
+        self.config = config
+
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
         """Register controllers, configure CORS, OpenAPI, DI, and error handling."""
         # Register controllers
         app_config.route_handlers.extend(
             [
                 BenchmarkController,
-                QueryController,
+                # Public query endpoints carry a per-client rate limit
+                Router(
+                    path="/",
+                    route_handlers=[QueryController],
+                    middleware=[
+                        RateLimitConfig(
+                            rate_limit=("minute", self.config.query_rate_limit_per_minute),
+                            identifier_for_request=client_identifier,
+                        ).middleware
+                    ],
+                ),
                 IngestController,
                 CacheController,
                 HealthController,
@@ -301,19 +369,28 @@ class ApplicationCore(InitPluginProtocol):
         # Register RFC 9457 error handler
         app_config.exception_handlers[Exception] = secret_sanitizing_exception_handler
 
-        # Configure CORS
-        app_config.cors_config = CORSConfig(allow_origins=["*"])
+        # CORS: same-origin only unless CORS_ALLOW_ORIGINS lists trusted origins
+        if self.config.cors_allow_origins:
+            app_config.cors_config = CORSConfig(
+                allow_origins=list(self.config.cors_allow_origins),
+                allow_headers=["Content-Type", "X-Admin-Key"],
+            )
+
+        app_config.request_max_body_size = MAX_REQUEST_BODY_BYTES
 
         # Configure OpenAPI with Scalar render plugin
         app_config.openapi_config = OpenAPIConfig(
             title="lattice-rag API",
-            version="1.0.0",
+            version=__version__,
             render_plugins=[ScalarRenderPlugin()],
         )
 
-        # Configure logging
+        # Configure logging: every stdlib record (and structlog, routed through stdlib)
+        # is rendered by the redacting formatter, tracebacks included.
+        configure_structlog()
         app_config.logging_config = LoggingConfig(
             log_exceptions="always",
+            formatters={"standard": {"()": "lattice_rag.security.RedactingFormatter"}},
         )
 
         # Configure lifespan
@@ -324,13 +401,11 @@ class ApplicationCore(InitPluginProtocol):
 
 def create_app(config: LatticeAppConfig | None = None) -> Litestar:
     """Create and configure the Litestar application."""
-    initial_state: dict[str, Any] = {}
-    if config is not None:
-        initial_state["config"] = config
+    resolved = _resolve_config(config)
     return Litestar(
         plugins=[
-            ApplicationCore(),
+            ApplicationCore(resolved),
             ProblemDetailsPlugin(ProblemDetailsConfig(enable_for_all_http_exceptions=True)),
         ],
-        state=State(initial_state),
+        state=State({"config": resolved}),
     )

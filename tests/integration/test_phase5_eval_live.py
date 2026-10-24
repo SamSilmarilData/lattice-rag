@@ -3,10 +3,13 @@
 Verifies end-to-end evaluation flow: ephemeral LatticeDB seeding, query execution,
 live TypeSafe AI Jev Score evaluation, and baseline comparison.
 """
+
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
+
 import pytest
 
 from lattice_rag.caching.fallback_cache import FallbackCache
@@ -129,32 +132,20 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
 
         for i, r in enumerate(resp.results):
             print(
-                f"Query {i+1}: {r.query[:50]}... | "
+                f"Query {i + 1}: {r.query[:50]}... | "
                 f"Faith: {r.faithfulness:.2f} | Prec: {r.context_precision:.2f} | Rel: {r.answer_relevance:.2f}"
             )
 
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await evaluator.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await fb_cache.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await sem_cache.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await router.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await guardrail.close()
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             store.close()
-        except Exception:
-            pass

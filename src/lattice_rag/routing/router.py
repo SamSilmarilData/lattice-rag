@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Choice
 
+from lattice_rag.generation.chitchat import is_pure_chitchat
+
 logger = structlog.get_logger(__name__)
 
 
@@ -64,14 +66,12 @@ class QueryRouter:
             logger.debug("empty_query_routed_to_chitchat")
             return RouteDecision(route="chitchat", confidence=1.0)
 
-        # Fast-path: Check single-pass chitchat automaton for conversational greetings/farewells
-        from lattice_rag.generation.chitchat import _CHITCHAT_AUTOMATON
-
-        if _CHITCHAT_AUTOMATON.search(query.strip()):
+        # Fast-path: messages that are entirely small talk skip the Jev call
+        if is_pure_chitchat(query):
             logger.debug("deterministic_chitchat_fast_path", query=query)
             return RouteDecision(route="chitchat", confidence=1.0)
 
-        logger.info("Routing query", query=query)
+        logger.debug("Routing query", query=query)
         try:
             response = await self._client.system_one(
                 state={"query": query},

@@ -1,12 +1,13 @@
 """Unit tests for the deep DocumentIngester module (TDD RED -> GREEN)."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+
 import numpy as np
 import pytest
 
-from lattice_rag.ingestion.ingester import DocumentIngester
+from lattice_rag.ingestion.ingester import DocumentExistsError, DocumentIngester
 from lattice_rag.storage.db import ChunkData, EntityData, IngestStats, RelationData
 
 
@@ -17,14 +18,27 @@ class FakeStore:
         self.documents = {}
         self.entities = {}
 
-    def ingest_document(self, doc_id: str, title: str, chunks: list[ChunkData]) -> IngestStats:
-        self.documents[doc_id] = {"title": title, "chunks": chunks}
-        chunk_ids = list(range(100, 100 + len(chunks)))
-        return IngestStats(chunk_count=len(chunks), entity_count=0, relation_count=0, chunk_ids=chunk_ids)
+    def has_document(self, doc_id: str) -> bool:
+        return doc_id in self.documents
 
-    def ingest_entities(self, chunk_id: int, entities: list[EntityData], relations: list[RelationData]) -> IngestStats:
-        self.entities[chunk_id] = {"entities": entities, "relations": relations}
-        return IngestStats(chunk_count=0, entity_count=len(entities), relation_count=len(relations))
+    def ingest_document_bundle(
+        self,
+        doc_id: str,
+        title: str,
+        chunks: list[ChunkData],
+        chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
+        tags: list[str] | None = None,
+    ) -> IngestStats:
+        self.documents[doc_id] = {"title": title, "chunks": chunks, "tags": tags}
+        chunk_ids = list(range(100, 100 + len(chunks)))
+        for idx, entities, relations in chunk_entities_relations:
+            self.entities[chunk_ids[idx]] = {"entities": entities, "relations": relations}
+        return IngestStats(
+            chunk_count=len(chunks),
+            entity_count=len({e.name for _, ents, _ in chunk_entities_relations for e in ents}),
+            relation_count=sum(len(rels) for _, _, rels in chunk_entities_relations),
+            chunk_ids=chunk_ids,
+        )
 
 
 class FakeEmbeddingService:
@@ -41,6 +55,9 @@ class FakeEmbeddingService:
 
 class FakeExtractor:
     """Mock entity and relation extractor."""
+
+    def extract_entities_batch(self, texts: list[str]) -> list[list[EntityData]]:
+        return [self.extract_entities(t) for t in texts]
 
     def extract_entities(self, text: str) -> list[EntityData]:
         if "LatticeDB" in text:
@@ -181,3 +198,17 @@ async def test_document_ingester_ingest_file(tmp_path: Path):
     assert stats.chunk_count == 1
     assert "sample_architecture" in store.documents
     assert store.documents["sample_architecture"]["title"] == "sample_architecture.txt"
+
+
+@pytest.mark.asyncio
+async def test_document_ingester_rejects_duplicate_doc_id():
+    """Re-ingesting a doc_id must not duplicate its chunks."""
+    store = FakeStore()
+    ingester = DocumentIngester(
+        store=store, embedding_service=FakeEmbeddingService(), extractor=FakeExtractor()
+    )
+    await ingester.ingest(doc_id="doc_1", title="T", text="LatticeDB is fast.")
+
+    with pytest.raises(DocumentExistsError):
+        await ingester.ingest(doc_id="doc_1", title="T", text="LatticeDB is fast.")
+    assert len(store.documents["doc_1"]["chunks"]) == 1

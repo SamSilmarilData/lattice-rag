@@ -1,7 +1,7 @@
 """Unit tests for LatticeStore in-process storage engine."""
+
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +38,9 @@ def test_document_and_chunk_ingestion(temp_store: LatticeStore):
 
     chunks = [
         ChunkData(text="LatticeDB is an embedded graph database.", embedding=vec1, position=0),
-        ChunkData(text="It combines Cypher, BM25, and HNSW vector search.", embedding=vec1, position=1),
+        ChunkData(
+            text="It combines Cypher, BM25, and HNSW vector search.", embedding=vec1, position=1
+        ),
     ]
 
     stats = temp_store.ingest_document(doc_id="doc_1", title="LatticeDB Overview", chunks=chunks)
@@ -56,7 +58,9 @@ def test_bm25_full_text_search(temp_store: LatticeStore):
     vec = np.zeros(384, dtype=np.float32)
     chunks = [
         ChunkData(text="The quick brown fox jumps over the lazy dog.", embedding=vec, position=0),
-        ChunkData(text="Quantum computing utilizes qubits for superposition.", embedding=vec, position=1),
+        ChunkData(
+            text="Quantum computing utilizes qubits for superposition.", embedding=vec, position=1
+        ),
     ]
     temp_store.ingest_document(doc_id="doc_2", title="Sample Text", chunks=chunks)
 
@@ -86,11 +90,17 @@ def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
         EntityData(name="CPU", entity_type="HARDWARE", embedding=vec),
     ]
     relations = [
-        RelationData(source_name="FastEmbed", target_name="ONNX Runtime", relation_type="USES_RUNTIME"),
-        RelationData(source_name="ONNX Runtime", target_name="CPU", relation_type="TARGETS_HARDWARE"),
+        RelationData(
+            source_name="FastEmbed", target_name="ONNX Runtime", relation_type="USES_RUNTIME"
+        ),
+        RelationData(
+            source_name="ONNX Runtime", target_name="CPU", relation_type="TARGETS_HARDWARE"
+        ),
     ]
 
-    ent_stats = temp_store.ingest_entities(chunk_id=chunk_id, entities=entities, relations=relations)
+    ent_stats = temp_store.ingest_entities(
+        chunk_id=chunk_id, entities=entities, relations=relations
+    )
     assert ent_stats.entity_count == 3
     assert ent_stats.relation_count == 2
 
@@ -99,7 +109,9 @@ def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
     assert len(linked_entities) == 3
 
     # Traverse 2 hops from the first entity (FastEmbed -> ONNX Runtime -> CPU)
-    subgraph = temp_store.traverse_from_entities(entity_ids=[linked_entities[0]], max_hops=2, budget=10)
+    subgraph = temp_store.traverse_from_entities(
+        entity_ids=[linked_entities[0]], max_hops=2, budget=10
+    )
     assert len(subgraph.nodes) >= 2
     assert len(subgraph.edges) >= 1
 
@@ -138,3 +150,79 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
     c2_ents = temp_store.get_entities_for_chunk(c2)
     assert ent_id_1 in c1_ents
     assert ent_id_1 in c2_ents
+
+
+class _BadVector:
+    """Passes the dimension check but makes set_vector fail mid-transaction."""
+
+    def __len__(self) -> int:
+        return 384
+
+
+def _chunk(text: str) -> ChunkData:
+    return ChunkData(text=text, embedding=np.zeros(384, dtype=np.float32), position=0)
+
+
+def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
+    """A rolled-back ingest must not leave cache entries pointing at nodes that don't exist."""
+    with pytest.raises(TypeError):
+        temp_store.ingest_document_bundle(
+            "d1",
+            "t",
+            [_chunk("LatticeDB rocks.")],
+            [
+                (
+                    0,
+                    [
+                        EntityData(name="LatticeDB", entity_type="tech"),
+                        EntityData(name="Ghost", entity_type="tech", embedding=_BadVector()),  # type: ignore[arg-type]
+                    ],
+                    [],
+                )
+            ],
+        )
+
+    assert temp_store.get_canonical_entity_id("LatticeDB") is None
+
+    # A later ingest of the same entity creates a real node
+    temp_store.ingest_document_bundle(
+        "d2",
+        "t",
+        [_chunk("LatticeDB again.")],
+        [(0, [EntityData(name="LatticeDB", entity_type="tech")], [])],
+    )
+    ent_id = temp_store.get_canonical_entity_id("LatticeDB")
+    assert ent_id in temp_store.db.get_nodes_by_label("Entity")
+
+
+def test_has_document(temp_store: LatticeStore):
+    assert temp_store.has_document("doc_a") is False
+    temp_store.ingest_document_bundle("doc_a", "A", [_chunk("Alpha.")], [])
+    assert temp_store.has_document("doc_a") is True
+    assert temp_store.has_document("doc_b") is False
+
+
+def test_get_entities_for_chunks_is_rank_ordered_and_budgeted(temp_store: LatticeStore):
+    """Entities are collected chunk by chunk in rank order, deduplicated, up to the budget."""
+    stats = temp_store.ingest_document_bundle(
+        "doc_rank",
+        "Rank",
+        [_chunk("A and B."), _chunk("B, C and D.")],
+        [
+            (0, [EntityData(name="A", entity_type="x"), EntityData(name="B", entity_type="x")], []),
+            (
+                1,
+                [
+                    EntityData(name="B", entity_type="x"),
+                    EntityData(name="C", entity_type="x"),
+                    EntityData(name="D", entity_type="x"),
+                ],
+                [],
+            ),
+        ],
+    )
+    c1, c2 = stats.chunk_ids
+    ids = {n: temp_store.get_canonical_entity_id(n) for n in "ABCD"}
+
+    assert temp_store.get_entities_for_chunks([c1, c2], budget=3) == [ids["A"], ids["B"], ids["C"]]
+    assert temp_store.get_entities_for_chunks([c2, c1], budget=10)[0] == ids["B"]
