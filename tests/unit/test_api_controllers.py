@@ -24,7 +24,11 @@ from lattice_rag.config import AppConfig
 from lattice_rag.ingestion.ingester import DocumentIngester
 from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.security import SecretStr
-from lattice_rag.storage.db import IngestStats
+from lattice_rag.storage.db import (
+    EmbeddingDimensionError,
+    IngestStats,
+    UnresolvedChunkReferenceError,
+)
 
 
 @pytest.fixture
@@ -378,6 +382,23 @@ async def test_api_delete_document_requires_admin_key(mock_controllers_app, head
         resp = await client.delete("/api/v1/documents/doc_arch", headers=headers)
         assert resp.status_code == 401
         mocks["store"].delete_document.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [EmbeddingDimensionError("chunk 0", 192, 384), UnresolvedChunkReferenceError(5, 1)],
+)
+async def test_api_ingest_validation_error_returns_422(mock_controllers_app, error):
+    app, mocks = mock_controllers_app
+    mocks["store"].ingest_document_bundle.side_effect = error
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_bad", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == str(error)
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,17 @@ The graph follows a **Hierarchical Document-Chunk-Entity** architecture:
 
 ---
 
+### Ingest Validation & Entity Identity
+
+`ingest_document_bundle` validates the whole Document Bundle before it opens the write transaction, so a rejected bundle writes nothing:
+
+- Every chunk embedding must have the store's `vector_dimensions`, or `EmbeddingDimensionError` is raised. A mismatch used to be skipped silently, which left chunks invisible to vector search.
+- Each `(chunk_ref, entities, relations)` entry must name its chunk by index into the bundle's chunk list. An out-of-range or non-integer reference raises `UnresolvedChunkReferenceError`; it is never attributed to another chunk. `ingest_entities(chunk_id, ...)` raises the same error when `chunk_id` is not a stored Chunk.
+
+Both are `IngestValidationError` subclasses; the ingest endpoint returns `422` and `lattice-rag ingest` exits with the message.
+
+An Entity's identity is its **name plus type**, normalized by `entity_key()` (trimmed, internal whitespace collapsed, case-folded) both in the canonical-entity cache and inside the transaction. `Mercury`/`planet` and `Mercury`/`element` are two nodes; `LatticeDB`/`database` and ` latticedb`/`Database` are one. Relation endpoints carry only a name, so they resolve against the same chunk's entities first, then entities earlier in the same document; they never resolve by bare name across the whole graph.
+
 ## 2. Indices & Search Operations
 
 LatticeDB supports three native search modalities in a single file:

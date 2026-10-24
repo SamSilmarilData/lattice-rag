@@ -20,7 +20,7 @@ http://localhost:8000/schema/scalar
 | `GET` | `/` | — | — | `text/html` | Studio SPA (or fallback landing page). |
 | `POST` | `/api/v1/query` | rate-limited | `QueryRequest` | `QueryResponse` | Synchronous RAG query. |
 | `POST` | `/api/v1/query/stream` | rate-limited | `QueryRequest` | `text/event-stream` | SSE stream of stage, token, error and done events. |
-| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. Runtime documents are ephemeral on the deployed instance (see §2.2). |
+| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists; `422` if the payload fails ingest validation (embedding dimension mismatch, unresolved chunk reference), in which case nothing is written. Runtime documents are ephemeral on the deployed instance (see §2.2). |
 | `DELETE` | `/api/v1/documents/{documentId}` | **admin** | — | `204`, no body | Delete a document, its chunks and their edges, and every entity no remaining chunk references; then clear Tier 1. `404` if `documentId` is not stored. |
 | `GET` | `/api/v1/graph/subgraph` | **admin** | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |
 | `GET` | `/api/v1/cache/stats` | **admin** | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |
