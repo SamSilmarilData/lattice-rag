@@ -38,6 +38,7 @@ from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.config import AppConfig as LatticeAppConfig
 from lattice_rag.config import get_config, load_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
+from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.generation.chitchat import ChitchatHandler
 from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
@@ -157,6 +158,8 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         embedding_service=embedding_service,
         extractor=extractor,
     )
+    # HTTP eval runs go through the job manager: one at a time, polled by handle
+    eval_jobs = EvalJobManager(eval_runner)
 
     # Store state on application for DI resolution
     app.state.config = config
@@ -169,11 +172,13 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     app.state.orchestrator = orchestrator
     app.state.evaluator = evaluator
     app.state.eval_runner = eval_runner
+    app.state.eval_jobs = eval_jobs
 
     try:
         yield
     finally:
         # Graceful shutdown of connections
+        await eval_jobs.close()
         await evaluator.close()
         await fallback_cache.close()
         await semantic_cache.close()
@@ -219,6 +224,10 @@ def provide_ingester(state: State) -> DocumentIngester:
 
 def provide_eval_runner(state: State) -> EvalRunner:
     return cast(EvalRunner, state.eval_runner)
+
+
+def provide_eval_jobs(state: State) -> EvalJobManager:
+    return cast(EvalJobManager, state.eval_jobs)
 
 
 # ── RFC 9457 Secret-Sanitizing Error Handler ──────────────────────────
@@ -363,6 +372,7 @@ class ApplicationCore(InitPluginProtocol):
                 "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
                 "config": Provide(provide_config, sync_to_thread=False),
                 "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),
+                "eval_jobs": Provide(provide_eval_jobs, sync_to_thread=False),
             }
         )
 

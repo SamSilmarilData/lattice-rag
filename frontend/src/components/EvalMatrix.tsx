@@ -1,7 +1,34 @@
 import React, { useState } from 'react';
 import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert, Zap, Timer, Activity } from 'lucide-react';
-import { EvalQueryResult, EvalRunResponse, BenchmarkRunResponse } from '../types';
+import { EvalQueryResult, EvalRunResponse, EvalJobResponse, BenchmarkRunResponse } from '../types';
 import { adminFetch } from '../adminKey';
+
+const EVAL_POLL_INTERVAL_MS = 2000;
+
+// Start an Eval Job, then poll its handle until it finishes; resolves with the report.
+async function runEvalJob(limit: number): Promise<EvalRunResponse> {
+  // use_temp_db: evaluate against an ephemeral copy of the golden corpus, not the live DB
+  const startRes = await adminFetch(`/api/v1/eval/jobs?limit=${limit}&use_temp_db=true`, {
+    method: 'POST',
+  });
+  if (!startRes.ok) {
+    const errText = await startRes.text();
+    throw new Error(`Evaluation could not start (status ${startRes.status}): ${errText}`);
+  }
+  let job: EvalJobResponse = await startRes.json();
+  while (job.status === 'running') {
+    await new Promise((resolve) => setTimeout(resolve, EVAL_POLL_INTERVAL_MS));
+    const res = await adminFetch(`/api/v1/eval/jobs/${encodeURIComponent(job.jobId)}`);
+    if (!res.ok) {
+      throw new Error(`Evaluation status check failed with status ${res.status}`);
+    }
+    job = await res.json();
+  }
+  if (job.status === 'failed' || !job.report) {
+    throw new Error(job.error ?? 'Evaluation failed');
+  }
+  return job.report;
+}
 
 interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
@@ -176,15 +203,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
     setEvalError(null);
     setEvalStatus(`Executing Live Evaluation Gate (${evalLimit} queries) through TypeSafe Jev & GroqCloud...`);
     try {
-      // use_temp_db: evaluate against an ephemeral copy of the golden corpus, not the live DB
-      const res = await adminFetch(`/api/v1/eval/run?limit=${evalLimit}&use_temp_db=true`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Evaluation failed with status ${res.status}: ${errText}`);
-      }
-      const data: EvalRunResponse = await res.json();
+      const data = await runEvalJob(evalLimit);
       if (data.results && data.results.length > 0) {
         setEvalData(data.results);
         setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${(data.meanFaithfulness * 100).toFixed(1)}%, Precision: ${(data.meanContextPrecision * 100).toFixed(1)}%, Relevance: ${(data.meanAnswerRelevance * 100).toFixed(1)}%)`);

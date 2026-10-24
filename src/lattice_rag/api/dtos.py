@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003  (msgspec resolves annotations at runtime)
+from enum import StrEnum
 from typing import Annotated, Any
 
 import msgspec
@@ -219,6 +221,25 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     passed_gate: bool
     regression_delta: float
     results: list[EvalQueryResult] = []
+
+
+class EvalJobStatus(StrEnum):
+    """Lifecycle of an Eval Job."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class EvalJobResponse(msgspec.Struct, rename="camel"):
+    """Handle and state of an Eval Job; ``report`` is set once it has succeeded."""
+
+    job_id: str
+    status: EvalJobStatus
+    started_at: datetime
+    finished_at: datetime | None = None
+    report: EvalRunResponse | None = None
+    error: str | None = None
 
 
 class HealthResponse(msgspec.Struct, rename="camel"):
