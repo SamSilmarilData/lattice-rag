@@ -42,6 +42,9 @@ ENV/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+# Hermetic Tier: CI model cache and exported report
+.model-cache/
+hermetic_report.json
 
 # ===========================
 # Node / Frontend

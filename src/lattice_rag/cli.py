@@ -265,6 +265,80 @@ def seed(dataset: str) -> None:
 
 
 @main.command()
+@click.option("--dataset", default="eval_dataset.json", help="Path to the Gold Set")
+@click.option(
+    "--thresholds",
+    default="hermetic_thresholds.json",
+    help="Path to the versioned recall/MRR floors",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(writable=True),
+    help="Export the full report to a JSON file",
+)
+def hermetic(dataset: str, thresholds: str, output: str | None) -> None:
+    """Run the key-free Hermetic Tier: Gold Passage recall and MRR per Slice (the PR gate)."""
+    import asyncio
+
+    import msgspec
+
+    from lattice_rag.config import load_config
+    from lattice_rag.eval.gold_set import GoldSetError, load_gold_set
+    from lattice_rag.eval.hermetic import HermeticError, load_thresholds, run_hermetic_tier
+    from lattice_rag.retrieval.embeddings import EmbeddingService
+
+    try:
+        gold_set = load_gold_set(dataset)
+        gate = load_thresholds(thresholds)
+    except (FileNotFoundError, GoldSetError, HermeticError) as e:
+        raise click.ClickException(str(e)) from e
+
+    config = load_config(require_typesafe=False)
+    embed_svc = EmbeddingService(
+        config.embed_model,
+        config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
+    )
+    click.echo(f"Hermetic Tier: {len(gold_set.queries)} queries from {dataset}\n")
+    try:
+        report = asyncio.run(run_hermetic_tier(gold_set, gate, embed_svc))
+    except HermeticError as e:
+        raise click.ClickException(str(e)) from e
+
+    def fmt(value: float | None) -> str:
+        return "-" if value is None else f"{value:.3f}"
+
+    click.echo(f"{'Query ID':<12} {'Slice':<14} {'Recall':>7} {'RR':>7} {'Top score':>10}  Status")
+    click.echo("-" * 64)
+    for q in report.queries:
+        status = "FAIL" if q.problems else "ok"
+        click.echo(
+            f"{q.id:<12} {q.slice:<14} {fmt(q.recall):>7} {fmt(q.reciprocal_rank):>7} "
+            f"{fmt(q.top_rerank_score):>10}  {status}"
+        )
+    click.echo("")
+    click.echo(f"{'Group':<14} {'Queries':>7} {'Recall':>7} {'MRR':>7} {'Floor R/MRR':>14}")
+    click.echo("-" * 54)
+    for m in [report.overall, *report.slices]:
+        floor = f"{m.floor.recall:.2f}/{m.floor.mrr:.2f}" if m.floor else "none"
+        click.echo(f"{m.slice:<14} {m.queries:>7} {m.recall:>7.3f} {m.mrr:>7.3f} {floor:>14}")
+
+    if output:
+        Path(output).write_bytes(msgspec.json.encode(report))
+        click.echo(f"\nReport written to {output}")
+
+    if report.passed:
+        click.echo("\n✓ HERMETIC TIER PASSED")
+        return
+    click.echo("\n✗ HERMETIC TIER FAILED")
+    for failure in report.failures:
+        click.echo(f"  - {failure}")
+    sys.exit(1)
+
+
+@main.command()
 @click.option(
     "--dataset",
     default="eval_dataset.json",
