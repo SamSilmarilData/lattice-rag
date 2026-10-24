@@ -463,13 +463,36 @@ def benchmark(
     default=True,
     help="Exit with 1 if regression occurs",
 )
-def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
-    """Run the CI/CD evaluation gate against the golden benchmark dataset."""
+@click.option(
+    "--output",
+    default=None,
+    help="Write the full run report (JSON) here, whether or not the gate passes",
+)
+def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str | None) -> None:
+    """Run the Live Tier: Jev-judged metrics over the Gold Set, compared with the baseline."""
     import asyncio
 
+    from lattice_rag.config import load_config
     from lattice_rag.eval import EvalRunner, JevEvaluator
     from lattice_rag.eval.gate import format_metric
     from lattice_rag.storage.extract import EntityExtractor
+
+    # Without the judge key nothing can be scored; without Groq every answer would come
+    # from the fallback, so the run would measure the wrong system. Either is a failure.
+    keys = load_config(require_typesafe=False)
+    missing = [
+        name
+        for name, value in (
+            ("TYPESAFE_API_KEY", keys.typesafe_api_key),
+            ("GROQ_API_KEY", keys.groq_api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise click.ClickException(
+            f"The Live Tier needs {', '.join(missing)}; set it in the environment or .env "
+            "(in CI, as a repository secret). Refusing to run a skipped or degraded evaluation."
+        )
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
 
@@ -487,6 +510,11 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
             resp = await runner.run_evaluation(
                 dataset_path=dataset, baseline_path=baseline, use_temp_db=True
             )
+            if output:
+                import msgspec
+
+                Path(output).write_bytes(msgspec.json.encode(resp))
+                click.echo(f"Report written to {output}")
 
             click.echo("\n=================== Evaluation Results ===================")
             click.echo(
