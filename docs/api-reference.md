@@ -58,6 +58,7 @@ interface QueryResponse {
   timings: StageTiming[];          // Stage latency breakdown (triage, retrieval, generation)
   degraded: boolean;               // True if the answer came from Gemini fallback or the FAQ cache
   lowGrounding: boolean;           // True if no retrieved chunk passed the relevance guardrail
+  unverified: boolean;             // True if routing or the guardrail could not run (Unverified Answer); never cached
 }
 ```
 
@@ -204,7 +205,7 @@ event: token
 data: {"delta":" unites HNSW and BM25 in a single binary [Chunk 0]."}
 
 event: done
-data: {"answer":"LatticeDB unites ...","route":"hybrid","cached":false,"latencyMs":528.2,"sources":[...],"graphPath":{...},"timings":[...],"degraded":false,"lowGrounding":false}
+data: {"answer":"LatticeDB unites ...","route":"hybrid","cached":false,"latencyMs":528.2,"sources":[...],"graphPath":{...},"timings":[...],"degraded":false,"lowGrounding":false,"unverified":false}
 ```
 
 | Event | Payload | When |
