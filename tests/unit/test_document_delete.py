@@ -94,6 +94,35 @@ def test_reingest_after_delete_recreates_orphaned_entities(store: LatticeStore):
     assert len(store.get_entities_for_chunks([hit.node_id])) == 1
 
 
+def test_delete_evicts_orphan_from_entity_cache_and_reingest_creates_new_entity(
+    store: LatticeStore,
+):
+    bundle = [(0, [EntityData("HNSW", "algorithm"), EntityData("LatticeDB", "tech")], [])]
+    store.ingest_document_bundle("doc_a", "A", [_chunk("HNSW graphs.", 0)], bundle)
+    store.ingest_document_bundle(
+        "doc_b",
+        "B",
+        [_chunk("LatticeDB is embedded.", 1)],
+        [(0, [EntityData("LatticeDB", "tech")], [])],
+    )
+    old_hnsw = store.get_canonical_entity_id("HNSW", "algorithm")
+    shared = store.get_canonical_entity_id("LatticeDB", "tech")
+    assert old_hnsw is not None and shared is not None
+
+    store.delete_document("doc_a")
+
+    # The orphan is evicted under its (name, type) key; the shared entity stays cached
+    assert store.get_canonical_entity_id("HNSW", "algorithm") is None
+    assert store.get_canonical_entity_id("LatticeDB", "tech") == shared
+
+    store.ingest_document_bundle("doc_a", "A", [_chunk("HNSW graphs.", 0)], bundle)
+    new_hnsw = store.get_canonical_entity_id("  hnsw ", "ALGORITHM")
+    assert new_hnsw is not None and new_hnsw != old_hnsw
+    assert store.get_canonical_entity_id("LatticeDB", "tech") == shared
+    (hit,) = store.bm25_search("graphs", top_k=5)
+    assert set(store.get_entities_for_chunks([hit.node_id])) == {new_hnsw, shared}
+
+
 class _Embedder:
     def embed_texts(self, texts: list[str]) -> list[np.ndarray]:
         return [_vec(i % DIM) for i, _ in enumerate(texts)]
