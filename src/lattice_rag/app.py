@@ -136,7 +136,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         router_guardrail=guardrail,
     )
 
-    # 7. LangGraph RAG Agentic Orchestrator
+    # 7. RAG Orchestrator (one pipeline core behind run() and stream_query())
     orchestrator = RAGOrchestrator(
         router=router,
         semantic_cache=semantic_cache,
