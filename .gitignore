@@ -70,3 +70,9 @@ models/
 *.onnx
 *.bin
 !requirements*.txt
+
+# ===========================
+# Agent tooling (local only)
+# ===========================
+.agents/
+.claude/
