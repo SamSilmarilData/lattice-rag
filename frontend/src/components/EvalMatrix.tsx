@@ -5,6 +5,22 @@ import { adminFetch } from '../adminKey';
 
 const EVAL_POLL_INTERVAL_MS = 2000;
 
+type MetricKey = 'faithfulness' | 'contextPrecision' | 'answerRelevance' | 'answerCorrectness';
+
+// Mean over the queries where the metric was judged; null when none were
+function meanOf(rows: EvalQueryResult[], key: MetricKey): number | null {
+  const values = rows.map((r) => r[key]).filter((v): v is number => v !== null);
+  return values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
+}
+
+function pct(value: number | null, digits = 0): string {
+  return value === null ? 'n/a' : `${(value * 100).toFixed(digits)}%`;
+}
+
+function fixed(value: number | null): string {
+  return value === null ? 'n/a' : value.toFixed(3);
+}
+
 // Start an Eval Job, then poll its handle until it finishes; resolves with the report.
 async function runEvalJob(limit: number): Promise<EvalRunResponse> {
   // use_temp_db: evaluate against an ephemeral copy of the golden corpus, not the live DB
@@ -41,140 +57,180 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     faithfulness: 0.96,
     contextPrecision: 0.94,
     answerRelevance: 0.95,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'What is the role of FastEmbed and what dense embedding model does it use by default?',
     faithfulness: 0.98,
     contextPrecision: 0.95,
     answerRelevance: 0.97,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does GLiNER extract entities and what default entity types are recognized?',
     faithfulness: 0.92,
     contextPrecision: 0.89,
     answerRelevance: 0.93,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Explain the three TypeSafe AI Jev primitives used in the architecture and their specific jobs.',
     faithfulness: 0.97,
     contextPrecision: 0.96,
     answerRelevance: 0.98,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Why is Litestar paired with the Granian Rust ASGI server, and what JSON library is used?',
     faithfulness: 0.95,
     contextPrecision: 0.93,
     answerRelevance: 0.96,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How are relation triples extracted from text and mapped into LatticeDB property-graph edges?',
     faithfulness: 0.91,
     contextPrecision: 0.88,
     answerRelevance: 0.92,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does the cross-encoder reranker incorporate graph structure during scoring?',
     faithfulness: 0.94,
     contextPrecision: 0.91,
     answerRelevance: 0.95,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does the front-door decision router triage queries and what routes does it choose between?',
     faithfulness: 0.96,
     contextPrecision: 0.95,
     answerRelevance: 0.97,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'What role does the Jev Noul boolean primitive play in context guardrailing before synthesis?',
     faithfulness: 0.93,
     contextPrecision: 0.90,
     answerRelevance: 0.94,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Compare the caching tiers in the architecture: Tier 1 vs Tier 2 fallback.',
     faithfulness: 0.96,
     contextPrecision: 0.94,
     answerRelevance: 0.97,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Explain the end-to-end flow of a multi-hop graph_relational query through the pipeline.',
     faithfulness: 0.93,
     contextPrecision: 0.92,
     answerRelevance: 0.94,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does the circuit breaker protect external LLM APIs and when does it trip?',
     faithfulness: 0.89,
     contextPrecision: 0.86,
     answerRelevance: 0.91,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'What fallback synthesis provider is used if GroqCloud encounters rate limits or errors?',
     faithfulness: 0.97,
     contextPrecision: 0.94,
     answerRelevance: 0.96,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does SSE streaming work in POST /api/v1/query/stream and what events are emitted?',
     faithfulness: 0.95,
     contextPrecision: 0.92,
     answerRelevance: 0.95,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'What security precautions are implemented to prevent API keys from leaking in logs or error traces?',
     faithfulness: 0.98,
     contextPrecision: 0.97,
     answerRelevance: 0.99,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Hello! Can you help me understand what you are capable of?',
     faithfulness: 1.00,
     contextPrecision: 0.90,
     answerRelevance: 0.95,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Thanks for your assistance, that was very helpful!',
     faithfulness: 1.00,
     contextPrecision: 0.90,
     answerRelevance: 0.95,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'Synthesize all findings across LatticeDB, FastEmbed, and GLiNER for in-process RAG.',
     faithfulness: 0.92,
     contextPrecision: 0.90,
     answerRelevance: 0.93,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'How does Reciprocal Rank Fusion (RRF) combine dense vector and BM25 sparse rankings?',
     faithfulness: 0.95,
     contextPrecision: 0.93,
     answerRelevance: 0.96,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
   {
     query: 'What happens when context guardrail rejects all retrieved candidate chunks?',
     faithfulness: 0.90,
     contextPrecision: 0.87,
     answerRelevance: 0.91,
+    answerCorrectness: null,
     passed: true,
+    error: null,
   },
 ];
 
@@ -193,9 +249,10 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
 
   // Compute live summary stats
   const total = evalData.length;
-  const meanFaithfulness = total ? evalData.reduce((s, r) => s + r.faithfulness, 0) / total : 0;
-  const meanPrecision = total ? evalData.reduce((s, r) => s + r.contextPrecision, 0) / total : 0;
-  const meanRelevance = total ? evalData.reduce((s, r) => s + r.answerRelevance, 0) / total : 0;
+  const meanFaithfulness = meanOf(evalData, 'faithfulness');
+  const meanPrecision = meanOf(evalData, 'contextPrecision');
+  const meanRelevance = meanOf(evalData, 'answerRelevance');
+  const meanCorrectness = meanOf(evalData, 'answerCorrectness');
   const allPassed = evalData.every((r) => r.passed);
 
   const runLiveEval = async () => {
@@ -206,7 +263,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
       const data = await runEvalJob(evalLimit);
       if (data.results && data.results.length > 0) {
         setEvalData(data.results);
-        setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${(data.meanFaithfulness * 100).toFixed(1)}%, Precision: ${(data.meanContextPrecision * 100).toFixed(1)}%, Relevance: ${(data.meanAnswerRelevance * 100).toFixed(1)}%)`);
+        setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${pct(data.meanFaithfulness, 1)}, Precision: ${pct(data.meanContextPrecision, 1)}, Relevance: ${pct(data.meanAnswerRelevance, 1)}, Correctness: ${pct(data.meanAnswerCorrectness, 1)}, Failed: ${data.failedQueries})`);
       } else {
         setEvalStatus('Evaluation completed with empty results.');
       }
@@ -453,7 +510,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
       )}
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="bg-card border border-border rounded-xl p-3.5">
           <div className="text-[11px] text-gray-400 font-medium">Total Golden Queries</div>
           <div className="text-xl font-bold font-mono text-gray-100 mt-1">{total}</div>
@@ -463,7 +520,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
         <div className="bg-card border border-border rounded-xl p-3.5">
           <div className="text-[11px] text-gray-400 font-medium">Mean Faithfulness</div>
           <div className="text-xl font-bold font-mono text-cyan-400 mt-1">
-            {(meanFaithfulness * 100).toFixed(1)}%
+            {pct(meanFaithfulness, 1)}
           </div>
           <div className="text-[10px] text-gray-500 mt-0.5">Threshold: $\ge$ 88.0%</div>
         </div>
@@ -471,7 +528,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
         <div className="bg-card border border-border rounded-xl p-3.5">
           <div className="text-[11px] text-gray-400 font-medium">Mean Context Precision</div>
           <div className="text-xl font-bold font-mono text-indigo-400 mt-1">
-            {(meanPrecision * 100).toFixed(1)}%
+            {pct(meanPrecision, 1)}
           </div>
           <div className="text-[10px] text-gray-500 mt-0.5">Threshold: $\ge$ 85.0%</div>
         </div>
@@ -479,9 +536,17 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
         <div className="bg-card border border-border rounded-xl p-3.5">
           <div className="text-[11px] text-gray-400 font-medium">Mean Answer Relevance</div>
           <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
-            {(meanRelevance * 100).toFixed(1)}%
+            {pct(meanRelevance, 1)}
           </div>
           <div className="text-[10px] text-gray-500 mt-0.5">Threshold: $\ge$ 90.0%</div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-3.5">
+          <div className="text-[11px] text-gray-400 font-medium">Mean Answer Correctness</div>
+          <div className="text-xl font-bold font-mono text-amber-400 mt-1">
+            {pct(meanCorrectness, 1)}
+          </div>
+          <div className="text-[10px] text-gray-500 mt-0.5">Agreement with the reference answer</div>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-3.5 col-span-2 md:col-span-1">
@@ -545,6 +610,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                 <th className="py-3 px-4 w-28 text-center">Faithfulness</th>
                 <th className="py-3 px-4 w-28 text-center">Precision</th>
                 <th className="py-3 px-4 w-28 text-center">Relevance</th>
+                <th className="py-3 px-4 w-28 text-center">Correctness</th>
                 <th className="py-3 px-4 w-24 text-center">Status</th>
                 <th className="py-3 px-4 w-32 text-right">Action</th>
               </tr>
@@ -572,13 +638,16 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center font-mono text-cyan-400">
-                        {(item.faithfulness * 100).toFixed(0)}%
+                        {pct(item.faithfulness)}
                       </td>
                       <td className="py-3 px-4 text-center font-mono text-indigo-400">
-                        {(item.contextPrecision * 100).toFixed(0)}%
+                        {pct(item.contextPrecision)}
                       </td>
                       <td className="py-3 px-4 text-center font-mono text-emerald-400">
-                        {(item.answerRelevance * 100).toFixed(0)}%
+                        {pct(item.answerRelevance)}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono text-amber-400">
+                        {pct(item.answerCorrectness)}
                       </td>
                       <td className="py-3 px-4 text-center">
                         {item.passed ? (
@@ -589,7 +658,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                         ) : (
                           <span className="inline-flex items-center space-x-1 text-rose-400 font-mono text-[10px]">
                             <XCircle className="w-3 h-3" />
-                            <span>FAIL</span>
+                            <span>{item.error ? item.error.replace('_', ' ').toUpperCase() : 'FAIL'}</span>
                           </span>
                         )}
                       </td>
@@ -611,7 +680,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                     {/* Expandable Comparison Details */}
                     {isExpanded && (
                       <tr className="bg-background/80">
-                        <td colSpan={7} className="p-4 border-y border-border/80">
+                        <td colSpan={8} className="p-4 border-y border-border/80">
                           <div className="space-y-3 text-xs max-w-4xl mx-auto">
                             <div className="font-semibold text-gray-300 flex items-center justify-between">
                               <span>Golden Benchmark Evaluation Details</span>
@@ -619,11 +688,11 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                                 Target Floor: &gt; 0.50
                               </span>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                               <div className="bg-card border border-border p-3 rounded-lg">
                                 <div className="text-gray-400 text-[11px]">Faithfulness Score</div>
                                 <div className="text-base font-bold font-mono text-cyan-400 mt-0.5">
-                                  {item.faithfulness.toFixed(3)}
+                                  {fixed(item.faithfulness)}
                                 </div>
                                 <p className="text-[10px] text-gray-500 mt-1">
                                   Ratio of claims in the generated answer supported by retrieved facts.
@@ -632,7 +701,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                               <div className="bg-card border border-border p-3 rounded-lg">
                                 <div className="text-gray-400 text-[11px]">Context Precision</div>
                                 <div className="text-base font-bold font-mono text-indigo-400 mt-0.5">
-                                  {item.contextPrecision.toFixed(3)}
+                                  {fixed(item.contextPrecision)}
                                 </div>
                                 <p className="text-[10px] text-gray-500 mt-1">
                                   Proportion of ground-truth evidence contained in retrieved chunks.
@@ -641,10 +710,19 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                               <div className="bg-card border border-border p-3 rounded-lg">
                                 <div className="text-gray-400 text-[11px]">Answer Relevance</div>
                                 <div className="text-base font-bold font-mono text-emerald-400 mt-0.5">
-                                  {item.answerRelevance.toFixed(3)}
+                                  {fixed(item.answerRelevance)}
                                 </div>
                                 <p className="text-[10px] text-gray-500 mt-1">
                                   Semantic match between generated answer and the user query intent.
+                                </p>
+                              </div>
+                              <div className="bg-card border border-border p-3 rounded-lg">
+                                <div className="text-gray-400 text-[11px]">Answer Correctness</div>
+                                <div className="text-base font-bold font-mono text-amber-400 mt-0.5">
+                                  {fixed(item.answerCorrectness)}
+                                </div>
+                                <p className="text-[10px] text-gray-500 mt-1">
+                                  Agreement of the answer with the Gold Set reference answer.
                                 </p>
                               </div>
                             </div>

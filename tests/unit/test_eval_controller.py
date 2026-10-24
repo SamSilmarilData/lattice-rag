@@ -28,16 +28,20 @@ REPORT = EvalRunResponse(
     mean_faithfulness=0.89,
     mean_context_precision=0.86,
     mean_answer_relevance=0.91,
+    mean_answer_correctness=0.84,
     passed_gate=True,
     regression_delta=0.01,
+    failed_queries=1,
     results=[
         EvalQueryResult(
             query="Sample query",
             faithfulness=0.90,
             context_precision=0.88,
             answer_relevance=0.92,
+            answer_correctness=0.84,
             passed=True,
-        )
+        ),
+        EvalQueryResult(query="Broken query", passed=False, error="pipeline_error"),
     ],
 )
 
@@ -130,6 +134,12 @@ async def test_report_is_fetchable_by_handle_once_the_run_finishes(client, runne
     assert done["report"]["totalQueries"] == 20
     assert done["report"]["passedGate"] is True
     assert done["report"]["results"][0]["query"] == "Sample query"
+    assert done["report"]["meanAnswerCorrectness"] == 0.84
+    assert done["report"]["failedQueries"] == 1
+    assert done["report"]["results"][0]["answerCorrectness"] == 0.84
+    broken = done["report"]["results"][1]
+    assert broken["error"] == "pipeline_error"
+    assert broken["answerCorrectness"] is None
     assert runner.calls == [
         {
             "dataset_path": Path("eval_dataset.json").resolve(),

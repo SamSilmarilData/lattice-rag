@@ -49,6 +49,7 @@ def _eval_response(contradiction: float) -> Any:
             "faithfulness": SimpleNamespace(score=3.6),
             "context_precision": SimpleNamespace(score=3.4),
             "answer_relevance": SimpleNamespace(score=3.8),
+            "answer_correctness": SimpleNamespace(score=3.6),
         },
         nouls={"contradiction": SimpleNamespace(noul=contradiction)},
     )
@@ -154,7 +155,24 @@ def _write_dataset(tmp_path: Path) -> None:
             }
         )
     )
-    (tmp_path / "base.json").write_text(json.dumps({"metrics": {}}))
+    (tmp_path / "base.json").write_text(
+        json.dumps(
+            {
+                "version": "2.0.0",
+                "metrics": {},
+                "gate_thresholds": {
+                    "max_regression_delta": 0.03,
+                    "min_query_floor": 0.5,
+                    "pass_thresholds": {
+                        "faithfulness": 0.7,
+                        "context_precision": 0.65,
+                        "answer_relevance": 0.7,
+                        "answer_correctness": 0.7,
+                    },
+                },
+            }
+        )
+    )
 
 
 async def _run_eval_job(app: Litestar) -> Any:

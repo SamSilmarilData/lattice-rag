@@ -150,24 +150,37 @@ interface EvalJobResponse {
   error: string | null;                    // Generic message with a log reference when status is "failed"
 }
 
+// Each metric is a Jev Score normalized to [0.0, 1.0], or null when it was not judged:
+// it does not apply to the query's Slice (chitchat: relevance + correctness only;
+// unanswerable: no context precision), or the query failed and was never judged.
 interface EvalQueryResult {
-  query: string;               // Evaluated benchmark query
-  faithfulness: number;        // Jev Score normalized expected value [0.0, 1.0]
-  contextPrecision: number;    // Jev Score normalized expected value [0.0, 1.0]
-  answerRelevance: number;     // Jev Score normalized expected value [0.0, 1.0]
-  passed: boolean;             // faithfulness >= 0.70, contextPrecision >= 0.65, answerRelevance >= 0.70, no contradiction veto
+  query: string;                     // Evaluated benchmark query
+  passed: boolean;                   // Judged, and every judged metric >= its pass threshold
+  faithfulness: number | null;       // Answer vs retrieved context; 0.0 on a contradiction veto
+  contextPrecision: number | null;   // Retrieved context vs what the reference answer needs
+  answerRelevance: number | null;    // Answer vs the query
+  answerCorrectness: number | null;  // Answer vs the Gold Set reference answer
+  error: "pipeline_error" | "judge_error" | null;  // Set when the query failed; it is then not judged
 }
 
 interface EvalRunResponse {
-  totalQueries: number;         // Total evaluated queries
-  meanFaithfulness: number;     // Average faithfulness across all queries
-  meanContextPrecision: number; // Average context precision across all queries
-  meanAnswerRelevance: number;  // Average answer relevance across all queries
-  passedGate: boolean;          // No mean metric dropped > 0.03 vs baseline and every query's faithfulness >= 0.50
-  regressionDelta: number;      // Actual worst-case delta compared to baseline
-  results: EvalQueryResult[];   // Granular query evaluation results
+  totalQueries: number;                // Total evaluated queries
+  passedGate: boolean;                 // See the gate rules below
+  regressionDelta: number;             // Worst mean delta vs the baseline's measured metrics
+  meanFaithfulness: number | null;     // Means are over queries where the metric was judged
+  meanContextPrecision: number | null;
+  meanAnswerRelevance: number | null;
+  meanAnswerCorrectness: number | null;
+  failedQueries: number;               // Queries with an error (not judged, excluded from means)
+  results: EvalQueryResult[];          // Granular query evaluation results
 }
 ```
+
+The gate rules live in `eval_baseline.json` under `gate_thresholds` and all are required:
+`passedGate` is false when any query failed, when any judged metric of any query is below
+`min_query_floor`, or when a mean drops more than `max_regression_delta` below its value in
+`metrics`. A metric absent from `metrics` is reported but not regression-checked.
+`pass_thresholds` sets the per-query, per-metric threshold behind `passed`.
 
 ### 3.7 `StageBenchmarkDTO` & `BenchmarkRunResponse`
 ```typescript

@@ -202,6 +202,6 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
    - **`frontend`**: `npm ci && npm run build` (`tsc -b` type-checks the studio against `types.ts`, then Vite builds it).
 2. **Golden Dataset Evaluation Gate** (after all three gates pass; skipped for fork PRs or without `TYPESAFE_API_KEY`):
    - Runs `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json` on an ephemeral database.
-   - Fails on a mean regression above 0.03, any query's faithfulness below 0.50, or a Noul contradiction veto. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
+   - Judges faithfulness, context precision, answer relevance and answer correctness. Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

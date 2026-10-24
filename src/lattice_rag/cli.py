@@ -394,6 +394,7 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     import asyncio
 
     from lattice_rag.eval import EvalRunner, JevEvaluator
+    from lattice_rag.eval.gate import format_metric
     from lattice_rag.storage.extract import EntityExtractor
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
@@ -415,21 +416,27 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
 
             click.echo("\n=================== Evaluation Results ===================")
             click.echo(
-                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} {'Status':<10}"
+                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} "
+                f"{'Correctness':<15} {'Status':<10}"
             )
-            click.echo("-" * 65)
+            click.echo("-" * 80)
             for idx, r in enumerate(resp.results):
-                status_str = "✓ PASS" if r.passed else "✗ FAIL"
+                status_str = "✓ PASS" if r.passed else f"✗ FAIL {r.error or ''}".rstrip()
                 q_id = f"eval_{idx + 1:02d}"
                 click.echo(
-                    f"{q_id:<10} {r.faithfulness:<15.4f} {r.context_precision:<15.4f} {r.answer_relevance:<15.4f} {status_str:<10}"
+                    f"{q_id:<10} {format_metric(r.faithfulness):<15} "
+                    f"{format_metric(r.context_precision):<15} "
+                    f"{format_metric(r.answer_relevance):<15} "
+                    f"{format_metric(r.answer_correctness):<15} {status_str:<10}"
                 )
 
-            click.echo("=" * 65)
+            click.echo("=" * 80)
             click.echo(f"Total Evaluated Queries: {resp.total_queries}")
-            click.echo(f"Mean Faithfulness:       {resp.mean_faithfulness:.4f}")
-            click.echo(f"Mean Context Precision:  {resp.mean_context_precision:.4f}")
-            click.echo(f"Mean Answer Relevance:   {resp.mean_answer_relevance:.4f}")
+            click.echo(f"Failed (not judged):     {resp.failed_queries}")
+            click.echo(f"Mean Faithfulness:       {format_metric(resp.mean_faithfulness)}")
+            click.echo(f"Mean Context Precision:  {format_metric(resp.mean_context_precision)}")
+            click.echo(f"Mean Answer Relevance:   {format_metric(resp.mean_answer_relevance)}")
+            click.echo(f"Mean Answer Correctness: {format_metric(resp.mean_answer_correctness)}")
             click.echo(f"Max Regression Delta:    {resp.regression_delta:+.4f}")
 
             if resp.passed_gate:
@@ -437,7 +444,8 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
                 return True
             else:
                 click.echo(
-                    "\n✗ CI/CD QUALITY GATE FAILED (Regression delta < -0.03 or floor violation)"
+                    "\n✗ CI/CD QUALITY GATE FAILED (failed query, floor violation, or regression; "
+                    "thresholds are in the baseline file)"
                 )
                 return False
         finally:

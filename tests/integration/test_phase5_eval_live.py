@@ -47,7 +47,7 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
         "queries": full_ds["queries"][:2],  # First 2 queries (cite only doc 1)
     }
     mini_baseline = {
-        "version": "0.4.0",
+        "version": "2.0.0",
         "metrics": {
             "faithfulness": 0.80,
             "context_precision": 0.75,
@@ -56,6 +56,12 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
         "gate_thresholds": {
             "max_regression_delta": 0.05,
             "min_query_floor": 0.50,
+            "pass_thresholds": {
+                "faithfulness": 0.70,
+                "context_precision": 0.65,
+                "answer_relevance": 0.70,
+                "answer_correctness": 0.70,
+            },
         },
     }
 
@@ -119,23 +125,17 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
             raise
 
         assert resp.total_queries == 2
-        assert 0.0 <= resp.mean_faithfulness <= 1.0
-        assert 0.0 <= resp.mean_context_precision <= 1.0
-        assert 0.0 <= resp.mean_answer_relevance <= 1.0
+        assert resp.failed_queries == 0
+        for mean in (
+            resp.mean_faithfulness,
+            resp.mean_context_precision,
+            resp.mean_answer_relevance,
+            resp.mean_answer_correctness,
+        ):
+            assert mean is not None and 0.0 <= mean <= 1.0
         assert len(resp.results) == 2
 
-        print("\n[Live Phase 5 Eval Results]:")
-        print(f"Mean Faithfulness:      {resp.mean_faithfulness:.4f}")
-        print(f"Mean Context Precision: {resp.mean_context_precision:.4f}")
-        print(f"Mean Answer Relevance:  {resp.mean_answer_relevance:.4f}")
-        print(f"Gate Passed:            {resp.passed_gate}")
-        print(f"Regression Delta:       {resp.regression_delta:+.4f}")
-
-        for i, r in enumerate(resp.results):
-            print(
-                f"Query {i + 1}: {r.query[:50]}... | "
-                f"Faith: {r.faithfulness:.2f} | Prec: {r.context_precision:.2f} | Rel: {r.answer_relevance:.2f}"
-            )
+        print("\n" + EvalRunner.format_markdown_report(resp))
 
     finally:
         with contextlib.suppress(Exception):
