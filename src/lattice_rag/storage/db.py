@@ -255,6 +255,7 @@ class LatticeStore:
         relations: list[RelationData],
         pending: dict[tuple[str, str], int],
         doc_names: dict[str, int],
+        removed: frozenset[int] = frozenset(),
     ) -> tuple[int, int]:
         """Link one chunk's entities (creating new canonical ones) and their relations.
 
@@ -266,6 +267,9 @@ class LatticeStore:
         chunk's entities first, then against entities seen earlier in the same document
         (``doc_names``). They never resolve by bare name against the whole graph, where a
         name alone is ambiguous; an unresolved relation is skipped.
+
+        ``removed`` holds entity ids deleted earlier in this transaction (a replace) but
+        not yet evicted from the shared cache; a cache hit on one counts as a miss.
         """
         created_entities = 0
         created_relations = 0
@@ -275,6 +279,8 @@ class LatticeStore:
         for ent in entities:
             key = entity_key(ent.name, ent.entity_type)
             ent_id = self._entity_cache.get(key)
+            if ent_id in removed:
+                ent_id = None
             if ent_id is None:
                 ent_id = pending.get(key)
             if ent_id is None:
@@ -355,11 +361,16 @@ class LatticeStore:
         chunks: list[ChunkData],
         chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
         tags: list[str] | None = None,
+        replace: bool = False,
     ) -> IngestStats:
         """Atomically ingest document, chunks, entities, and relations in a single write transaction.
 
         Each ``chunk_entities_relations`` entry names its chunk by index into ``chunks``.
         The whole payload is validated before anything is written.
+
+        With ``replace``, a stored document with this ``doc_id`` is deleted in the same
+        transaction as the insert, so a failure part-way leaves the old version intact.
+        Without it the caller is responsible for rejecting an existing ``doc_id``.
 
         Raises:
             EmbeddingDimensionError: if a chunk embedding has the wrong dimension.
@@ -382,7 +393,11 @@ class LatticeStore:
         if tags:
             doc_properties["tags"] = list(tags)
 
+        removed: set[int] = set()
         with self.db.write() as txn:
+            if replace:
+                removed = self.delete_document_in_txn(txn, doc_id) or set()
+            frozen_removed = frozenset(removed)
             doc_node = txn.create_node(labels=["Document"], properties=doc_properties)
 
             for chunk in chunks:
@@ -400,12 +415,14 @@ class LatticeStore:
 
             for c_ref, entities, relations in chunk_entities_relations:
                 created_entities, created_relations = self._write_entity_group(
-                    txn, chunk_ids[c_ref], entities, relations, pending, doc_names
+                    txn, chunk_ids[c_ref], entities, relations, pending, doc_names, frozen_removed
                 )
                 total_entities += created_entities
                 total_relations += created_relations
 
             txn.commit()
+        # Evict before publishing: a re-created entity's key must map to its new id
+        self.evict_entities(removed)
         self._entity_cache.update(pending)
 
         return IngestStats(

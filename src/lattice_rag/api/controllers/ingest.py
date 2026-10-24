@@ -42,6 +42,7 @@ class IngestController(Controller):
                 title=data.title,
                 text=data.text,
                 tags=data.tags,
+                replace=data.replace,
             )
         except DocumentExistsError as e:
             raise HTTPException(status_code=HTTP_409_CONFLICT, detail=str(e)) from e
