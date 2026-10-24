@@ -67,6 +67,7 @@ export interface IngestResponse {
   chunkCount: number;
   entityCount: number;
   relationCount: number;
+  persistence: string;
 }
 
 export interface CacheStatsResponse {

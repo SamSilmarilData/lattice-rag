@@ -61,7 +61,15 @@ db.create_node_fts_index("Entity", "name")
   ```
   Returns BM25-ranked relevance scores for exact keyword and term matching.
 
-### 2.3 Reciprocal Rank Fusion (RRF)
+### 2.3 Document Equality Index
+`LatticeStore` creates an equality index on `Document.doc_id` at startup (building it backfills an existing database):
+```python
+db.create_node_property_index("Document", "doc_id")
+txn.find_nodes_by_label_property("Document", "doc_id", doc_id)
+```
+The duplicate-document check on ingest and document delete both use it, so neither scans every Document.
+
+### 2.4 Reciprocal Rank Fusion (RRF)
 Vector similarity and BM25 search results are fused using standard RRF ($k=60$):
 $$\text{RRF}(d) = \sum_{m \in \{\text{vector}, \text{bm25}\}} \frac{1}{60 + \text{rank}_m(d)}$$
 
@@ -83,6 +91,11 @@ with db.write() as txn:
     # CRITICAL: Commit transaction
     txn.commit()
 ```
+
+### 3.1 Document Delete
+`LatticeStore.delete_document(doc_id)` runs in one write transaction. It removes the Document, its Chunks (with their vectors and BM25 entries), every edge on those nodes, and each Entity that no remaining Chunk `CONTAINS`; entities shared with other documents stay. LatticeDB's `delete_node` does not remove a node's edges, so the store deletes them explicitly first. Deleted entities leave the canonical-entity cache only after commit. `delete_document_in_txn(txn, doc_id)` exposes the same steps inside a caller's transaction. `DocumentIngester.delete` holds the ingest write lock while it runs and clears Tier 1 afterwards.
+
+On the deployed instance, documents ingested or deleted at runtime are ephemeral ([ADR-0001](adr/0001-seeded-database-single-instance.md)).
 
 ---
 
