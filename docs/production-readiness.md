@@ -185,7 +185,7 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 
 ## 6. Continuous Integration & Quality Gates Pipeline
 
-`lattice-rag` runs quality gates on every push and pull request via GitHub Actions (`.github/workflows/eval-gate.yml`):
+`lattice-rag` runs key-free quality gates on every push and pull request (`.github/workflows/eval-gate.yml`) and an advisory, Jev-judged Live Tier nightly and on demand (`.github/workflows/live-tier.yml`). The diagram below predates the split and still shows the live evaluation as a PR step.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
@@ -200,8 +200,21 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
    - **`lint`**: `ruff check src tests` (rules `E,F,W,I,N,UP,B,A,C4,SIM`), `ruff format --check src tests` (ruff version pinned in `pyproject.toml`), and `mypy src` in strict mode.
    - **`unit-tests`**: the hermetic `pytest tests/unit/` suite with mock keys and no network, including the security audit (`test_security_audit.py`: secret scan of tracked files, `SecretStr` masking, DTO field audit, log redaction, error shielding).
    - **`frontend`**: `npm ci && npm run build` (`tsc -b` type-checks the studio against `types.ts`, then Vite builds it).
-2. **Golden Dataset Evaluation Gate** (after all three gates pass; skipped for fork PRs or without `TYPESAFE_API_KEY`):
-   - Runs `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json` on an ephemeral database.
-   - Judges faithfulness, context precision, answer relevance and answer correctness. Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
+   - **`hermetic-tier`** (the required PR gate, ADR-0002): `lattice-rag hermetic` validates the Gold Set and checks retrieval recall and MRR per Slice against Gold Passages with the real local models and no API keys, so it runs for fork PRs too.
+
+### Two tiers: Hermetic gates, Live advises
+
+| | Hermetic Tier | Live Tier |
+| :--- | :--- | :--- |
+| Workflow | `eval-gate.yml`, every push and PR | `live-tier.yml`, nightly (03:17 UTC) and `workflow_dispatch` |
+| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the fallback) |
+| Measures | Gold Set validity, retrieval recall and MRR per Slice | Jev-judged faithfulness, context precision, answer relevance, answer correctness |
+| Blocks merges | Yes | No: it never runs on PRs |
+| Missing secret | n/a | The run fails with an error annotation naming the secret; it is never skipped |
+
+**Live Tier** (`lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output live_tier_report.json`, on an ephemeral database; the report is uploaded as the `live-tier-report` artifact):
+- `lattice-rag eval` itself refuses to start without `TYPESAFE_API_KEY` or `GROQ_API_KEY` (without Groq every answer would come from the fallback, so the run would measure the wrong system).
+- Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. A red nightly is a signal to investigate, not a merge block. Latency SLAs are not part of either tier; check them with `lattice-rag benchmark --sla-check`.
+- **Tolerance from measured variance.** The judge's run-to-run noise sets `max_regression_delta`: run the Live Tier three times on unchanged code, then `lattice-rag measure-baseline r1.json r2.json r3.json`. It sets each baseline mean to the mean of the three run means and `max_regression_delta` to two sample standard deviations of the noisiest metric, rounded up to 0.01. The raw per-run means, the standard deviations and the rule are kept under `measurement` in `eval_baseline.json`. The floor and per-query `pass_thresholds` are policy and are edited by hand. Re-measure when a change intentionally moves the metrics (prompt, model, retrieval, Gold Set).
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.
