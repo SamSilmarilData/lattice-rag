@@ -193,3 +193,46 @@ def test_trusted_proxy_hops_read_from_env(monkeypatch):
 def test_negative_trusted_proxy_hops_rejected(tmp_path):
     with pytest.raises(ValueError):
         _config(tmp_path, trusted_proxy_hops=-1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("skip_score", "expected_jev_calls"),
+    [(None, 2), (4.0, 1)],  # off: route + Noul guardrail; on: the 5.0-scored chunk skips Noul
+)
+async def test_rerank_score_noul_skip_follows_the_setting(
+    monkeypatch, tmp_path, skip_score, expected_jev_calls
+):
+    """GUARDRAIL_SKIP_RERANK_SCORE reaches the served pipeline; unset, every chunk goes to Noul."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import numpy as np
+    from typesafe_sdk import AsyncTypeSafeClient
+
+    import lattice_rag.app as app_module
+    from lattice_rag.retrieval.embeddings import RerankResult
+    from lattice_rag.storage.db import SearchResult, SubgraphResult
+
+    store = MagicMock()
+    store.vector_search.return_value = [
+        SearchResult(node_id=1, score=0.9, text="LatticeDB uses HNSW.", metadata={})
+    ]
+    store.bm25_search.return_value = []
+    store.get_entities_for_chunks.return_value = []
+    store.traverse_from_entities.return_value = SubgraphResult(nodes=[], edges=[])
+    embedder = MagicMock()
+    embedder.embed_query.return_value = np.ones(384, dtype=np.float32)
+    embedder.rerank.return_value = [RerankResult(index=0, score=5.0, text="LatticeDB uses HNSW.")]
+    monkeypatch.setattr(app_module, "LatticeStore", lambda *a, **k: store)
+    monkeypatch.setattr(app_module, "EmbeddingService", lambda *a, **k: embedder)
+    monkeypatch.setattr(app_module, "EntityExtractor", lambda *a, **k: MagicMock())
+    # Every Jev call fails fast (no network): routing degrades to hybrid, Noul to unverified
+    jev_calls = AsyncMock(side_effect=RuntimeError("no network in unit tests"))
+    monkeypatch.setattr(AsyncTypeSafeClient, "system_one", jev_calls)
+
+    app = create_app(_config(tmp_path, guardrail_skip_rerank_score=skip_score))
+    async with AsyncTestClient(app) as client:
+        resp = await client.post("/api/v1/query", json={"query": "How does vector search work?"})
+
+    assert resp.status_code == 201
+    assert jev_calls.await_count == expected_jev_calls

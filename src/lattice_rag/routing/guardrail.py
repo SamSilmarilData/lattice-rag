@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
@@ -128,3 +128,70 @@ class ContextGuardrail:
     async def close(self) -> None:
         """Alias for aclose."""
         await self.aclose()
+
+
+class ChunkGuardrail(Protocol):
+    """What the retrieval pipeline needs from a guardrail."""
+
+    async def filter_chunks(self, query: str, chunks: list[dict[str, Any]]) -> GuardrailResult: ...
+
+    async def aclose(self) -> None: ...
+
+
+class RerankScoreGate:
+    """Skips the Noul guardrail for chunks the cross-encoder already rates clearly relevant.
+
+    Chunks with ``rerank_score >= min_score`` are kept without a Noul question; the rest go
+    to the wrapped guardrail. Output keeps the reranker's order. Off by default
+    (``GUARDRAIL_SKIP_RERANK_SCORE`` unset); enabling it requires Live Tier results showing
+    no quality loss (docs/production-readiness.md).
+    """
+
+    def __init__(self, guardrail: ChunkGuardrail, min_score: float) -> None:
+        self.guardrail = guardrail
+        self.min_score = min_score
+
+    def _clears(self, chunk: dict[str, Any]) -> bool:
+        score = chunk.get("rerank_score")
+        return score is not None and float(score) >= self.min_score
+
+    async def filter_chunks(self, query: str, chunks: list[dict[str, Any]]) -> GuardrailResult:
+        to_check = [c for c in chunks if not self._clears(c)]
+        skipped = len(chunks) - len(to_check)
+        logger.debug("rerank_score_gate", skipped=skipped, checked=len(to_check))
+        if not to_check:
+            return GuardrailResult(chunks=list(chunks), low_grounding=False)
+
+        verdict = await self.guardrail.filter_chunks(query, to_check)
+        # The guardrail returns its survivors as copies, in input order: merge them back
+        # between the skipped chunks so the reranker's order holds.
+        survivors = verdict.chunks
+        kept: list[dict[str, Any]] = []
+        j = 0
+        for chunk in chunks:
+            if self._clears(chunk):
+                kept.append(chunk)
+            elif j < len(survivors) and survivors[j].get("node_id") == chunk.get("node_id"):
+                kept.append(survivors[j])
+                j += 1
+        return GuardrailResult(
+            chunks=kept,
+            low_grounding=verdict.low_grounding and skipped == 0,
+            verified=verdict.verified,
+        )
+
+    async def aclose(self) -> None:
+        await self.guardrail.aclose()
+
+    async def close(self) -> None:
+        """Alias for aclose."""
+        await self.aclose()
+
+
+def with_rerank_skip(
+    guardrail: ContextGuardrail | None, min_score: float | None
+) -> ContextGuardrail | RerankScoreGate | None:
+    """Wrap ``guardrail`` in a :class:`RerankScoreGate` when a skip score is configured."""
+    if guardrail is None or min_score is None:
+        return guardrail
+    return RerankScoreGate(guardrail, min_score)

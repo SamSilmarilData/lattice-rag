@@ -49,7 +49,7 @@ from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.routing.guardrail import ContextGuardrail
+from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
@@ -105,7 +105,11 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     # 3. Decision routing & context guardrail. In mock-key mode neither is called, so no
     #    query pays for failing Jev calls; the resulting answers are flagged unverified.
     router = QueryRouter.offline() if config.using_mock_keys else QueryRouter(typesafe_client())
-    guardrail = None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client())
+    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set.
+    guardrail = with_rerank_skip(
+        None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client()),
+        config.guardrail_skip_rerank_score,
+    )
 
     # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
     semantic_cache = SemanticCache(ts_client=None if config.using_mock_keys else typesafe_client())
