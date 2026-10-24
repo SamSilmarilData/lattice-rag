@@ -53,6 +53,8 @@ export interface QueryResponse {
   timings: StageTiming[];
   degraded: boolean;
   lowGrounding: boolean;
+  // Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+  unverified: boolean;
 }
 
 export interface IngestRequest {
@@ -60,6 +62,7 @@ export interface IngestRequest {
   title: string;
   text: string;
   tags?: string[];
+  replace?: boolean;
 }
 
 export interface IngestResponse {
@@ -67,6 +70,7 @@ export interface IngestResponse {
   chunkCount: number;
   entityCount: number;
   relationCount: number;
+  persistence: string;
 }
 
 export interface CacheStatsResponse {
@@ -86,21 +90,30 @@ export interface HealthResponse {
   geminiConfigured: boolean;
 }
 
+// A metric is null when it was not judged: it does not apply to the query's
+// Slice, or the query failed (error is set) and was never sent to the judge.
+export type EvalQueryError = 'pipeline_error' | 'judge_error';
+
 export interface EvalQueryResult {
   query: string;
-  faithfulness: number;
-  contextPrecision: number;
-  answerRelevance: number;
   passed: boolean;
+  faithfulness: number | null;
+  contextPrecision: number | null;
+  answerRelevance: number | null;
+  answerCorrectness: number | null;
+  error: EvalQueryError | null;
 }
 
+// Means are over the queries where the metric was judged (null if none were)
 export interface EvalRunResponse {
   totalQueries: number;
-  meanFaithfulness: number;
-  meanContextPrecision: number;
-  meanAnswerRelevance: number;
   passedGate: boolean;
   regressionDelta: number;
+  meanFaithfulness: number | null;
+  meanContextPrecision: number | null;
+  meanAnswerRelevance: number | null;
+  meanAnswerCorrectness: number | null;
+  failedQueries: number;
   results: EvalQueryResult[];
 }
 

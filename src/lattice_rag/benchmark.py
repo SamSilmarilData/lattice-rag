@@ -276,7 +276,7 @@ class BenchmarkEngine:
             q = queries[q_idx % len(queries)]
             q_idx += 1
             if live_llm:
-                # Full StateGraph, bypassing Tier 1 so every iteration does real work
+                # Full pipeline, bypassing Tier 1 so every iteration does real work
                 return await orch.run(q, use_cache=False)
             return await orch.retrieval.execute(q, route="hybrid", apply_guardrail=False)
 

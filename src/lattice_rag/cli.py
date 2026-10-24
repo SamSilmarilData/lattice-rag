@@ -162,7 +162,13 @@ def query(text: str, stream: bool) -> None:
 @click.argument("filepath", type=click.Path(exists=True))
 @click.option("--doc-id", default=None, help="Document ID")
 @click.option("--title", default=None, help="Document title")
-def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
+@click.option(
+    "--replace",
+    is_flag=True,
+    default=False,
+    help="Atomically replace an existing document with this doc_id",
+)
+def ingest(filepath: str, doc_id: str | None, title: str | None, replace: bool) -> None:
     """Ingest a text file into the knowledge graph."""
     import asyncio
 
@@ -170,7 +176,7 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
-    from lattice_rag.storage.db import LatticeStore
+    from lattice_rag.storage.db import IngestValidationError, LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
 
     path = Path(filepath)
@@ -189,9 +195,11 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
         try:
-            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title, replace=replace)
         except DocumentExistsError as e:
-            raise click.ClickException(f"{e}. Use a different --doc-id.") from e
+            raise click.ClickException(f"{e}. Use a different --doc-id, or --replace.") from e
+        except IngestValidationError as e:
+            raise click.ClickException(f"Ingest rejected, nothing was written: {e}") from e
         finally:
             store.close()
         click.echo(
@@ -460,6 +468,7 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     import asyncio
 
     from lattice_rag.eval import EvalRunner, JevEvaluator
+    from lattice_rag.eval.gate import format_metric
     from lattice_rag.storage.extract import EntityExtractor
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
@@ -481,21 +490,27 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
 
             click.echo("\n=================== Evaluation Results ===================")
             click.echo(
-                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} {'Status':<10}"
+                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} "
+                f"{'Correctness':<15} {'Status':<10}"
             )
-            click.echo("-" * 65)
+            click.echo("-" * 80)
             for idx, r in enumerate(resp.results):
-                status_str = "✓ PASS" if r.passed else "✗ FAIL"
+                status_str = "✓ PASS" if r.passed else f"✗ FAIL {r.error or ''}".rstrip()
                 q_id = f"eval_{idx + 1:02d}"
                 click.echo(
-                    f"{q_id:<10} {r.faithfulness:<15.4f} {r.context_precision:<15.4f} {r.answer_relevance:<15.4f} {status_str:<10}"
+                    f"{q_id:<10} {format_metric(r.faithfulness):<15} "
+                    f"{format_metric(r.context_precision):<15} "
+                    f"{format_metric(r.answer_relevance):<15} "
+                    f"{format_metric(r.answer_correctness):<15} {status_str:<10}"
                 )
 
-            click.echo("=" * 65)
+            click.echo("=" * 80)
             click.echo(f"Total Evaluated Queries: {resp.total_queries}")
-            click.echo(f"Mean Faithfulness:       {resp.mean_faithfulness:.4f}")
-            click.echo(f"Mean Context Precision:  {resp.mean_context_precision:.4f}")
-            click.echo(f"Mean Answer Relevance:   {resp.mean_answer_relevance:.4f}")
+            click.echo(f"Failed (not judged):     {resp.failed_queries}")
+            click.echo(f"Mean Faithfulness:       {format_metric(resp.mean_faithfulness)}")
+            click.echo(f"Mean Context Precision:  {format_metric(resp.mean_context_precision)}")
+            click.echo(f"Mean Answer Relevance:   {format_metric(resp.mean_answer_relevance)}")
+            click.echo(f"Mean Answer Correctness: {format_metric(resp.mean_answer_correctness)}")
             click.echo(f"Max Regression Delta:    {resp.regression_delta:+.4f}")
 
             if resp.passed_gate:
@@ -503,7 +518,8 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
                 return True
             else:
                 click.echo(
-                    "\n✗ CI/CD QUALITY GATE FAILED (Regression delta < -0.03 or floor violation)"
+                    "\n✗ CI/CD QUALITY GATE FAILED (failed query, floor violation, or regression; "
+                    "thresholds are in the baseline file)"
                 )
                 return False
         finally:
