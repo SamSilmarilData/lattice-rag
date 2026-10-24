@@ -1,20 +1,59 @@
 {
   "version": "2.0.0",
-  "updated_at": "2026-10-06T00:00:00Z",
-  "total_queries": 20,
+  "updated_at": "2026-10-24T23:34:25Z",
+  "total_queries": 30,
   "metrics": {
-    "faithfulness": 0.88,
-    "context_precision": 0.85,
-    "answer_relevance": 0.90
+    "faithfulness": 0.8286,
+    "context_precision": 0.808,
+    "answer_relevance": 0.8648,
+    "answer_correctness": 0.8832
   },
   "gate_thresholds": {
-    "max_regression_delta": 0.03,
-    "min_query_floor": 0.50,
+    "max_regression_delta": 0.05,
+    "min_query_floor": 0.5,
     "pass_thresholds": {
-      "faithfulness": 0.70,
+      "faithfulness": 0.7,
       "context_precision": 0.65,
-      "answer_relevance": 0.70,
-      "answer_correctness": 0.70
+      "answer_relevance": 0.7,
+      "answer_correctness": 0.7
     }
+  },
+  "measurement": {
+    "runs": [
+      {
+        "faithfulness": 0.8242,
+        "context_precision": 0.8113,
+        "answer_relevance": 0.8617,
+        "answer_correctness": 0.8795
+      },
+      {
+        "faithfulness": 0.8519,
+        "context_precision": 0.815,
+        "answer_relevance": 0.8741,
+        "answer_correctness": 0.8829
+      },
+      {
+        "faithfulness": 0.8096,
+        "context_precision": 0.7978,
+        "answer_relevance": 0.8585,
+        "answer_correctness": 0.8872
+      }
+    ],
+    "means": {
+      "faithfulness": 0.8286,
+      "context_precision": 0.808,
+      "answer_relevance": 0.8648,
+      "answer_correctness": 0.8832
+    },
+    "stdev": {
+      "faithfulness": 0.0215,
+      "context_precision": 0.0091,
+      "answer_relevance": 0.0082,
+      "answer_correctness": 0.0039
+    },
+    "tolerance": 0.05,
+    "tolerance_rule": "max_regression_delta = 2 x the largest per-metric sample standard deviation of the run means, rounded up to 0.01 (minimum 0.01); metrics = mean of the run means",
+    "measured_at": "2026-10-24T23:34:25Z",
+    "notes": "Three sequential `lattice-rag eval --output` runs on unchanged code (fix/audit-spec-issue-2 at faece2c plus ticket-16, before ticket-19), Gold Set v2 (30 queries), ephemeral DB, macOS, local ONNX models. No pipeline or judge errors; Groq returned 429 on 1/4/2 queries per run and those answers came from the Gemini fallback, so that noise is inside the measurement. faithfulness sd 0.0215 is the widest: 2 x 0.0215 = 0.043, rounded up to 0.05. Per-run passed queries 22/25/20. Floor violations: Noul contradiction vetoes (faithfulness 0.0) on long_context queries eval_20, eval_28 (run 1), eval_28, eval_29 (run 3); run 2 had none."
   }
 }

@@ -44,7 +44,7 @@ Traditional GraphRAG architectures suffer from heavy JVM database footprints (Ne
 | **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 in-process exact + semantic cache (fuzzy hits verified by Jev Noul); Tier 2 Redis hash of pre-computed FAQ answers used when every LLM provider fails. |
 | **Primary Synthesis** | **GroqCloud** | Ultra-fast token streaming (200+ tok/s) via `qwen/qwen3.8-27b` with structured citation grounding. |
 | **Context Fallback** | **Gemini 3.8 Flash** | Large-context model for cross-document synthesis and for failover when the Groq circuit breaker opens. |
-| **CI/CD Quality Gate** | **TypeSafe Jev Score + Noul** | Automated 20-query evaluation gate blocking PRs on regression ($\Delta \ge -0.03$), floor drop ($< 0.50$), and contradiction veto. |
+| **CI/CD Quality Gate** | **Hermetic Tier + Live Tier (Jev Score + Noul)** | Key-free retrieval gate (recall/MRR per Slice) on every PR; advisory nightly Live Tier judging four metrics against a measured baseline (tolerance = 2 sd of judge noise), a 0.50 floor, and contradiction veto. |
 | **Secret Hygiene** | **Defense in Depth** | Admin-key guard on write/cost endpoints, rate limits and input bounds, `SecretStr` masking, log redaction, RFC 9457 error shielding, prompt-injection delimiting, and `apikeys.md` migration. |
 
 ---
@@ -62,7 +62,8 @@ lattice-rag/
 ├── eval_dataset.json            # Gold Set v2 (format 2.0.0): corpus + 30 sliced queries with verbatim Gold Passages
 ├── eval_baseline.json           # Tracked main-branch baseline metrics & gate thresholds
 ├── .github/workflows/           # GitHub Actions CI/CD workflows
-│   └── eval-gate.yml            # Two-tier PR regression gate (hermetic tests + live Jev evaluation)
+│   ├── eval-gate.yml            # PR gate: lint, unit tests, studio build, Hermetic Tier
+│   └── live-tier.yml            # Advisory Live Tier (Jev-judged), nightly and on demand
 ├── docs/                        # In-depth architectural guides
 │   ├── architecture.md          # Multi-layer system architecture
 │   ├── security.md              # Zero-trust secret management
@@ -201,8 +202,14 @@ lattice-rag ingest path/to/document.txt
 # Run latency benchmarks on the retrieval pipeline
 lattice-rag benchmark
 
-# Run the 20-query CI/CD evaluation gate against baseline
-lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json
+# Hermetic Tier: key-free retrieval gate (what PRs must pass)
+lattice-rag hermetic --dataset eval_dataset.json
+
+# Live Tier: Jev-judged metrics against the baseline (needs TYPESAFE_API_KEY and GROQ_API_KEY)
+lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output run.json
+
+# Re-measure the baseline and tolerance from three Live Tier reports
+lattice-rag measure-baseline run1.json run2.json run3.json
 ```
 
 ---

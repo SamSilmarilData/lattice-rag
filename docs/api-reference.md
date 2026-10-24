@@ -179,7 +179,10 @@ interface EvalRunResponse {
 The gate rules live in `eval_baseline.json` under `gate_thresholds` and all are required:
 `passedGate` is false when any query failed, when any judged metric of any query is below
 `min_query_floor`, or when a mean drops more than `max_regression_delta` below its value in
-`metrics`. A metric absent from `metrics` is reported but not regression-checked.
+`metrics`. A metric absent from `metrics` is reported but not regression-checked. `metrics`
+and `max_regression_delta` are measured, not chosen: `lattice-rag measure-baseline` derives
+them from three Live Tier runs (two standard deviations of the noisiest metric) and records
+the raw runs under `measurement`.
 `pass_thresholds` sets the per-query, per-metric threshold behind `passed`.
 
 ### 3.7 `StageBenchmarkDTO` & `BenchmarkRunResponse`
