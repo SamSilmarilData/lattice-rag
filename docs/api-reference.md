@@ -28,8 +28,8 @@ http://localhost:8000/schema/scalar
 | `GET` | `/health` | — | — | `HealthResponse` | Health and configuration status. |
 
 ### 2.1 Authentication & Limits
-- **Admin endpoints** require `X-Admin-Key: <ADMIN_API_KEY>`. A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled.
-- **Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded.
+- **Admin endpoints** require `X-Admin-Key: <ADMIN_API_KEY>`. A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled. After 5 wrong keys within 5 minutes a client gets `429` for the rest of that window.
+- **Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded. Clients are identified by the socket peer, or by `X-Forwarded-For` when `TRUSTED_PROXY_HOPS` is set (see `docs/deployment.md`).
 - **Validation** failures return `400` problem details: `query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB.
 - **Unexpected errors** return `500` with a generic `detail` and a `requestId` to correlate with server logs; exception text is never returned.
 

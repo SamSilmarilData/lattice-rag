@@ -22,6 +22,10 @@ for secret in "${REQUIRED_SECRETS[@]}"; do
 done
 SECRET_FLAGS=$(for s in "${REQUIRED_SECRETS[@]}"; do printf '%s=%s:latest,' "$s" "$s"; done | sed 's/,$//')
 
+# Cloud Run's Google Front End appends the caller's address to X-Forwarded-For: one trusted
+# hop. Set TRUSTED_PROXY_HOPS=2 when an external HTTPS load balancer fronts the service.
+TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
+
 echo "Deploying $SERVICE_NAME to Google Cloud Run (Region: $REGION, Project: $PROJECT_ID)..."
 
 # The LatticeDB file lives on the instance's ephemeral filesystem. Pin to a single instance so
@@ -39,6 +43,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --min-instances 0 \
   --max-instances 1 \
   --set-secrets "$SECRET_FLAGS" \
+  --set-env-vars "TRUSTED_PROXY_HOPS=$TRUSTED_PROXY_HOPS" \
   --allow-unauthenticated
 
 echo "✓ Deployment complete! Service URL:"

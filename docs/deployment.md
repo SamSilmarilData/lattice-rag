@@ -107,6 +107,25 @@ Oracle Cloud provides the industry's most generous persistent compute tier for f
    docker build -t lattice-rag .
    docker run -d --restart=always -p 8000:8000 --env-file .env lattice-rag
    ```
+   If you put nginx or Caddy in front of the container, set `TRUSTED_PROXY_HOPS=1` in `.env` (see below).
+
+---
+
+## Client identity behind reverse proxies (`TRUSTED_PROXY_HOPS`)
+
+The query rate limit (`QUERY_RATE_LIMIT_PER_MINUTE`) and the admin-key lockout both key on the client's address. `TRUSTED_PROXY_HOPS` says how many reverse proxies sit between the client and the app:
+
+| Value | Client identity | Use for |
+|-------|-----------------|---------|
+| `0` (default) | Socket peer; `X-Forwarded-For` is ignored | Direct exposure, local dev |
+| `1` | Rightmost `X-Forwarded-For` entry | Cloud Run, a single nginx/Caddy, Cloudflare Tunnel |
+| `N` | `N`th entry from the right | `N` proxies that each append to `X-Forwarded-For` |
+
+Every proxy appends the address it received the request from, so entries to the left of the trusted ones were written by the client and are ignored. A header with fewer than `N` entries is not trusted and the socket peer is used.
+
+Set the value to the real hop count. Too low, and every client behind the proxy shares one identity (one rate-limit budget, one lockout). Too high, and clients can choose their identity by sending their own `X-Forwarded-For`. `scripts/deploy_cloud_run.sh` sets `TRUSTED_PROXY_HOPS=1`; override it (`TRUSTED_PROXY_HOPS=2 ./scripts/deploy_cloud_run.sh ...`) when an external HTTPS load balancer fronts the service.
+
+**Admin-key lockout.** A client that sends a wrong `X-Admin-Key` 5 times within 5 minutes gets `429` from the admin endpoints for the rest of that window, even with the right key. Other clients are unaffected, and a successful attempt clears the count. Counts are kept in process memory per server worker and reset on restart.
 
 ---
 
