@@ -20,7 +20,7 @@ http://localhost:8000/schema/scalar
 | `GET` | `/` | — | — | `text/html` | Studio SPA (or fallback landing page). |
 | `POST` | `/api/v1/query` | rate-limited | `QueryRequest` | `QueryResponse` | Synchronous RAG query. |
 | `POST` | `/api/v1/query/stream` | rate-limited | `QueryRequest` | `text/event-stream` | SSE stream of stage, token, error and done events. |
-| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. |
+| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists; `422` if the payload fails ingest validation (embedding dimension mismatch, unresolved chunk reference), in which case nothing is written. |
 | `GET` | `/api/v1/graph/subgraph` | — | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |
 | `GET` | `/api/v1/cache/stats` | — | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |
 | `POST` | `/api/v1/eval/run` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `EvalRunResponse` | Run the evaluation gate. |

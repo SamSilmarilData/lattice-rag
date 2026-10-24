@@ -6,11 +6,12 @@ from litestar import Controller, post
 from litestar.di import NamedDependency
 from litestar.exceptions import HTTPException
 from litestar.params import JSONBody, SkipValidation
-from litestar.status_codes import HTTP_409_CONFLICT
+from litestar.status_codes import HTTP_409_CONFLICT, HTTP_422_UNPROCESSABLE_ENTITY
 
 from lattice_rag.api.dtos import IngestRequest, IngestResponse
 from lattice_rag.api.guards import require_admin_key
 from lattice_rag.ingestion.ingester import DocumentExistsError, DocumentIngester, chunk_text
+from lattice_rag.storage.db import IngestValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ class IngestController(Controller):
             )
         except DocumentExistsError as e:
             raise HTTPException(status_code=HTTP_409_CONFLICT, detail=str(e)) from e
+        except IngestValidationError as e:
+            # Messages carry only dimensions and chunk indexes, never document text
+            raise HTTPException(status_code=HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
 
         return IngestResponse(
             document_id=data.document_id,

@@ -132,7 +132,7 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
         entities=[EntityData(name="LatticeDB", entity_type="database", embedding=vec)],
         relations=[],
     )
-    ent_id_1 = temp_store.get_canonical_entity_id("LatticeDB")
+    ent_id_1 = temp_store.get_canonical_entity_id("LatticeDB", "database")
     assert ent_id_1 is not None
 
     # Ingest LatticeDB entity again for chunk 2 (case-insensitive)
@@ -141,7 +141,7 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
         entities=[EntityData(name="latticedb", entity_type="database", embedding=vec)],
         relations=[],
     )
-    ent_id_2 = temp_store.get_canonical_entity_id("latticedb")
+    ent_id_2 = temp_store.get_canonical_entity_id("latticedb", "database")
     # Must reuse the same node ID!
     assert ent_id_1 == ent_id_2
 
@@ -182,7 +182,7 @@ def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
             ],
         )
 
-    assert temp_store.get_canonical_entity_id("LatticeDB") is None
+    assert temp_store.get_canonical_entity_id("LatticeDB", "tech") is None
 
     # A later ingest of the same entity creates a real node
     temp_store.ingest_document_bundle(
@@ -191,7 +191,7 @@ def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
         [_chunk("LatticeDB again.")],
         [(0, [EntityData(name="LatticeDB", entity_type="tech")], [])],
     )
-    ent_id = temp_store.get_canonical_entity_id("LatticeDB")
+    ent_id = temp_store.get_canonical_entity_id("LatticeDB", "tech")
     assert ent_id in temp_store.db.get_nodes_by_label("Entity")
 
 
@@ -222,7 +222,7 @@ def test_get_entities_for_chunks_is_rank_ordered_and_budgeted(temp_store: Lattic
         ],
     )
     c1, c2 = stats.chunk_ids
-    ids = {n: temp_store.get_canonical_entity_id(n) for n in "ABCD"}
+    ids = {n: temp_store.get_canonical_entity_id(n, "x") for n in "ABCD"}
 
     assert temp_store.get_entities_for_chunks([c1, c2], budget=3) == [ids["A"], ids["B"], ids["C"]]
     assert temp_store.get_entities_for_chunks([c2, c1], budget=10)[0] == ids["B"]

@@ -63,6 +63,44 @@ class IngestStats(msgspec.Struct, rename="camel"):
     chunk_ids: list[int] = []
 
 
+def _clean(text: str) -> str:
+    """Trim and collapse internal whitespace, keeping case."""
+    return " ".join(text.split())
+
+
+def entity_key(name: str, entity_type: str) -> tuple[str, str]:
+    """Canonical Entity identity: name plus type, whitespace-collapsed and case-folded."""
+    return _clean(name).casefold(), _clean(entity_type).casefold()
+
+
+class IngestValidationError(ValueError):
+    """An ingest payload is malformed; raised before anything is written."""
+
+
+class EmbeddingDimensionError(IngestValidationError):
+    """A chunk or entity embedding does not match the store's vector dimension."""
+
+    def __init__(self, what: str, actual: int, expected: int) -> None:
+        super().__init__(
+            f"{what} embedding has dimension {actual}, but the store expects {expected}"
+        )
+        self.actual = actual
+        self.expected = expected
+
+
+class UnresolvedChunkReferenceError(IngestValidationError):
+    """Entities or relations reference a chunk that is not part of the ingest payload."""
+
+    def __init__(self, ref: object, chunk_count: int | None) -> None:
+        scope = (
+            "any stored chunk"
+            if chunk_count is None
+            else f"any of the {chunk_count} chunk(s) in this document"
+        )
+        super().__init__(f"chunk reference {ref!r} does not match {scope}")
+        self.ref = ref
+
+
 class LatticeStore:
     """Embedded property-graph, HNSW vector, and BM25 full-text storage engine."""
 
@@ -74,7 +112,7 @@ class LatticeStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.vector_dimensions = vector_dimensions
-        self._entity_cache: dict[str, int] = {}
+        self._entity_cache: dict[tuple[str, str], int] = {}
 
         # Open embedded database with vector support and WAL enabled
         self.db = Database(
@@ -104,7 +142,7 @@ class LatticeStore:
         self._load_entity_cache()
 
     def _load_entity_cache(self) -> None:
-        """Preload canonical entity name -> node_id mapping for O(1) deduplication."""
+        """Preload the canonical (name, type) -> node_id mapping for O(1) deduplication."""
         try:
             entity_ids = self.db.get_nodes_by_label("Entity")
             if not entity_ids:
@@ -113,13 +151,15 @@ class LatticeStore:
                 for nid in entity_ids:
                     name = txn.get_property(nid, "name")
                     if name:
-                        self._entity_cache[str(name).strip().lower()] = nid
+                        entity_type = txn.get_property(nid, "entity_type") or ""
+                        key = entity_key(str(name), str(entity_type))
+                        self._entity_cache.setdefault(key, nid)
         except Exception as e:
             logger.debug("Could not preload entity cache: %s", e)
 
-    def get_canonical_entity_id(self, name: str) -> int | None:
-        """Return canonical node_id for an entity name if it exists in the graph."""
-        return self._entity_cache.get(name.strip().lower())
+    def get_canonical_entity_id(self, name: str, entity_type: str) -> int | None:
+        """Return the canonical node_id for an entity's identity if it exists in the graph."""
+        return self._entity_cache.get(entity_key(name, entity_type))
 
     def has_document(self, doc_id: str) -> bool:
         """Return True if a Document node with this doc_id is already stored."""
@@ -129,10 +169,79 @@ class LatticeStore:
         with self.db.read() as txn:
             return any(txn.get_property(nid, "doc_id") == doc_id for nid in doc_nodes)
 
-    def _lookup_entity(self, name: str, pending: dict[str, int]) -> int | None:
-        norm_name = name.strip().lower()
-        found = self._entity_cache.get(norm_name)
-        return found if found is not None else pending.get(norm_name)
+    def _check_dimension(self, what: str, embedding: Any) -> None:
+        actual = len(embedding)
+        if actual != self.vector_dimensions:
+            raise EmbeddingDimensionError(what, actual, self.vector_dimensions)
+
+    def _validate_entities(self, entities: list[EntityData]) -> None:
+        for ent in entities:
+            if ent.embedding is not None:
+                self._check_dimension(f"entity {ent.name!r}", ent.embedding)
+
+    def _write_entity_group(
+        self,
+        txn: Any,
+        chunk_id: int,
+        entities: list[EntityData],
+        relations: list[RelationData],
+        pending: dict[tuple[str, str], int],
+        doc_names: dict[str, int],
+    ) -> tuple[int, int]:
+        """Link one chunk's entities (creating new canonical ones) and their relations.
+
+        New canonical ids go into ``pending``; the caller publishes them to the shared
+        cache only after commit, so a rolled-back transaction cannot leave ids for nodes
+        that were never written. Returns (entities created, relations created).
+
+        Relations name their endpoints without a type, so they resolve against this
+        chunk's entities first, then against entities seen earlier in the same document
+        (``doc_names``). They never resolve by bare name against the whole graph, where a
+        name alone is ambiguous; an unresolved relation is skipped.
+        """
+        created_entities = 0
+        created_relations = 0
+        by_name: dict[str, int] = {}
+        linked: set[int] = set()
+
+        for ent in entities:
+            key = entity_key(ent.name, ent.entity_type)
+            ent_id = self._entity_cache.get(key)
+            if ent_id is None:
+                ent_id = pending.get(key)
+            if ent_id is None:
+                name, entity_type = _clean(ent.name), _clean(ent.entity_type)
+                ent_node = txn.create_node(
+                    labels=["Entity", entity_type],
+                    properties={"name": name, "entity_type": entity_type},
+                )
+                ent_id = ent_node.id
+                if ent.embedding is not None:
+                    txn.set_vector(ent_id, "embedding", ent.embedding)
+                pending[key] = ent_id
+                created_entities += 1
+
+            by_name.setdefault(key[0], ent_id)
+            if ent_id not in linked:
+                linked.add(ent_id)
+                txn.create_edge(chunk_id, ent_id, "CONTAINS")
+
+        for name, ent_id in by_name.items():
+            doc_names.setdefault(name, ent_id)
+
+        def resolve(name: str) -> int | None:
+            norm = entity_key(name, "")[0]
+            found = by_name.get(norm)
+            return found if found is not None else doc_names.get(norm)
+
+        for rel in relations:
+            s_id = resolve(rel.source_name)
+            t_id = resolve(rel.target_name)
+            if s_id is not None and t_id is not None:
+                txn.create_edge(s_id, t_id, "RELATION", properties={"type": rel.relation_type})
+                created_relations += 1
+
+        return created_entities, created_relations
 
     def ingest_document(
         self,
@@ -140,34 +249,8 @@ class LatticeStore:
         title: str,
         chunks: list[ChunkData],
     ) -> IngestStats:
-        """Ingest a document with its text chunks and vector embeddings."""
-        chunk_ids: list[int] = []
-        with self.db.write() as txn:
-            doc_node = txn.create_node(
-                labels=["Document"],
-                properties={"doc_id": doc_id, "title": title},
-            )
-
-            for chunk in chunks:
-                chunk_node = txn.create_node(
-                    labels=["Chunk"],
-                    properties={
-                        "text": chunk.text,
-                        "position": chunk.position,
-                        "doc_id": doc_id,
-                    },
-                )
-                if chunk.embedding is not None and len(chunk.embedding) == self.vector_dimensions:
-                    txn.set_vector(chunk_node.id, "embedding", chunk.embedding)
-
-                txn.create_edge(doc_node.id, chunk_node.id, "HAS_CHUNK")
-                chunk_ids.append(chunk_node.id)
-
-            txn.commit()
-
-        return IngestStats(
-            chunk_count=len(chunks), entity_count=0, relation_count=0, chunk_ids=chunk_ids
-        )
+        """Ingest a document with its text chunks and vector embeddings (no entities)."""
+        return self.ingest_document_bundle(doc_id, title, chunks, [])
 
     def ingest_entities(
         self,
@@ -175,47 +258,23 @@ class LatticeStore:
         entities: list[EntityData],
         relations: list[RelationData],
     ) -> IngestStats:
-        """Ingest extracted entities and relations linked to their source chunk with canonical deduplication."""
-        entity_name_to_id: dict[str, int] = {}
-        created_relations = 0
-        # New canonical entities are published to the shared cache only after commit
-        pending: dict[str, int] = {}
+        """Ingest entities and relations for an already stored chunk.
 
+        Raises:
+            UnresolvedChunkReferenceError: if ``chunk_id`` is not a stored Chunk node.
+            EmbeddingDimensionError: if an entity embedding has the wrong dimension.
+        """
+        self._validate_entities(entities)
+        with self.db.read() as txn:
+            node = txn.get_node(chunk_id)
+        if node is None or "Chunk" not in node.labels:
+            raise UnresolvedChunkReferenceError(chunk_id, None)
+
+        pending: dict[tuple[str, str], int] = {}
         with self.db.write() as txn:
-            for ent in entities:
-                norm_name = ent.name.strip().lower()
-                existing = self._lookup_entity(ent.name, pending)
-                if existing is not None:
-                    ent_id = existing
-                else:
-                    ent_node = txn.create_node(
-                        labels=["Entity", ent.entity_type],
-                        properties={"name": ent.name, "entity_type": ent.entity_type},
-                    )
-                    ent_id = ent_node.id
-                    if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
-                        txn.set_vector(ent_id, "embedding", ent.embedding)
-                    pending[norm_name] = ent_id
-
-                txn.create_edge(chunk_id, ent_id, "CONTAINS")
-                entity_name_to_id[ent.name] = ent_id
-
-            for rel in relations:
-                source_id = entity_name_to_id.get(rel.source_name) or self._lookup_entity(
-                    rel.source_name, pending
-                )
-                target_id = entity_name_to_id.get(rel.target_name) or self._lookup_entity(
-                    rel.target_name, pending
-                )
-                if source_id is not None and target_id is not None:
-                    txn.create_edge(
-                        source_id,
-                        target_id,
-                        "RELATION",
-                        properties={"type": rel.relation_type},
-                    )
-                    created_relations += 1
-
+            _created, created_relations = self._write_entity_group(
+                txn, chunk_id, entities, relations, pending, {}
+            )
             txn.commit()
         self._entity_cache.update(pending)
 
@@ -233,14 +292,28 @@ class LatticeStore:
         chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
         tags: list[str] | None = None,
     ) -> IngestStats:
-        """Atomically ingest document, chunks, entities, and relations in a single write transaction."""
+        """Atomically ingest document, chunks, entities, and relations in a single write transaction.
+
+        Each ``chunk_entities_relations`` entry names its chunk by index into ``chunks``.
+        The whole payload is validated before anything is written.
+
+        Raises:
+            EmbeddingDimensionError: if a chunk or entity embedding has the wrong dimension.
+            UnresolvedChunkReferenceError: if an entry's chunk index is out of range.
+        """
+        for idx, chunk in enumerate(chunks):
+            self._check_dimension(f"chunk {idx}", chunk.embedding)
+        for c_ref, entities, _relations in chunk_entities_relations:
+            # bool is an int subclass; only a real index into ``chunks`` resolves
+            if type(c_ref) is not int or not 0 <= c_ref < len(chunks):
+                raise UnresolvedChunkReferenceError(c_ref, len(chunks))
+            self._validate_entities(entities)
+
         chunk_ids: list[int] = []
-        entity_name_to_id: dict[str, int] = {}
         total_entities = 0
         total_relations = 0
-        # New canonical entities are published to the shared cache only after commit, so a
-        # rolled-back transaction cannot leave ids for nodes that were never written.
-        pending: dict[str, int] = {}
+        pending: dict[tuple[str, str], int] = {}
+        doc_names: dict[str, int] = {}
 
         doc_properties: dict[str, Any] = {"doc_id": doc_id, "title": title}
         if tags:
@@ -249,8 +322,7 @@ class LatticeStore:
         with self.db.write() as txn:
             doc_node = txn.create_node(labels=["Document"], properties=doc_properties)
 
-            chunk_idx_to_id: dict[int, int] = {}
-            for idx, chunk in enumerate(chunks):
+            for chunk in chunks:
                 chunk_node = txn.create_node(
                     labels=["Chunk"],
                     properties={
@@ -259,63 +331,16 @@ class LatticeStore:
                         "doc_id": doc_id,
                     },
                 )
-                if chunk.embedding is not None and len(chunk.embedding) == self.vector_dimensions:
-                    txn.set_vector(chunk_node.id, "embedding", chunk.embedding)
-
+                txn.set_vector(chunk_node.id, "embedding", chunk.embedding)
                 txn.create_edge(doc_node.id, chunk_node.id, "HAS_CHUNK")
                 chunk_ids.append(chunk_node.id)
-                chunk_idx_to_id[idx] = chunk_node.id
 
             for c_ref, entities, relations in chunk_entities_relations:
-                if isinstance(c_ref, int) and c_ref in chunk_idx_to_id:
-                    real_chunk_id = chunk_idx_to_id[c_ref]
-                elif isinstance(c_ref, int) and c_ref in chunk_ids:
-                    real_chunk_id = c_ref
-                elif chunk_ids:
-                    real_chunk_id = chunk_ids[0]
-                else:
-                    real_chunk_id = None
-
-                for ent in entities:
-                    norm_name = ent.name.strip().lower()
-                    existing = self._lookup_entity(ent.name, pending)
-                    if existing is not None:
-                        ent_id = existing
-                    elif ent.name in entity_name_to_id:
-                        ent_id = entity_name_to_id[ent.name]
-                    else:
-                        ent_node = txn.create_node(
-                            labels=["Entity", ent.entity_type],
-                            properties={"name": ent.name, "entity_type": ent.entity_type},
-                        )
-                        ent_id = ent_node.id
-                        if (
-                            ent.embedding is not None
-                            and len(ent.embedding) == self.vector_dimensions
-                        ):
-                            txn.set_vector(ent_id, "embedding", ent.embedding)
-                        pending[norm_name] = ent_id
-                        total_entities += 1
-
-                    entity_name_to_id[ent.name] = ent_id
-                    if real_chunk_id is not None:
-                        txn.create_edge(real_chunk_id, ent_id, "CONTAINS")
-
-                for rel in relations:
-                    s_id = entity_name_to_id.get(rel.source_name) or self._lookup_entity(
-                        rel.source_name, pending
-                    )
-                    t_id = entity_name_to_id.get(rel.target_name) or self._lookup_entity(
-                        rel.target_name, pending
-                    )
-                    if s_id is not None and t_id is not None:
-                        txn.create_edge(
-                            s_id,
-                            t_id,
-                            "RELATION",
-                            properties={"type": rel.relation_type},
-                        )
-                        total_relations += 1
+                created_entities, created_relations = self._write_entity_group(
+                    txn, chunk_ids[c_ref], entities, relations, pending, doc_names
+                )
+                total_entities += created_entities
+                total_relations += created_relations
 
             txn.commit()
         self._entity_cache.update(pending)
