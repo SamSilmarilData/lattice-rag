@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
 
 import msgspec
 import numpy as np
-from latticedb import Database
+from latticedb import Database, LatticeAlreadyExistsError
+from latticedb.transaction import Transaction
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on Document nodes sharing one doc_id (databases from before the duplicate check)
+_MAX_DOCUMENT_NODES = 64
 
 
 class ChunkData(msgspec.Struct, rename="camel"):
@@ -101,6 +106,10 @@ class LatticeStore:
         except Exception as e:
             logger.warning("Could not create Entity name index: %s", e)
 
+        # Equality index for duplicate checks and delete; building it backfills existing nodes
+        with contextlib.suppress(LatticeAlreadyExistsError):
+            self.db.create_node_property_index("Document", "doc_id")
+
         self._load_entity_cache()
 
     def _load_entity_cache(self) -> None:
@@ -121,13 +130,74 @@ class LatticeStore:
         """Return canonical node_id for an entity name if it exists in the graph."""
         return self._entity_cache.get(name.strip().lower())
 
+    @staticmethod
+    def _find_document_nodes(txn: Transaction, doc_id: str) -> list[int]:
+        """Return the Document node ids for ``doc_id`` via the equality index."""
+        return txn.find_nodes_by_label_property(
+            "Document", "doc_id", doc_id, limit=_MAX_DOCUMENT_NODES
+        )
+
     def has_document(self, doc_id: str) -> bool:
         """Return True if a Document node with this doc_id is already stored."""
-        doc_nodes = self.db.get_nodes_by_label("Document")
-        if not doc_nodes:
-            return False
         with self.db.read() as txn:
-            return any(txn.get_property(nid, "doc_id") == doc_id for nid in doc_nodes)
+            return bool(self._find_document_nodes(txn, doc_id))
+
+    @staticmethod
+    def _delete_node_with_edges(txn: Transaction, node_id: int) -> None:
+        # LatticeDB's delete_node leaves the node's edges dangling, so remove them first
+        for edge in txn.get_outgoing_edges(node_id) + txn.get_incoming_edges(node_id):
+            txn.delete_edge(edge.source_id, edge.target_id, edge.edge_type)
+        txn.delete_node(node_id)
+
+    def delete_document_in_txn(self, txn: Transaction, doc_id: str) -> set[int] | None:
+        """Delete ``doc_id`` inside an open write transaction; the caller commits.
+
+        Removes the Document, its Chunks, their edges, and every Entity no remaining
+        Chunk references. Returns the removed entity ids, which the caller must pass to
+        ``evict_entities`` after commit, or None (deleting nothing) when the document is
+        not stored. Splitting it this way lets a replace run delete and insert in one
+        transaction.
+        """
+        doc_nodes = self._find_document_nodes(txn, doc_id)
+        if not doc_nodes:
+            return None
+
+        candidate_entities: set[int] = set()
+        for doc_node in doc_nodes:
+            chunk_ids = [e.target_id for e in txn.get_outgoing_edges_by_type(doc_node, "HAS_CHUNK")]
+            for chunk_id in chunk_ids:
+                candidate_entities.update(
+                    e.target_id for e in txn.get_outgoing_edges_by_type(chunk_id, "CONTAINS")
+                )
+                self._delete_node_with_edges(txn, chunk_id)
+            self._delete_node_with_edges(txn, doc_node)
+
+        orphaned = {
+            ent_id
+            for ent_id in candidate_entities
+            if not txn.get_incoming_edges_by_type(ent_id, "CONTAINS")
+        }
+        for ent_id in orphaned:
+            self._delete_node_with_edges(txn, ent_id)
+        return orphaned
+
+    def evict_entities(self, entity_ids: set[int]) -> None:
+        """Drop deleted entities from the canonical-entity cache (call after commit)."""
+        if entity_ids:
+            self._entity_cache = {
+                key: nid for key, nid in self._entity_cache.items() if nid not in entity_ids
+            }
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Delete a document, its chunks and its orphaned entities; False if not stored."""
+        with self.db.write() as txn:
+            orphaned = self.delete_document_in_txn(txn, doc_id)
+            if orphaned is None:
+                return False
+            txn.commit()
+        self.evict_entities(orphaned)
+        logger.info("Deleted document %s (%d orphaned entities removed)", doc_id, len(orphaned))
+        return True
 
     def _lookup_entity(self, name: str, pending: dict[str, int]) -> int | None:
         norm_name = name.strip().lower()

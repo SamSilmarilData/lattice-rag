@@ -27,6 +27,7 @@ from lattice_rag import __version__
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
+    DocumentController,
     EvalController,
     GraphController,
     HealthController,
@@ -328,6 +329,7 @@ class ApplicationCore(InitPluginProtocol):
                     ],
                 ),
                 IngestController,
+                DocumentController,
                 CacheController,
                 HealthController,
                 EvalController,
