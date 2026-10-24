@@ -62,6 +62,7 @@ export interface IngestRequest {
   title: string;
   text: string;
   tags?: string[];
+  replace?: boolean;
 }
 
 export interface IngestResponse {

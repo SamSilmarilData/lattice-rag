@@ -191,6 +191,8 @@ class IngestRequest(msgspec.Struct, rename="camel"):
     title: Title
     text: DocumentText
     tags: Annotated[list[Tag], msgspec.Meta(max_length=32)] = []
+    # Atomically replace an existing document with this id instead of returning 409
+    replace: bool = False
 
 
 class IngestResponse(msgspec.Struct, rename="camel"):

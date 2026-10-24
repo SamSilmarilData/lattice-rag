@@ -64,6 +64,23 @@ def test_seed_refuses_an_invalid_gold_set(monkeypatch, tmp_path):
     ingester.ingest.assert_not_called()
 
 
+def test_ingest_replace_flag_reaches_the_ingester(monkeypatch, tmp_path):
+    """`ingest --replace` asks for an atomic replace instead of failing on an existing id."""
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "ingest.db"))
+    doc = tmp_path / "doc.txt"
+    doc.write_text("Hello world.")
+    ingester = MagicMock()
+    ingester.ingest_file = AsyncMock(return_value=MagicMock(chunk_count=1))
+    monkeypatch.setattr("lattice_rag.ingestion.DocumentIngester", lambda **_: ingester)
+    monkeypatch.setattr("lattice_rag.retrieval.embeddings.EmbeddingService", MagicMock())
+    monkeypatch.setattr("lattice_rag.storage.extract.EntityExtractor", MagicMock())
+
+    result = CliRunner().invoke(cli.main, ["ingest", str(doc), "--replace"])
+
+    assert result.exit_code == 0, result.output
+    assert ingester.ingest_file.await_args.kwargs["replace"] is True
+
+
 def test_serve_passes_host_and_port_through(monkeypatch):
     """`serve --host/--port` reach the server instead of being silently ignored."""
     captured: dict[str, object] = {}
