@@ -93,3 +93,47 @@ async def test_mock_key_mode_is_reported_and_not_written_to_env(monkeypatch, tmp
         assert data["typesafeConfigured"] is False
         assert data["status"] == "degraded"
         assert os.environ.get("TYPESAFE_API_KEY") == ""
+
+
+async def _query_statuses(client: AsyncTestClient, forwarded_for: list[str]) -> list[int]:
+    statuses = []
+    for header in forwarded_for:
+        resp = await client.post("/api/v1/query", json={}, headers={"X-Forwarded-For": header})
+        statuses.append(resp.status_code)
+    return statuses
+
+
+@pytest.mark.asyncio
+async def test_forged_forwarded_for_does_not_change_rate_limit_identity(tmp_path):
+    """With no trusted proxies, rotating X-Forwarded-For cannot dodge the limit."""
+    app = create_app(_config(tmp_path))
+    async with AsyncTestClient(app) as client:
+        statuses = await _query_statuses(client, ["1.1.1.1", "2.2.2.2", "3.3.3.3"])
+        assert statuses == [400, 400, 429]
+
+
+@pytest.mark.asyncio
+async def test_trusted_proxy_hop_identifies_client_and_ignores_spoofed_entries(tmp_path):
+    app = create_app(_config(tmp_path, trusted_proxy_hops=1))
+    async with AsyncTestClient(app) as client:
+        # Same client behind the proxy, different spoofed prefixes: one identity
+        statuses = await _query_statuses(
+            client, ["198.51.100.4", "6.6.6.6, 198.51.100.4", "7.7.7.7, 198.51.100.4"]
+        )
+        assert statuses == [400, 400, 429]
+        # A different real client keeps its own budget
+        assert await _query_statuses(client, ["198.51.100.5"]) == [400]
+
+
+def test_trusted_proxy_hops_read_from_env(monkeypatch):
+    from lattice_rag.config import load_config
+
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "2")
+    assert load_config(require_typesafe=False).trusted_proxy_hops == 2
+    monkeypatch.delenv("TRUSTED_PROXY_HOPS")
+    assert load_config(require_typesafe=False).trusted_proxy_hops == 0
+
+
+def test_negative_trusted_proxy_hops_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        _config(tmp_path, trusted_proxy_hops=-1)

@@ -1,4 +1,5 @@
-// Admin key for write/cost endpoints (ingest, eval, benchmark), sent as X-Admin-Key.
+// Admin key for admin-only endpoints (ingest, graph snapshot, cache stats, eval, benchmark),
+// sent as X-Admin-Key.
 // Kept in sessionStorage so it is forgotten when the tab closes.
 const STORAGE_KEY = 'lattice-rag.adminKey';
 
@@ -23,6 +24,11 @@ function promptForKey(reason: string): string | null {
   const key = window.prompt(`${reason}\nEnter the server's ADMIN_API_KEY:`)?.trim();
   storeKey(key || null);
   return key || null;
+}
+
+/** True when an admin key was entered earlier in this tab, so admin calls need no prompt. */
+export function hasAdminKey(): boolean {
+  return Boolean(readStoredKey());
 }
 
 /** fetch() with the admin key attached; prompts for it when missing or rejected (401). */

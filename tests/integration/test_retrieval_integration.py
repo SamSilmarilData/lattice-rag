@@ -69,8 +69,8 @@ async def test_full_pipeline_live_integration(
     temp_store.ingest_entities(
         chunk_id=2,  # Chunk 0 node_id
         entities=[
-            EntityData(name="LatticeDB", entity_type="Database", embedding=embeddings[0]),
-            EntityData(name="HNSW", entity_type="Index", embedding=embeddings[0]),
+            EntityData(name="LatticeDB", entity_type="Database"),
+            EntityData(name="HNSW", entity_type="Index"),
         ],
         relations=[
             RelationData(source_name="LatticeDB", target_name="HNSW", relation_type="USES_INDEX"),

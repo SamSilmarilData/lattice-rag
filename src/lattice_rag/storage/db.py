@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 # Upper bound on Document nodes sharing one doc_id (databases from before the duplicate check)
 _MAX_DOCUMENT_NODES = 64
+# LatticeDB's default HNSW ef_search; raised to k when over-fetching so k results are reachable
+_DEFAULT_EF_SEARCH = 64
+# Upper bound on one vector_search fetch while widening past legacy Entity vectors
+_MAX_VECTOR_FETCH = 4096
 
 
 class ChunkData(msgspec.Struct, rename="camel"):
@@ -28,11 +32,10 @@ class ChunkData(msgspec.Struct, rename="camel"):
 
 
 class EntityData(msgspec.Struct, rename="camel"):
-    """Represents an extracted entity node."""
+    """Represents an extracted entity node. Entities carry no vector; only Chunks are embedded."""
 
     name: str
     entity_type: str
-    embedding: np.ndarray | None = None
 
 
 class RelationData(msgspec.Struct, rename="camel"):
@@ -263,8 +266,6 @@ class LatticeStore:
                         properties={"name": ent.name, "entity_type": ent.entity_type},
                     )
                     ent_id = ent_node.id
-                    if ent.embedding is not None and len(ent.embedding) == self.vector_dimensions:
-                        txn.set_vector(ent_id, "embedding", ent.embedding)
                     pending[norm_name] = ent_id
 
                 txn.create_edge(chunk_id, ent_id, "CONTAINS")
@@ -359,11 +360,6 @@ class LatticeStore:
                             properties={"name": ent.name, "entity_type": ent.entity_type},
                         )
                         ent_id = ent_node.id
-                        if (
-                            ent.embedding is not None
-                            and len(ent.embedding) == self.vector_dimensions
-                        ):
-                            txn.set_vector(ent_id, "embedding", ent.embedding)
                         pending[norm_name] = ent_id
                         total_entities += 1
 
@@ -408,9 +404,31 @@ class LatticeStore:
         elif query_embedding.dtype != np.float32:
             query_embedding = query_embedding.astype(np.float32)
 
-        # Retrieve a broader candidate pool to filter out non-chunk nodes (e.g. Entity nodes sharing vector index)
+        if top_k <= 0:
+            return []
+
+        # Databases seeded before entity vectors were dropped still hold Entity vectors in the
+        # shared HNSW index. Over-fetch, and widen the fetch until top_k Chunks are found or the
+        # index is exhausted, so those vectors cannot crowd Chunks out.
         fetch_k = max(top_k * 3, 20)
-        raw_results = self.db.vector_search(query_embedding, k=fetch_k)
+        while True:
+            search_results, exhausted = self._chunk_hits(query_embedding, fetch_k, top_k)
+            if len(search_results) >= top_k or exhausted or fetch_k >= _MAX_VECTOR_FETCH:
+                return search_results
+            fetch_k = min(fetch_k * 4, _MAX_VECTOR_FETCH)
+
+    def _chunk_hits(
+        self, query_embedding: np.ndarray, fetch_k: int, top_k: int
+    ) -> tuple[list[SearchResult], bool]:
+        """Return up to top_k Chunk hits among the fetch_k nearest vectors.
+
+        The flag is True when the index returned fewer than fetch_k vectors, so a wider fetch
+        cannot find more.
+        """
+        raw_results = self.db.vector_search(
+            query_embedding, k=fetch_k, ef_search=max(_DEFAULT_EF_SEARCH, fetch_k)
+        )
+        exhausted = len(raw_results) < fetch_k
 
         search_results: list[SearchResult] = []
         with self.db.read() as txn:
@@ -441,7 +459,7 @@ class LatticeStore:
                 if len(search_results) >= top_k:
                     break
 
-        return search_results
+        return search_results, exhausted
 
     def bm25_search(
         self,
@@ -530,7 +548,12 @@ class LatticeStore:
         max_hops: int = 1,
         budget: int = 25,
     ) -> SubgraphResult:
-        """Traverse connected relations expanding from entity anchor nodes up to max_hops."""
+        """Traverse connected relations expanding from entity anchor nodes up to max_hops.
+
+        ``budget`` caps nodes and edges separately. Reaching either cap ends the whole
+        traversal, across every hop, and an edge is only kept together with both of its
+        endpoints, so the result never holds a dangling edge.
+        """
         if not entity_ids:
             return SubgraphResult(nodes=[], edges=[])
 
@@ -538,54 +561,50 @@ class LatticeStore:
         visited_edges: list[dict[str, Any]] = []
         seen_edges: set[tuple[int, int, str]] = set()
 
+        def exhausted() -> bool:
+            return len(visited_nodes) >= budget or len(visited_edges) >= budget
+
         with self.db.read() as txn:
+
+            def visit(node_id: int) -> None:
+                name = txn.get_property(node_id, "name") or f"node_{node_id}"
+                node_type = txn.get_property(node_id, "entity_type") or "Entity"
+                visited_nodes[node_id] = {
+                    "id": node_id,
+                    "name": str(name),
+                    "label": str(node_type),
+                }
+
             frontier = list(entity_ids)
             for _hop in range(max_hops):
-                if not frontier or len(visited_nodes) >= budget:
-                    break
-
                 next_frontier: list[int] = []
                 for curr_id in frontier:
+                    if exhausted():
+                        break
                     if curr_id not in visited_nodes:
-                        node_name = txn.get_property(curr_id, "name") or f"node_{curr_id}"
-                        node_type = txn.get_property(curr_id, "entity_type") or "Entity"
-                        visited_nodes[curr_id] = {
-                            "id": curr_id,
-                            "name": str(node_name),
-                            "label": str(node_type),
-                        }
+                        visit(curr_id)
 
-                    outgoing = txn.get_outgoing_edges(curr_id)
-                    for edge in outgoing:
-                        if len(visited_edges) >= budget:
+                    for edge in txn.get_outgoing_edges(curr_id):
+                        if exhausted():
                             break
-
                         rel_type = str(txn.get_edge_property(edge.id, "type") or edge.edge_type)
                         edge_key = (edge.source_id, edge.target_id, rel_type)
-                        if edge_key not in seen_edges:
-                            seen_edges.add(edge_key)
-                            visited_edges.append(
-                                {
-                                    "source_id": edge.source_id,
-                                    "target_id": edge.target_id,
-                                    "relation_type": rel_type,
-                                }
-                            )
-
-                        if edge.target_id not in visited_nodes and len(visited_nodes) < budget:
-                            target_name = (
-                                txn.get_property(edge.target_id, "name") or f"node_{edge.target_id}"
-                            )
-                            target_type = (
-                                txn.get_property(edge.target_id, "entity_type") or "Entity"
-                            )
-                            visited_nodes[edge.target_id] = {
-                                "id": edge.target_id,
-                                "name": str(target_name),
-                                "label": str(target_type),
-                            }
+                        if edge_key in seen_edges:
+                            continue
+                        if edge.target_id not in visited_nodes:
+                            visit(edge.target_id)
                             next_frontier.append(edge.target_id)
+                        seen_edges.add(edge_key)
+                        visited_edges.append(
+                            {
+                                "source_id": edge.source_id,
+                                "target_id": edge.target_id,
+                                "relation_type": rel_type,
+                            }
+                        )
 
+                if exhausted() or not next_frontier:
+                    break
                 frontier = next_frontier
 
         return SubgraphResult(

@@ -248,14 +248,14 @@ lattice-rag serve
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
 | `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). On the deployed instance runtime documents are ephemeral: they do not survive a restart or redeploy (ADR-0001). |
 | `DELETE` | `/api/v1/documents/{documentId}` | **Admin key.** Deletes a document, its chunks, and entities no other document references, then clears Tier 1 (`404` if unknown). |
-| `GET` | `/api/v1/graph/subgraph` | Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
-| `GET` | `/api/v1/cache/stats` | Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
+| `GET` | `/api/v1/graph/subgraph` | **Admin key.** Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
+| `GET` | `/api/v1/cache/stats` | **Admin key.** Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
 | `POST` | `/api/v1/eval/run` | **Admin key.** Runs the evaluation gate (dataset/baseline must be `*.json` files in the project root). |
 | `POST` | `/api/v1/benchmark/run` | **Admin key.** Retrieval-only latency benchmark with SLA verification ($p50, p90, p95, p99$, QPS). |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |
 
-Admin endpoints require the `X-Admin-Key` header (`ADMIN_API_KEY`); query endpoints are rate-limited per client. See [`docs/api-reference.md`](docs/api-reference.md).
+Admin endpoints require the `X-Admin-Key` header (`ADMIN_API_KEY`); `/`, `/health` and the two query endpoints are public, and the query endpoints are rate-limited per client. See [`docs/api-reference.md`](docs/api-reference.md).
 
 ---
 
@@ -301,7 +301,7 @@ The unit suite covers security (secret masking, log redaction including structlo
 
 - **Zero Git Leaks:** `.env`, `apikeys.md`, `*.key`, and `data/*.db` are hard-blocked in `.gitignore`.
 - **Masked Runtime Logs:** Keys wrapped in `SecretStr` are masked as `sk-****{last_4}` in all `str()` and `repr()` representations.
-- **Access Control:** Ingest, eval and benchmark require `X-Admin-Key`; queries are rate-limited and input sizes are bounded.
+- **Access Control:** Ingest, graph snapshot, cache stats, eval and benchmark require `X-Admin-Key`; queries are rate-limited and input sizes are bounded.
 - **Log Sanitizer:** `RedactingFormatter` redacts API keys, bearer tokens and URI credentials from every rendered log line, including tracebacks and structlog events.
 - **RFC 9457 Error Shielding:** Unexpected errors return a generic problem document with a request id; exception text is only logged server-side.
 - **Prompt-Injection Delimiting:** Retrieved evidence is wrapped, escaped and marked untrusted in the shared LLM prompt.
