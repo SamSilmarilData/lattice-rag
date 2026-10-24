@@ -59,7 +59,7 @@ lattice-rag/
 ├── LICENSE                      # MIT License
 ├── .gitignore                   # Strict boundary blocking .env, apikeys.md, and databases
 ├── .env.example                 # Sanitized configuration template
-├── eval_dataset.json            # Version-controlled 20-query golden benchmark dataset
+├── eval_dataset.json            # Gold Set v2 (format 2.0.0): corpus + 30 sliced queries with verbatim Gold Passages
 ├── eval_baseline.json           # Tracked main-branch baseline metrics & gate thresholds
 ├── .github/workflows/           # GitHub Actions CI/CD workflows
 │   └── eval-gate.yml            # Two-tier PR regression gate (hermetic tests + live Jev evaluation)
