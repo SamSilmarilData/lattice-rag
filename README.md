@@ -249,7 +249,8 @@ lattice-rag serve
 | `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). |
 | `GET` | `/api/v1/graph/subgraph` | **Admin key.** Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
 | `GET` | `/api/v1/cache/stats` | **Admin key.** Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
-| `POST` | `/api/v1/eval/run` | **Admin key.** Runs the evaluation gate (dataset/baseline must be `*.json` files in the project root). |
+| `POST` | `/api/v1/eval/jobs` | **Admin key.** Starts an evaluation run in the background and returns a job handle (`202`); `409` while another run is in progress (dataset/baseline must be `*.json` files in the project root). |
+| `GET` | `/api/v1/eval/jobs/{jobId}` | **Admin key.** Status of an evaluation job and, once finished, its report. |
 | `POST` | `/api/v1/benchmark/run` | **Admin key.** Retrieval-only latency benchmark with SLA verification ($p50, p90, p95, p99$, QPS). |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |

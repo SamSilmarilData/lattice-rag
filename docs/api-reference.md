@@ -23,16 +23,18 @@ http://localhost:8000/schema/scalar
 | `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists. |
 | `GET` | `/api/v1/graph/subgraph` | **admin** | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |
 | `GET` | `/api/v1/cache/stats` | **admin** | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |
-| `POST` | `/api/v1/eval/run` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `EvalRunResponse` | Run the evaluation gate. |
+| `POST` | `/api/v1/eval/jobs` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `202` `EvalJobResponse` | Start an evaluation run in the background and return its handle immediately. `409` if a run is already in progress. |
+| `GET` | `/api/v1/eval/jobs/{jobId}` | **admin** | — | `EvalJobResponse` | Status of an Eval Job and, once it has succeeded, its `EvalRunResponse` report. `404` for an unknown or expired handle. |
 | `POST` | `/api/v1/benchmark/run` | **admin** | — | `BenchmarkRunResponse` | Retrieval-only latency benchmark (6 iterations, 2 warmup) with SLA checks. |
 | `GET` | `/health` | — | — | `HealthResponse` | Health and configuration status. |
 
 ### 2.1 Authentication & Limits
 - **Public endpoints** (no key): `/`, `/health`, `POST /api/v1/query` and `POST /api/v1/query/stream`.
-- **Admin-only endpoints**: `POST /api/v1/ingest`, `GET /api/v1/graph/subgraph`, `GET /api/v1/cache/stats`, `POST /api/v1/eval/run` and `POST /api/v1/benchmark/run`.
+- **Admin-only endpoints**: `POST /api/v1/ingest`, `GET /api/v1/graph/subgraph`, `GET /api/v1/cache/stats`, `POST /api/v1/eval/jobs`, `GET /api/v1/eval/jobs/{jobId}` and `POST /api/v1/benchmark/run`.
 - **Admin endpoints** require `X-Admin-Key: <ADMIN_API_KEY>`. A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled. After 5 wrong keys within 5 minutes a client gets `429` for the rest of that window.
 - **Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded. Clients are identified by the socket peer, or by `X-Forwarded-For` when `TRUSTED_PROXY_HOPS` is set (see `docs/deployment.md`).
 - **Validation** failures return `400` problem details: `query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB.
+- **Eval runs are serialized.** Only one Eval Job runs at a time per server process; a start request while one is running is rejected with `409` (it is not queued), so parallel requests cannot multiply judge and LLM API cost. Poll `GET /api/v1/eval/jobs/{jobId}` until `status` leaves `running`. The 20 most recent jobs are kept in memory and are lost on restart. A failed job's `error` carries only a reference id for the server logs. The `lattice-rag eval` CLI runs in its own process and does not go through this queue.
 - **Unexpected errors** return `500` with a generic `detail` and a `requestId` to correlate with server logs; exception text is never returned.
 
 ---
@@ -130,8 +132,17 @@ interface HealthResponse {
 }
 ```
 
-### 3.6 `EvalRunResponse` & `EvalQueryResult`
+### 3.6 `EvalJobResponse`, `EvalRunResponse` & `EvalQueryResult`
 ```typescript
+interface EvalJobResponse {
+  jobId: string;                           // Handle for GET /api/v1/eval/jobs/{jobId}
+  status: "running" | "succeeded" | "failed";
+  startedAt: string;                       // ISO 8601, UTC
+  finishedAt: string | null;               // Set once the job is no longer running
+  report: EvalRunResponse | null;          // Set when status is "succeeded"
+  error: string | null;                    // Generic message with a log reference when status is "failed"
+}
+
 interface EvalQueryResult {
   query: string;               // Evaluated benchmark query
   faithfulness: number;        // Jev Score normalized expected value [0.0, 1.0]

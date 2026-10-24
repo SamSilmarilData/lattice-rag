@@ -43,6 +43,7 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Slice**: A tag grouping Gold Set queries by kind (`factoid`, `multihop`, `unanswerable`, `chitchat`, `long_context`) so results can be broken down.
 - **Hermetic Tier**: The evaluation tier that needs no API keys and, once the local embedding models are cached, no network. It checks retrieval against Gold Passages and validates the Gold Set itself, and gates every PR.
 - **Live Tier**: The evaluation tier that runs the full pipeline and has Jev judge faithfulness, context precision, answer relevance and answer correctness. It needs API keys and is advisory, not a PR gate.
+- **Eval Job**: One evaluation run started over the HTTP API, identified by a handle and polled for its status and report. Only one runs at a time per server; a start while one is running is rejected, not queued.
 - **Answer Correctness**: How well an answer agrees with the Gold Set query's reference answer. Unlike faithfulness, which compares an answer to the evidence it was given, it catches answers that are well-grounded but wrong.
 - **Unverified Answer**: An answer produced while a Jev check (routing, guardrail, or cache verification) was unavailable, so its grounding was not confirmed. It is flagged to the caller and never stored in Tier 1, like a degraded answer.
 - **Seeded Database**: The knowledge base baked into a deployment at build time. A deployed instance treats it as read-only; documents ingested at runtime are not expected to survive a restart.

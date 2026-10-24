@@ -104,6 +104,18 @@ export interface EvalRunResponse {
   results: EvalQueryResult[];
 }
 
+export type EvalJobStatus = 'running' | 'succeeded' | 'failed';
+
+// POST /api/v1/eval/jobs (202) and GET /api/v1/eval/jobs/{jobId}
+export interface EvalJobResponse {
+  jobId: string;
+  status: EvalJobStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  report: EvalRunResponse | null;
+  error: string | null;
+}
+
 // SSE payloads of POST /api/v1/query/stream (mirror the Stream* DTOs in api/dtos.py)
 export interface StreamStage {
   stage: string;
