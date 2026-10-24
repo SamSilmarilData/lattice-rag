@@ -29,6 +29,7 @@ from lattice_rag.api.client_identity import client_address
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
+    DocumentController,
     EvalController,
     GraphController,
     HealthController,
@@ -68,8 +69,10 @@ def _resolve_config(config: LatticeAppConfig | None) -> LatticeAppConfig:
     except SystemExit:
         # Keep every other env setting (DB path, admin key, CORS); only the key is mocked
         logger.warning(
-            "TYPESAFE_API_KEY is not set: starting in degraded mode (routing falls back to "
-            "hybrid, guardrail and semantic-cache verification are disabled)"
+            "TYPESAFE_API_KEY is not set: starting in degraded mode. Jev is not called: "
+            "routing falls back to hybrid (pure small talk still goes to chitchat), the "
+            "context guardrail and semantic-cache verification are off, answers are flagged "
+            "unverified and are not cached."
         )
         return dataclasses.replace(
             load_config(require_typesafe=False),
@@ -99,9 +102,10 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     )
     extractor = EntityExtractor()
 
-    # 3. Decision routing & context guardrail
-    router = QueryRouter(ts_client=typesafe_client())
-    guardrail = ContextGuardrail(ts_client=typesafe_client())
+    # 3. Decision routing & context guardrail. In mock-key mode neither is called, so no
+    #    query pays for failing Jev calls; the resulting answers are flagged unverified.
+    router = QueryRouter.offline() if config.using_mock_keys else QueryRouter(typesafe_client())
+    guardrail = None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client())
 
     # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
     semantic_cache = SemanticCache(ts_client=None if config.using_mock_keys else typesafe_client())
@@ -132,7 +136,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         router_guardrail=guardrail,
     )
 
-    # 7. LangGraph RAG Agentic Orchestrator
+    # 7. RAG Orchestrator (one pipeline core behind run() and stream_query())
     orchestrator = RAGOrchestrator(
         router=router,
         semantic_cache=semantic_cache,
@@ -185,7 +189,8 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
-        await guardrail.close()
+        if guardrail is not None:
+            await guardrail.close()
         store.close()
 
 
@@ -334,6 +339,7 @@ class ApplicationCore(InitPluginProtocol):
                     ],
                 ),
                 IngestController,
+                DocumentController,
                 CacheController,
                 HealthController,
                 EvalController,

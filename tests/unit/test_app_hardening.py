@@ -95,6 +95,62 @@ async def test_mock_key_mode_is_reported_and_not_written_to_env(monkeypatch, tmp
         assert os.environ.get("TYPESAFE_API_KEY") == ""
 
 
+@pytest.mark.asyncio
+async def test_mock_key_mode_makes_no_jev_calls_per_query(monkeypatch, tmp_path):
+    """Degraded mode skips routing and the guardrail instead of paying for failing Jev calls,
+    and the answer it produces is flagged unverified."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    import numpy as np
+    from typesafe_sdk import AsyncTypeSafeClient
+
+    import lattice_rag.app as app_module
+    from lattice_rag.retrieval.embeddings import RerankResult
+    from lattice_rag.storage.db import SearchResult, SubgraphResult
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "")
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "mock.db"))
+
+    store = MagicMock()
+    store.vector_search.return_value = [
+        SearchResult(node_id=1, score=0.9, text="LatticeDB uses HNSW.", metadata={})
+    ]
+    store.bm25_search.return_value = []
+    store.get_entities_for_chunks.return_value = []
+    store.traverse_from_entities.return_value = SubgraphResult(nodes=[], edges=[])
+    embedder = MagicMock()
+    embedder.embed_query.return_value = np.ones(384, dtype=np.float32)
+    embedder.rerank.return_value = [RerankResult(index=0, score=5.0, text="LatticeDB uses HNSW.")]
+    monkeypatch.setattr(app_module, "LatticeStore", lambda *a, **k: store)
+    monkeypatch.setattr(app_module, "EmbeddingService", lambda *a, **k: embedder)
+    monkeypatch.setattr(app_module, "EntityExtractor", lambda *a, **k: MagicMock())
+
+    jev_calls = AsyncMock(side_effect=RuntimeError("network call in mock-key mode"))
+    monkeypatch.setattr(AsyncTypeSafeClient, "system_one", jev_calls)
+
+    app = create_app()
+    async with AsyncTestClient(app) as client:
+        resp = await client.post("/api/v1/query", json={"query": "How does vector search work?"})
+
+    assert resp.status_code == 201
+    assert resp.json()["unverified"] is True
+    jev_calls.assert_not_awaited()
+
+
+def test_mock_key_startup_message_matches_behavior(monkeypatch, tmp_path, caplog):
+    from lattice_rag.app import _resolve_config
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "")
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "env.db"))
+
+    with caplog.at_level("WARNING"):
+        _resolve_config(None)
+
+    message = caplog.text.lower()
+    assert "not called" in message
+    assert "unverified" in message
+
+
 async def _query_statuses(client: AsyncTestClient, forwarded_for: list[str]) -> list[int]:
     statuses = []
     for header in forwarded_for:

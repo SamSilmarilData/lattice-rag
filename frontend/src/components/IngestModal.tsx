@@ -200,6 +200,7 @@ export const IngestModal: React.FC<IngestModalProps> = ({ isOpen, onClose, onIng
                   <div className="text-indigo-300 font-bold text-sm mt-0.5">{result.relationCount}</div>
                 </div>
               </div>
+              <p className="text-[11px] text-gray-400">Persistence: {result.persistence}</p>
             </div>
           )}
 

@@ -11,7 +11,7 @@ This guide provides operational guidance for deploying, maintaining, monitoring,
 - **Web Framework**: Litestar 2.24+ with `msgspec` DTOs.
 - **Embedded Database**: LatticeDB 0.15+ (in-process SQLite-based property graph + HNSW + BM25).
 - **Embedded ML Inferences**: FastEmbed (`bge-small-en-v1.5`), GLiNER (`gliner-2.5-decide`), and INT8 ONNX Cross-Encoder (`bge-reranker-v2-m3`).
-- **Orchestration**: LangGraph state graph with TypeSafe AI front-door decision triage and context guardrailing.
+- **Orchestration**: a single pipeline core behind the buffered `run()` and streaming `stream_query()` entry points, with TypeSafe AI front-door decision triage and context guardrailing.
 
 ### 1.1 Single-Container Production Deployment Topology
 

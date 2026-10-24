@@ -28,6 +28,7 @@ class FakeStore:
         chunks: list[ChunkData],
         chunk_entities_relations: list[tuple[int, list[EntityData], list[RelationData]]],
         tags: list[str] | None = None,
+        replace: bool = False,
     ) -> IngestStats:
         self.documents[doc_id] = {"title": title, "chunks": chunks, "tags": tags}
         chunk_ids = list(range(100, 100 + len(chunks)))

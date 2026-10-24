@@ -53,6 +53,8 @@ export interface QueryResponse {
   timings: StageTiming[];
   degraded: boolean;
   lowGrounding: boolean;
+  // Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+  unverified: boolean;
 }
 
 export interface IngestRequest {
@@ -60,6 +62,7 @@ export interface IngestRequest {
   title: string;
   text: string;
   tags?: string[];
+  replace?: boolean;
 }
 
 export interface IngestResponse {
@@ -67,6 +70,7 @@ export interface IngestResponse {
   chunkCount: number;
   entityCount: number;
   relationCount: number;
+  persistence: string;
 }
 
 export interface CacheStatsResponse {

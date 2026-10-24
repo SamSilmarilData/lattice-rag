@@ -27,6 +27,8 @@ class RetrievalResult:
     graph_context: SubgraphResult
     timings: dict[str, float] = field(default_factory=dict)
     low_grounding: bool = False
+    # True when the guardrail could not confirm grounding (not configured, or Jev failed)
+    unverified: bool = False
 
 
 class RetrievalPipeline:
@@ -106,6 +108,8 @@ class RetrievalPipeline:
 
         final_chunks = stage3_results
         low_grounding = False
+        # Grounding counts as verified only when the guardrail actually ran
+        unverified = True
 
         # ── Guardrail: Context Relevance Filtering ───────────────────────────
         if apply_guardrail and self.guardrail is not None:
@@ -115,6 +119,7 @@ class RetrievalPipeline:
                 timings["guardrail_filter"] = (time.perf_counter() - t0) * 1000.0
                 final_chunks = verdict.chunks
                 low_grounding = verdict.low_grounding or not verdict.chunks
+                unverified = not verdict.verified
             except Exception as e:
                 logger.warning(
                     "guardrail_filter_unexpected_error_fallback: error=%s",
@@ -136,6 +141,7 @@ class RetrievalPipeline:
             graph_context=graph_context,
             timings=timings,
             low_grounding=low_grounding,
+            unverified=unverified,
         )
 
     async def execute(

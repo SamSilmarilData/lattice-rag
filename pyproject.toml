@@ -33,9 +33,6 @@ dependencies = [
     # --- Routing & Decision ---
     "typesafe-sdk>=0.7.2",
 
-    # --- Orchestration ---
-    "langgraph>=1.2.0",
-
     # --- Caching & Resilience ---
     "pybreaker>=1.4.0",
     "redis>=5.0.0",
