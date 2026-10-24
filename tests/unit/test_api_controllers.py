@@ -375,6 +375,20 @@ async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
 
 
 @pytest.mark.asyncio
+async def test_api_ingest_with_replace_replaces_an_existing_document(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].has_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_arch", "title": "T", "text": "New text.", "replace": True}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 201
+        assert mocks["store"].ingest_document_bundle.call_args.kwargs["replace"] is True
+        mocks["semantic_cache"].clear.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_api_ingest_response_states_runtime_documents_are_ephemeral(mock_controllers_app):
     app, _ = mock_controllers_app
     async with AsyncTestClient(app=app) as client:
