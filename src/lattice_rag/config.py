@@ -37,6 +37,9 @@ class AppConfig:
     llm_max_tokens: int = 256
     cors_allow_origins: tuple[str, ...] = ()
     query_rate_limit_per_minute: int = 60
+    # Reverse proxies in front of the app whose X-Forwarded-For entries are trusted.
+    # 0 identifies clients by the socket peer and ignores the header.
+    trusted_proxy_hops: int = 0
     # True when the app booted without TYPESAFE_API_KEY and runs in degraded hermetic mode
     using_mock_keys: bool = False
 
@@ -44,6 +47,10 @@ class AppConfig:
         """Validate config after initialization."""
         if not (1 <= self.port <= 65535):
             raise ValueError(f"Invalid port: {self.port}. Must be between 1 and 65535.")
+        if self.trusted_proxy_hops < 0:
+            raise ValueError(
+                f"Invalid TRUSTED_PROXY_HOPS: {self.trusted_proxy_hops}. Must be 0 or greater."
+            )
 
 
 def _split_csv(raw: str) -> tuple[str, ...]:
@@ -80,6 +87,7 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", "256")),
         cors_allow_origins=_split_csv(os.environ.get("CORS_ALLOW_ORIGINS", "")),
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
+        trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),
     )
 
 

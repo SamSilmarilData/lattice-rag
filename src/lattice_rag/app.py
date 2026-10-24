@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -24,6 +25,7 @@ from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetail
 from typesafe_sdk import AsyncTypeSafeClient
 
 from lattice_rag import __version__
+from lattice_rag.api.client_identity import client_address
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
@@ -265,14 +267,6 @@ def secret_sanitizing_exception_handler(
     )
 
 
-def client_identifier(request: Request[Any, Any, Any]) -> str:
-    """Rate-limit key: the address appended by the fronting proxy, else the socket peer."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
-    return request.client.host if request.client else "unknown"
-
-
 @get("/", media_type=MediaType.HTML, include_in_schema=False)
 async def fallback_landing() -> Response[Any]:
     """Graceful fallback landing page when frontend/dist is not yet built."""
@@ -323,7 +317,10 @@ class ApplicationCore(InitPluginProtocol):
                     middleware=[
                         RateLimitConfig(
                             rate_limit=("minute", self.config.query_rate_limit_per_minute),
-                            identifier_for_request=client_identifier,
+                            identifier_for_request=functools.partial(
+                                client_address,
+                                trusted_proxy_hops=self.config.trusted_proxy_hops,
+                            ),
                         ).middleware
                     ],
                 ),
