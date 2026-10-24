@@ -133,7 +133,23 @@ def _assert_query_absent_above_debug(caplog: pytest.LogCaptureFixture) -> None:
 
 def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "ds.json").write_text(
-        json.dumps({"queries": [{"query": SECRET_QUERY, "ground_truth": "gt"}]})
+        json.dumps(
+            {
+                "version": "2.0.0",
+                "domain": "test",
+                "corpus": [],
+                "queries": [
+                    {
+                        "id": "q1",
+                        "query": SECRET_QUERY,
+                        "slice": "unanswerable",
+                        "expected_route": "hybrid",
+                        "reference_answer": "gt",
+                        "gold_passages": [],
+                    }
+                ],
+            }
+        )
     )
     (tmp_path / "base.json").write_text(json.dumps({"metrics": {}}))
 
