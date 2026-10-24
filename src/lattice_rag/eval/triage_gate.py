@@ -7,7 +7,7 @@ import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul, Score
 
 from lattice_rag.api.dtos import EvalQueryResult
-from lattice_rag.security import SecretStr
+from lattice_rag.security import SecretStr, query_fingerprint
 
 logger = structlog.get_logger(__name__)
 
@@ -140,7 +140,7 @@ class JevEvaluator:
         if contradiction_prob >= 0.40:
             logger.warning(
                 "factual_contradiction_veto_triggered",
-                query=query,
+                **query_fingerprint(query),
                 contradiction_prob=contradiction_prob,
                 previous_faithfulness=faith_score,
             )
@@ -153,7 +153,7 @@ class JevEvaluator:
 
         logger.info(
             "jev_evaluation_completed",
-            query=query,
+            **query_fingerprint(query),
             faithfulness=round(faith_score, 4),
             context_precision=round(prec_score, 4),
             answer_relevance=round(rel_score, 4),

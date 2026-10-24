@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import re
@@ -15,6 +16,16 @@ REDACT_PATTERN = re.compile(
 _ENV_KEY_PATTERN = re.compile(
     r"(TYPESAFE_API_KEY|GROQ_API_KEY|GEMINI_API_KEY|REDIS_URL|ADMIN_API_KEY)\s*[:=]\s*([^\s`]+)"
 )
+
+
+def query_fingerprint(query: str) -> dict[str, int | str]:
+    """Correlation fields for logging a user query without its text.
+
+    Returns the query's length and a short SHA-256 prefix, so log lines about the
+    same query can be grouped while the query itself stays out of logs above DEBUG.
+    """
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
+    return {"query_len": len(query), "query_hash": digest}
 
 
 class SecretStr:
