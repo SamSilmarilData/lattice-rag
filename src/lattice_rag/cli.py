@@ -204,11 +204,11 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
 @main.command()
 @click.option("--dataset", default="eval_dataset.json", help="Path to dataset containing corpus")
 def seed(dataset: str) -> None:
-    """Pre-seed LatticeDB with the golden corpus documents."""
+    """Pre-seed LatticeDB with the corpus of a validated Gold Set."""
     import asyncio
-    import json
 
     from lattice_rag.config import load_config
+    from lattice_rag.eval.gold_set import GoldSetError, load_gold_set
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -220,8 +220,10 @@ def seed(dataset: str) -> None:
         click.echo(f"Error: Dataset {dataset} not found.")
         return
 
-    data = json.loads(path.read_text(encoding="utf-8"))
-    corpus = data.get("corpus", [])
+    try:
+        corpus = load_gold_set(path).corpus
+    except GoldSetError as e:
+        raise click.ClickException(str(e)) from e
     if not corpus:
         click.echo("No corpus documents found in dataset.")
         return
@@ -241,9 +243,7 @@ def seed(dataset: str) -> None:
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
         for doc in corpus:
-            d_id = doc.get("document_id", "doc")
-            d_title = doc.get("title", d_id)
-            d_text = doc.get("text", "")
+            d_id, d_title, d_text = doc.document_id, doc.title, doc.text
             try:
                 await ingester.ingest(d_id, d_title, d_text)
                 click.echo(f"  Ingested '{d_title}' ({len(d_text)} chars)")

@@ -16,18 +16,25 @@ from lattice_rag.eval.runner import EvalRunner
 def mock_dataset_and_baseline(tmp_path: Path):
     """Create sample dataset and baseline files."""
     dataset = {
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "domain": "test",
         "corpus": [],
         "queries": [
             {
                 "id": "q1",
                 "query": "Test query 1",
-                "ground_truth": "Expected 1",
+                "slice": "unanswerable",
+                "expected_route": "hybrid",
+                "reference_answer": "Expected 1",
+                "gold_passages": [],
             },
             {
                 "id": "q2",
                 "query": "Test query 2",
-                "ground_truth": "Expected 2",
+                "slice": "unanswerable",
+                "expected_route": "vector_exact",
+                "reference_answer": "Expected 2",
+                "gold_passages": [],
             },
         ],
     }
@@ -261,3 +268,47 @@ async def test_eval_runner_records_evaluator_failure_instead_of_aborting(mock_da
     assert failed.passed is False
     assert failed.faithfulness == 0.0
     assert resp.passed_gate is False
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_judges_against_the_reference_answer(mock_dataset_and_baseline):
+    """The Gold Set's reference answer is what the judge compares the answer to."""
+    ds_path, base_path = mock_dataset_and_baseline
+
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = EvalQueryResult(
+        query="q", faithfulness=0.9, context_precision=0.9, answer_relevance=0.9, passed=True
+    )
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    refs = {c.kwargs["ground_truth"] for c in mock_evaluator.evaluate_query.await_args_list}
+    assert refs == {"Expected 1", "Expected 2"}
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_rejects_invalid_gold_set_before_running(tmp_path: Path):
+    """A malformed Gold Set fails fast with the missing field named; no query is run."""
+    from lattice_rag.eval.gold_set import GoldSetError
+
+    ds_path = tmp_path / "bad.json"
+    ds_path.write_text(
+        json.dumps(
+            {
+                "version": "2.0.0",
+                "domain": "test",
+                "corpus": [],
+                "queries": [{"id": "q1", "query": "Q", "ground_truth": "old v1 field"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    mock_orch = AsyncMock()
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=AsyncMock())
+    with pytest.raises(GoldSetError, match=r"queries\[0\]"):
+        await runner.run_evaluation(dataset_path=ds_path, baseline_path="eval_baseline.json")
+    mock_orch.run.assert_not_called()
