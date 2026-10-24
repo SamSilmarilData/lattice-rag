@@ -61,7 +61,7 @@ Instead of invoking large generative models for intent recognition, `lattice-rag
 
 ### 3.4 3-Stage Hybrid Retrieval Pipeline
 1. **Stage 1 (Vector Candidate Recall):** The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`). Each candidate keeps its `doc_id` and `position` for citations.
-2. **Stage 2 (Relational Traversal):** Identifies entity anchors from the Stage 1 chunks and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`), budget-capped at 25 nodes. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.
+2. **Stage 2 (Relational Traversal):** Runs after Stage 3 and the context guardrail. It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates, and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.
 3. **Stage 3 (Precision Reranking):** The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`). Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead. Each candidate costs about 100 ms on CPU, which is why the headroom is small.
 
 ### 3.5 Multi-Tier Caching & Circuit Breaker

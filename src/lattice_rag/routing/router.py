@@ -7,6 +7,7 @@ import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Choice
 
 from lattice_rag.generation.chitchat import is_pure_chitchat
+from lattice_rag.security import query_fingerprint, sanitize_error_detail
 
 logger = structlog.get_logger(__name__)
 
@@ -107,7 +108,7 @@ class QueryRouter:
 
             choice_result = response.choices.get("route")
             if choice_result is None:
-                logger.warning("missing_route_choice", query=query)
+                logger.warning("missing_route_choice", **query_fingerprint(query))
                 return _FALLBACK
 
             chosen_route = str(choice_result.choice).strip().lower()
@@ -125,8 +126,8 @@ class QueryRouter:
         except Exception as e:
             logger.warning(
                 "query_routing_failed_falling_back_to_hybrid",
-                query=query,
-                error=str(e),
+                **query_fingerprint(query),
+                error=sanitize_error_detail(str(e)),
             )
             return _FALLBACK
 

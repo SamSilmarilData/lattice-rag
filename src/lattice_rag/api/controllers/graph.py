@@ -8,15 +8,17 @@ from litestar.di import NamedDependency
 from litestar.params import QueryParameter, SkipValidation
 
 from lattice_rag.api.dtos import SubgraphDTO
+from lattice_rag.api.guards import require_admin_key
 from lattice_rag.storage.db import LatticeStore
 
 logger = logging.getLogger(__name__)
 
 
 class GraphController(Controller):
-    """Litestar controller for inspecting the embedded LatticeDB knowledge graph."""
+    """Litestar controller for inspecting the embedded LatticeDB knowledge graph (admin-only)."""
 
     path = "/api/v1/graph"
+    guards = [require_admin_key]
 
     @get("/subgraph")
     async def get_subgraph(

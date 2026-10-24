@@ -125,9 +125,7 @@ class EntityExtractor:
                             if not name or name in seen:
                                 continue
                             seen.add(name)
-                            entities.append(
-                                EntityData(name=name, entity_type=entity_type, embedding=None)
-                            )
+                            entities.append(EntityData(name=name, entity_type=entity_type))
                 results.append(entities)
         else:
             # Classic GLiNER
@@ -147,9 +145,7 @@ class EntityExtractor:
                     if not name or name in seen:
                         continue
                     seen.add(name)
-                    entities.append(
-                        EntityData(name=name, entity_type=p.get("label", "entity"), embedding=None)
-                    )
+                    entities.append(EntityData(name=name, entity_type=p.get("label", "entity")))
                 results.append(entities)
 
         return results
