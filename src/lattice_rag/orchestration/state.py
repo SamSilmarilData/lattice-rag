@@ -32,6 +32,8 @@ class PipelineState:
     # --- Reranked chunks that passed the guardrail (Jev Noul) ---
     filtered_chunks: list[dict[str, Any]] = field(default_factory=list)
     low_grounding: bool = False
+    # Unverified Answer: a Jev check (routing or guardrail) could not run for this query
+    unverified: bool = False
 
     # --- Generation ---
     answer: str = ""

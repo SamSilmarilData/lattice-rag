@@ -33,6 +33,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
   const [expandedSource, setExpandedSource] = useState<number | null>(null);
   const [degraded, setDegraded] = useState(false);
   const [lowGrounding, setLowGrounding] = useState(false);
+  const [unverified, setUnverified] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
 
   // Dynamic Token Velocity Meter State
@@ -65,6 +66,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
     setTimings([]);
     setDegraded(false);
     setLowGrounding(false);
+    setUnverified(false);
     setStreamError(null);
     setTokenCount(0);
     setTokenVelocity(null);
@@ -136,6 +138,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 setTimings(d.timings);
                 setDegraded(d.degraded);
                 setLowGrounding(d.lowGrounding);
+                setUnverified(d.unverified);
                 if (d.graphPath) onGraphUpdate(d.graphPath);
               }
             } catch (parseErr) {
@@ -244,6 +247,15 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 title="No retrieved evidence passed the relevance guardrail, so this answer is not grounded in your documents."
               >
                 LOW GROUNDING
+              </div>
+            )}
+
+            {unverified && (
+              <div
+                className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-950/60 text-amber-400 border border-amber-800/40"
+                title="A verification check (routing or the relevance guardrail) was unavailable, so this answer's grounding was not confirmed. It is not cached."
+              >
+                UNVERIFIED
               </div>
             )}
           </div>

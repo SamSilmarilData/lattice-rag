@@ -53,6 +53,8 @@ export interface QueryResponse {
   timings: StageTiming[];
   degraded: boolean;
   lowGrounding: boolean;
+  // Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+  unverified: boolean;
 }
 
 export interface IngestRequest {

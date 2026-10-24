@@ -140,6 +140,8 @@ class QueryResponse(msgspec.Struct, rename="camel"):
     timings: list[StageTiming] = []
     degraded: bool = False
     low_grounding: bool = False
+    # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+    unverified: bool = False
 
 
 # ── Server-Sent Event payloads for POST /api/v1/query/stream ─────────────────
@@ -172,6 +174,8 @@ class StreamDone(msgspec.Struct, rename="camel"):
     timings: list[StageTiming] = []
     degraded: bool = False
     low_grounding: bool = False
+    # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+    unverified: bool = False
 
 
 class StreamError(msgspec.Struct, rename="camel"):
