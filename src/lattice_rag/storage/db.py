@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ import msgspec
 import numpy as np
 from latticedb import Database, LatticeAlreadyExistsError
 from latticedb.transaction import Transaction
+
+from lattice_rag.security import sanitize_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,40 @@ _MAX_DOCUMENT_NODES = 64
 _DEFAULT_EF_SEARCH = 64
 # Upper bound on one vector_search fetch while widening past legacy Entity vectors
 _MAX_VECTOR_FETCH = 4096
+# A minimum fuzzy-term length no real term reaches: fts_search_fuzzy then matches exact terms only
+_NO_FUZZY_TERM_LENGTH = 1 << 16
+# Words dropped from the BM25 keyword fallback (with words of two characters or fewer)
+_KEYWORD_STOPWORDS = frozenset(
+    [
+        "what",
+        "is",
+        "the",
+        "of",
+        "and",
+        "are",
+        "in",
+        "a",
+        "to",
+        "for",
+        "with",
+        "from",
+        "by",
+        "that",
+        "this",
+        "how",
+        "does",
+        "do",
+        "an",
+    ]
+)
+_KEYWORD_PATTERN = re.compile(r"\b[a-zA-Z0-9_-]+\b")
+
+
+def _keywords(query_text: str) -> list[str]:
+    """Distinct content words of a query, in order, for the BM25 keyword fallback."""
+    words = (w for w in _KEYWORD_PATTERN.findall(query_text) if len(w) > 2)
+    kept = (w for w in words if w.lower() not in _KEYWORD_STOPWORDS)
+    return list(dict.fromkeys(w.lower() for w in kept))
 
 
 class ChunkData(msgspec.Struct, rename="camel"):
@@ -505,55 +542,19 @@ class LatticeStore:
         query_text: str,
         top_k: int = 10,
     ) -> list[SearchResult]:
-        """Perform native BM25 full-text search on Chunk text with keyword recall fallback."""
-        raw_results = []
-        try:
-            raw_results = self.db.fts_search("Chunk", "text", query_text, limit=top_k)
-        except Exception as e:
-            logger.debug("BM25 search error: %s", e)
+        """Perform native BM25 full-text search on Chunk text with keyword recall fallback.
 
-        # If natural-language question did not match exact conjunction, fallback to keyword search
+        The native query requires every term. When no Chunk holds them all, one disjunctive
+        query over the query's keywords recovers Chunks that hold any of them. A failing
+        search is logged and contributes no hits.
+        """
+        raw_results = self._fts_or_empty("bm25_search_failed", query_text, top_k, all_terms=True)
         if not raw_results and query_text:
-            import re
-
-            stopwords = {
-                "what",
-                "is",
-                "the",
-                "of",
-                "and",
-                "are",
-                "in",
-                "a",
-                "to",
-                "for",
-                "with",
-                "from",
-                "by",
-                "that",
-                "this",
-                "how",
-                "does",
-                "do",
-                "an",
-            }
-            words = [
-                w
-                for w in re.findall(r"\b[a-zA-Z0-9_-]+\b", query_text)
-                if w.lower() not in stopwords and len(w) > 2
-            ]
-            accum: dict[int, float] = {}
-            for w in words:
-                try:
-                    for item in self.db.fts_search("Chunk", "text", w, limit=top_k):
-                        accum[item.node_id] = accum.get(item.node_id, 0.0) + item.score
-                except Exception:
-                    pass
-            if accum:
-                top_sorted = sorted(accum.items(), key=lambda x: x[1], reverse=True)[:top_k]
-                raw_results = [
-                    type("FtsItem", (), {"node_id": nid, "score": sc})() for nid, sc in top_sorted
-                ]
+            keywords = _keywords(query_text)
+            if keywords:
+                raw_results = self._fts_or_empty(
+                    "bm25_keyword_fallback_failed", " ".join(keywords), top_k, all_terms=False
+                )
 
         search_results: list[SearchResult] = []
         with self.db.read() as txn:
@@ -580,6 +581,25 @@ class LatticeStore:
                 )
 
         return search_results
+
+    def _fts_or_empty(self, event: str, query: str, limit: int, *, all_terms: bool) -> list[Any]:
+        """Run one Chunk full-text query; on failure log ``event`` and return no hits.
+
+        ``all_terms=True`` is the native conjunctive query (every term required). ``all_terms=False``
+        matches any term: LatticeDB's fuzzy search is disjunctive, and a minimum term length no
+        term reaches turns its typo tolerance off, so only exact terms match.
+        """
+        try:
+            if all_terms:
+                return list(self.db.fts_search("Chunk", "text", query, limit=limit))
+            return list(
+                self.db.fts_search_fuzzy(
+                    "Chunk", "text", query, limit=limit, min_term_length=_NO_FUZZY_TERM_LENGTH
+                )
+            )
+        except Exception as e:
+            logger.warning("%s: %s", event, sanitize_error_detail(str(e)))
+            return []
 
     def traverse_from_entities(
         self,
