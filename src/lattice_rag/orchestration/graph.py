@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
 
@@ -49,6 +50,8 @@ class _Triage:
     cached: dict[str, Any] | None = None
     query_embedding: Any = None
     decision: RouteDecision | None = None
+    # A near-duplicate existed but Noul cache verification could not run
+    cache_unverified: bool = False
 
 
 class RAGOrchestrator:
@@ -223,7 +226,7 @@ class RAGOrchestrator:
         answer = "".join(tokens)
 
         # 4. Tier 1 write rule: primary-provider answers grounded in verified evidence only
-        unverified = not decision.verified or retrieved.unverified
+        unverified = not decision.verified or retrieved.unverified or triage.cache_unverified
         if (
             use_cache
             and not outcome.degraded
@@ -261,13 +264,23 @@ class RAGOrchestrator:
                 return _Triage(cached=exact_hit)
 
         query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
+        cache_unverified = False
         if use_cache:
-            cached = await self.semantic_cache.get(query, query_embedding)
+            try:
+                cached = await self.semantic_cache.get(query, query_embedding)
+            except CacheVerificationError:
+                # A near-duplicate could not be checked: recompute, and flag the answer
+                cached = None
+                cache_unverified = True
             if cached is not None:
                 return _Triage(cached=cached, query_embedding=query_embedding)
 
         decision = await self.router.route_query(query)
-        return _Triage(query_embedding=query_embedding, decision=decision)
+        return _Triage(
+            query_embedding=query_embedding,
+            decision=decision,
+            cache_unverified=cache_unverified,
+        )
 
     async def _generate(
         self,
