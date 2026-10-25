@@ -1,114 +1,37 @@
-"""Live End-to-End Integration Tests for Phase 4 (Litestar + LangGraph + Groq + LatticeDB).
+"""Live End-to-End Integration Tests for Phase 4 (Litestar + Groq + LatticeDB).
 
-Runs full ingestion and query flow through Litestar AsyncTestClient using real in-process
-LatticeDB, real FastEmbed embeddings, and live GroqCloud qwen/qwen3.8-27b generation.
+Runs the full ingestion and query flow through Litestar AsyncTestClient against the real
+composition root (``create_app``): in-process LatticeDB, real FastEmbed embeddings, live
+Jev routing and live Groq generation. Needs real GROQ/TYPESAFE keys in the environment.
 """
 
 from __future__ import annotations
 
-import contextlib
+import dataclasses
 from pathlib import Path
 
 import pytest
 from litestar import Litestar
-from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
-from lattice_rag.api.controllers import (
-    CacheController,
-    HealthController,
-    IngestController,
-    QueryController,
-)
-from lattice_rag.caching.fallback_cache import FallbackCache
-from lattice_rag.caching.semantic_cache import SemanticCache
+from lattice_rag.api.guards import ADMIN_KEY_HEADER
+from lattice_rag.app import create_app
 from lattice_rag.config import get_config
-from lattice_rag.generation.chitchat import ChitchatHandler
-from lattice_rag.generation.gemini_fallback import GeminiFallback
-from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
-from lattice_rag.orchestration.graph import RAGOrchestrator
-from lattice_rag.retrieval.embeddings import EmbeddingService
-from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.routing.guardrail import ContextGuardrail
-from lattice_rag.routing.router import QueryRouter
-from lattice_rag.storage.db import LatticeStore
-from lattice_rag.storage.extract import EntityExtractor
+from lattice_rag.security import SecretStr
+
+ADMIN_KEY = "e2e-admin-key"
+ADMIN_HEADERS = {ADMIN_KEY_HEADER: ADMIN_KEY}
 
 
 @pytest.fixture
-async def live_app(tmp_path: Path):
-    config = get_config()
-    db_path = tmp_path / "live_e2e.db"
-    store = LatticeStore(db_path)
-
-    embed_svc = EmbeddingService(
-        embed_model="BAAI/bge-small-en-v1.5", reranker_model="BAAI/bge-reranker-v2-m3"
+def live_app(tmp_path: Path) -> Litestar:
+    """The production app on an ephemeral DB, with an admin key for the guarded routes."""
+    config = dataclasses.replace(
+        get_config(),
+        admin_api_key=SecretStr(ADMIN_KEY),
+        latticedb_path=tmp_path / "live_e2e.db",
     )
-    extractor = EntityExtractor()
-    router = QueryRouter()
-    guardrail = ContextGuardrail(threshold=0.50)
-    sem_cache = SemanticCache()
-    fb_cache = FallbackCache(redis_url="embedded")
-    await fb_cache.connect()
-
-    groq = GroqSynthesizer(
-        api_key=config.groq_api_key.get_secret_value(),
-        model=config.groq_model,
-    )
-    gemini = GeminiFallback(
-        api_key=config.gemini_api_key.get_secret_value(),
-        model=config.gemini_model,
-    )
-    chitchat = ChitchatHandler()
-
-    ret_pipeline = RetrievalPipeline(
-        store=store,
-        embedding_service=embed_svc,
-        router_guardrail=guardrail,
-    )
-
-    orchestrator = RAGOrchestrator(
-        router=router,
-        semantic_cache=sem_cache,
-        fallback_cache=fb_cache,
-        retrieval_pipeline=ret_pipeline,
-        groq=groq,
-        gemini=gemini,
-        chitchat=chitchat,
-        embedding_service=embed_svc,
-    )
-
-    app = Litestar(
-        route_handlers=[
-            QueryController,
-            IngestController,
-            CacheController,
-            HealthController,
-        ],
-        debug=True,
-        dependencies={
-            "store": Provide(lambda: store, sync_to_thread=False),
-            "embedding_service": Provide(lambda: embed_svc, sync_to_thread=False),
-            "extractor": Provide(lambda: extractor, sync_to_thread=False),
-            "semantic_cache": Provide(lambda: sem_cache, sync_to_thread=False),
-            "fallback_cache": Provide(lambda: fb_cache, sync_to_thread=False),
-            "orchestrator": Provide(lambda: orchestrator, sync_to_thread=False),
-            "config": Provide(lambda: config, sync_to_thread=False),
-        },
-    )
-
-    yield app
-
-    with contextlib.suppress(Exception):
-        await fb_cache.close()
-    with contextlib.suppress(Exception):
-        await sem_cache.close()
-    with contextlib.suppress(Exception):
-        await router.close()
-    with contextlib.suppress(Exception):
-        await guardrail.close()
-    with contextlib.suppress(Exception):
-        store.close()
+    return create_app(config)
 
 
 @pytest.mark.integration
@@ -134,7 +57,9 @@ async def test_live_phase4_end_to_end_flow(live_app):
                 "and BM25 inverted index text searches in a single single-binary local storage engine."
             ),
         }
-        ingest_resp = await client.post("/api/v1/ingest", json=ingest_payload)
+        ingest_resp = await client.post(
+            "/api/v1/ingest", json=ingest_payload, headers=ADMIN_HEADERS
+        )
         assert ingest_resp.status_code == 201
         ingest_data = ingest_resp.json()
         assert ingest_data["documentId"] == "doc_e2e_whitepaper"
@@ -175,7 +100,7 @@ async def test_live_phase4_end_to_end_flow(live_app):
         assert "Hello!" in chitchat_data["answer"]
 
         # 6. Verify Cache Stats
-        stats_resp = await client.get("/api/v1/cache/stats")
+        stats_resp = await client.get("/api/v1/cache/stats", headers=ADMIN_HEADERS)
         assert stats_resp.status_code == 200
         stats_data = stats_resp.json()
         if not query_data["degraded"]:
