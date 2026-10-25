@@ -11,7 +11,7 @@ This guide provides operational guidance for deploying, maintaining, monitoring,
 - **Web Framework**: Litestar 2.24+ with `msgspec` DTOs.
 - **Embedded Database**: LatticeDB 0.15+ (in-process SQLite-based property graph + HNSW + BM25).
 - **Embedded ML Inferences**: FastEmbed (`bge-small-en-v1.5`), GLiNER (`gliner-2.5-decide`), and INT8 ONNX Cross-Encoder (`bge-reranker-v2-m3`).
-- **Orchestration**: LangGraph state graph with TypeSafe AI front-door decision triage and context guardrailing.
+- **Orchestration**: a single pipeline core behind the buffered `run()` and streaming `stream_query()` entry points, with TypeSafe AI front-door decision triage and context guardrailing.
 
 ### 1.1 Single-Container Production Deployment Topology
 
@@ -113,7 +113,7 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
 3. **Subgraph Snapshot Export**:
    Export graph knowledge as JSON via the REST API:
    ```bash
-   curl -s "http://localhost:8000/api/v1/graph/subgraph?limit=5000" > backup_graph.json
+   curl -s -H "X-Admin-Key: $ADMIN_API_KEY" "http://localhost:8000/api/v1/graph/subgraph?limit=500" > backup_graph.json
    ```
 
 ### 3.2 Restoration Procedure
@@ -162,7 +162,7 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
    - The sanitized exception is logged server-side under the same `requestId`.
 
 4. **Access Control**:
-   - Ingest, eval and benchmark require `X-Admin-Key` (`ADMIN_API_KEY`); query endpoints are rate-limited per client; request sizes are bounded. See `docs/security.md` §3.4.
+   - Ingest, graph snapshot, cache stats, eval and benchmark require `X-Admin-Key` (`ADMIN_API_KEY`); query endpoints are rate-limited per client; request sizes are bounded. See `docs/security.md` §3.4.
 
 5. **Static Secret Scanning in CI/CD**:
    - Automated git test scans all tracked repository files to guarantee no accidental commits of `apikeys.md`, `.env`, or hardcoded API tokens.
@@ -185,12 +185,12 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 
 ## 6. Continuous Integration & Quality Gates Pipeline
 
-`lattice-rag` runs quality gates on every push and pull request via GitHub Actions (`.github/workflows/eval-gate.yml`):
+`lattice-rag` runs key-free quality gates on every push and pull request (`.github/workflows/eval-gate.yml`) and an advisory, Jev-judged Live Tier nightly and on demand (`.github/workflows/live-tier.yml`).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="diagrams/d10-cicd-pipeline-light.svg">
-  <img alt="CI Quality Gates & Deploy Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
+  <img alt="CI Quality Gates & Live Tier" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
 </picture>
 
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d10-cicd-pipeline-dark.html">Dark Specimen</a> | <a href="diagrams/d10-cicd-pipeline-light.html">Light Specimen</a></sub>
@@ -200,8 +200,33 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
    - **`lint`**: `ruff check src tests` (rules `E,F,W,I,N,UP,B,A,C4,SIM`), `ruff format --check src tests` (ruff version pinned in `pyproject.toml`), and `mypy src` in strict mode.
    - **`unit-tests`**: the hermetic `pytest tests/unit/` suite with mock keys and no network, including the security audit (`test_security_audit.py`: secret scan of tracked files, `SecretStr` masking, DTO field audit, log redaction, error shielding).
    - **`frontend`**: `npm ci && npm run build` (`tsc -b` type-checks the studio against `types.ts`, then Vite builds it).
-2. **Golden Dataset Evaluation Gate** (after all three gates pass; skipped for fork PRs or without `TYPESAFE_API_KEY`):
-   - Runs `lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json` on an ephemeral database.
-   - Fails on a mean regression above 0.03, any query's faithfulness below 0.50, or a Noul contradiction veto. Latency SLAs are not part of this gate; check them with `lattice-rag benchmark --sla-check`.
+   - **`hermetic-tier`** (the required PR gate, ADR-0002): `lattice-rag hermetic` validates the Gold Set and checks retrieval recall and MRR per Slice against Gold Passages with the real local models and no API keys, so it runs for fork PRs too.
+
+### Two tiers: Hermetic gates, Live advises
+
+| | Hermetic Tier | Live Tier |
+| :--- | :--- | :--- |
+| Workflow | `eval-gate.yml`, every push and PR | `live-tier.yml`, nightly (03:17 UTC) and `workflow_dispatch` |
+| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the fallback) |
+| Measures | Gold Set validity, retrieval recall and MRR per Slice | Jev-judged faithfulness, context precision, answer relevance, answer correctness |
+| Blocks merges | Yes | No: it never runs on PRs |
+| Missing secret | n/a | The run fails with an error annotation naming the secret; it is never skipped |
+
+**Live Tier** (`lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output live_tier_report.json`, on an ephemeral database; the report is uploaded as the `live-tier-report` artifact):
+- `lattice-rag eval` itself refuses to start without `TYPESAFE_API_KEY` or `GROQ_API_KEY` (without Groq every answer would come from the fallback, so the run would measure the wrong system).
+- Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. A red nightly is a signal to investigate, not a merge block. Latency SLAs are not part of either tier; check them with `lattice-rag benchmark --sla-check`.
+- **Tolerance from measured variance.** The judge's run-to-run noise sets `max_regression_delta`: run the Live Tier three times on unchanged code, then `lattice-rag measure-baseline r1.json r2.json r3.json`. It sets each baseline mean to the mean of the three run means and `max_regression_delta` to two sample standard deviations of the noisiest metric, rounded up to 0.01. The raw per-run means, the standard deviations and the rule are kept under `measurement` in `eval_baseline.json`. The floor and per-query `pass_thresholds` are policy and are edited by hand. Re-measure when a change intentionally moves the metrics (prompt, model, retrieval, Gold Set).
+
+### Rerank-score Noul skip (off by default)
+
+`GUARDRAIL_SKIP_RERANK_SCORE` lets chunks the cross-encoder already rates clearly relevant skip the Jev Noul context guardrail (`RerankScoreGate` in `routing/guardrail.py`). A chunk whose `rerank_score` (the raw bge-reranker logit, not a probability) is at or above the value is kept without a Noul question; the others are still judged by Noul, and the reranker's order is kept. When every chunk clears the value no Noul call is made, which is the only case that saves a network round-trip; otherwise it only shrinks the Noul request. The setting ships **unset (off)**, and the code default must stay off. It is enabled per deployment, through the environment, and only with Live Tier evidence:
+
+1. **Pick a candidate from the Hermetic Tier.** `lattice-rag hermetic --output h.json` lists each query's top rerank score. The candidate must sit well above every `unanswerable` query's top score (at the time of writing the highest is -0.26, eval_22) so unanswerable queries still go to Noul; 3.0 is a reasonable first trial.
+2. **Measure with the gate on.** Run the Live Tier three times with the candidate: `GUARDRAIL_SKIP_RERANK_SCORE=<value> lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output on-rN.json`, or dispatch `live-tier.yml` with the `guardrail_skip_rerank_score` input (the nightly schedule always runs with the gate off). `eval` reuses the served guardrail, so the setting applies to the ephemeral pipeline too.
+3. **Compare against the measured baseline** (`measurement` in `eval_baseline.json`, three gate-off runs) and enable only if all of these hold:
+   - every metric mean, above all `faithfulness` and `context_precision` (the two the guardrail protects), is within `max_regression_delta` (0.06) of the baseline mean;
+   - no query that passes in the baseline runs fails in all three gate-on runs;
+   - the Noul contradiction vetoes on `long_context` (baseline: 1, 1 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
+4. **Record and enable.** Put the three run means and the veto counts in the PR that sets the variable in the deployment environment (for example the Cloud Run service's env vars), and keep the reports. Re-run this procedure when the reranker model, `top_k`, the Gold Set or the threshold changes.
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

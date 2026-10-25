@@ -114,4 +114,74 @@ async def test_router_pure_chitchat_uses_fast_path(query: str):
     decision = await router.route_query(query)
 
     assert decision.route == "chitchat"
+    assert decision.verified is True
     mock_client.system_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "jev_outcome",
+    [
+        RuntimeError("503 Service Unavailable"),
+        SimpleNamespace(choices={}),
+        SimpleNamespace(choices={"route": SimpleNamespace(choice="poetry", confidence=0.9)}),
+    ],
+    ids=["jev_error", "missing_choice", "unknown_route"],
+)
+async def test_router_fallbacks_are_unverified(jev_outcome):
+    """Every System 1 fallback to hybrid is reported as unverified."""
+    mock_client = AsyncMock()
+    if isinstance(jev_outcome, Exception):
+        mock_client.system_one.side_effect = jev_outcome
+    else:
+        mock_client.system_one.return_value = jev_outcome
+    router = QueryRouter(ts_client=mock_client)
+
+    decision = await router.route_query("Explain vector indexing")
+
+    assert decision.route == "hybrid"
+    assert decision.verified is False
+
+
+@pytest.mark.asyncio
+async def test_router_successful_jev_route_is_verified():
+    mock_client = AsyncMock()
+    mock_client.system_one.return_value = SimpleNamespace(
+        choices={"route": SimpleNamespace(choice="graph_relational", confidence=0.9)}
+    )
+    router = QueryRouter(ts_client=mock_client)
+
+    decision = await router.route_query("How does X relate to Y?")
+
+    assert decision.verified is True
+
+
+@pytest.mark.asyncio
+async def test_offline_router_makes_no_jev_calls(monkeypatch: pytest.MonkeyPatch):
+    """Mock-key mode: the router never contacts Jev and reports its fallback as unverified."""
+    from typesafe_sdk import AsyncTypeSafeClient
+
+    calls = AsyncMock()
+    monkeypatch.setattr(AsyncTypeSafeClient, "system_one", calls)
+    router = QueryRouter.offline()
+
+    decision = await router.route_query("Explain vector indexing")
+    greeting = await router.route_query("hello there")
+    await router.aclose()
+
+    assert (decision.route, decision.verified) == ("hybrid", False)
+    assert (greeting.route, greeting.verified) == ("chitchat", True)
+    calls.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_offline_mode_needs_no_key_and_rejects_a_client(monkeypatch: pytest.MonkeyPatch):
+    """Offline mode is an explicit constructor mode: no key needed, and no client accepted."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+
+    router = QueryRouter(offline=True)
+    decision = await router.route_query("Explain vector indexing")
+
+    assert (decision.route, decision.verified) == ("hybrid", False)
+    with pytest.raises(ValueError, match="offline"):
+        QueryRouter(ts_client=AsyncMock(), offline=True)

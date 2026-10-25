@@ -60,3 +60,22 @@ def test_load_config_defaults_are_locked_down(monkeypatch: pytest.MonkeyPatch):
     cfg = load_config()
     assert not cfg.admin_api_key
     assert cfg.cors_allow_origins == ()
+
+
+def test_guardrail_skip_rerank_score_is_off_by_default(monkeypatch: pytest.MonkeyPatch):
+    """The rerank-score Noul skip ships disabled until the Live Tier shows no quality loss."""
+    monkeypatch.delenv("GUARDRAIL_SKIP_RERANK_SCORE", raising=False)
+
+    assert load_config().guardrail_skip_rerank_score is None
+
+
+def test_guardrail_skip_rerank_score_reads_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GUARDRAIL_SKIP_RERANK_SCORE", "4.5")
+
+    assert load_config().guardrail_skip_rerank_score == 4.5
+
+
+def test_guardrail_skip_rerank_score_empty_means_off(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GUARDRAIL_SKIP_RERANK_SCORE", "")
+
+    assert load_config().guardrail_skip_rerank_score is None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003  (msgspec resolves annotations at runtime)
+from enum import StrEnum
 from typing import Annotated, Any
 
 import msgspec
@@ -10,7 +12,14 @@ MAX_QUERY_CHARS = 2_000
 MAX_DOCUMENT_CHARS = 200_000
 
 QueryText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_QUERY_CHARS)]
-DocumentId = Annotated[str, msgspec.Meta(pattern=r"^[\w.-]{1,128}$")]
+DOCUMENT_ID_PATTERN = r"^[\w.-]{1,128}$"
+DocumentId = Annotated[str, msgspec.Meta(pattern=DOCUMENT_ID_PATTERN)]
+
+# ADR-0001: the deployed instance serves a Seeded Database from ephemeral disk
+RUNTIME_DOCUMENT_PERSISTENCE = (
+    "ephemeral: on the deployed instance, documents ingested at runtime do not survive "
+    "a restart or redeploy; durable content is added with `lattice-rag seed` at build time"
+)
 Title = Annotated[str, msgspec.Meta(min_length=1, max_length=512)]
 DocumentText = Annotated[str, msgspec.Meta(min_length=1, max_length=MAX_DOCUMENT_CHARS)]
 Tag = Annotated[str, msgspec.Meta(min_length=1, max_length=64)]
@@ -131,6 +140,8 @@ class QueryResponse(msgspec.Struct, rename="camel"):
     timings: list[StageTiming] = []
     degraded: bool = False
     low_grounding: bool = False
+    # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+    unverified: bool = False
 
 
 # ── Server-Sent Event payloads for POST /api/v1/query/stream ─────────────────
@@ -163,6 +174,8 @@ class StreamDone(msgspec.Struct, rename="camel"):
     timings: list[StageTiming] = []
     degraded: bool = False
     low_grounding: bool = False
+    # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
+    unverified: bool = False
 
 
 class StreamError(msgspec.Struct, rename="camel"):
@@ -178,6 +191,8 @@ class IngestRequest(msgspec.Struct, rename="camel"):
     title: Title
     text: DocumentText
     tags: Annotated[list[Tag], msgspec.Meta(max_length=32)] = []
+    # Atomically replace an existing document with this id instead of returning 409
+    replace: bool = False
 
 
 class IngestResponse(msgspec.Struct, rename="camel"):
@@ -187,6 +202,7 @@ class IngestResponse(msgspec.Struct, rename="camel"):
     chunk_count: int
     entity_count: int
     relation_count: int
+    persistence: str = RUNTIME_DOCUMENT_PERSISTENCE
 
 
 class CacheStatsResponse(msgspec.Struct, rename="camel"):
@@ -199,26 +215,63 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
     tier2_cached_queries: int
 
 
+class EvalQueryError(StrEnum):
+    """Why a Gold Set query failed; a fixed code, never exception text."""
+
+    PIPELINE_ERROR = "pipeline_error"
+    JUDGE_ERROR = "judge_error"
+
+
 class EvalQueryResult(msgspec.Struct, rename="camel"):
-    """Result of an evaluation query."""
+    """Result of one Gold Set query in the Live Tier.
+
+    A metric is ``None`` when it was not judged: either it does not apply to the
+    query's Slice, or the query failed (``error`` is set) and was never judged.
+    """
 
     query: str
-    faithfulness: float
-    context_precision: float
-    answer_relevance: float
     passed: bool
+    faithfulness: float | None = None
+    context_precision: float | None = None
+    answer_relevance: float | None = None
+    answer_correctness: float | None = None
+    error: EvalQueryError | None = None
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):
-    """Response DTO for an evaluation run."""
+    """Response DTO for an evaluation run.
+
+    Means are over the queries where the metric was judged (``None`` if none were).
+    """
 
     total_queries: int
-    mean_faithfulness: float
-    mean_context_precision: float
-    mean_answer_relevance: float
     passed_gate: bool
     regression_delta: float
+    mean_faithfulness: float | None = None
+    mean_context_precision: float | None = None
+    mean_answer_relevance: float | None = None
+    mean_answer_correctness: float | None = None
+    failed_queries: int = 0
     results: list[EvalQueryResult] = []
+
+
+class EvalJobStatus(StrEnum):
+    """Lifecycle of an Eval Job."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class EvalJobResponse(msgspec.Struct, rename="camel"):
+    """Handle and state of an Eval Job; ``report`` is set once it has succeeded."""
+
+    job_id: str
+    status: EvalJobStatus
+    started_at: datetime
+    finished_at: datetime | None = None
+    report: EvalRunResponse | None = None
+    error: str | None = None
 
 
 class HealthResponse(msgspec.Struct, rename="camel"):

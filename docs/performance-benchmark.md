@@ -67,6 +67,21 @@ The following metrics were captured with `lattice-rag benchmark --iterations 5 -
    - Stage 1 + Stage 2 + Stage 3 for `top_k=5` (8 reranked candidates), without routing, guardrail or generation.
    - The rerank stage dominates. Routing, the guardrail and the LLM call add network-bound latency on top; measure them with `--live`.
 
+### Rerank headroom and `top_k` tuning (#20)
+
+`RERANK_HEADROOM` (3) and `top_k` (5, or 12 for `massive_context`) are changed only when the retrieval benchmark and the Hermetic Tier agree. Sweep of `RERANK_HEADROOM` on the 30-query Gold Set (macOS, CPU, real models, no keys; latencies are per query over the 26 non-chitchat queries, miss path = exact miss + embed + semantic scan + offline route + retrieval at `top_k=5`):
+
+| Headroom | Hermetic recall (overall / multihop) | MRR overall | Miss path p50 / p95 | Retrieval `top_k=12` p50 |
+|---|---|---|---|---|
+| 3 (shipped) | 1.000 / 1.000 | 0.978 | 893 / 1069 ms | 1120 ms |
+| 2 | 0.986 / 0.944 | 0.978 | 1222 / 1362 ms | 1771 ms |
+| 1 | 0.986 / 0.944 | 0.978 | 990 / 1203 ms | 1630 ms |
+| 0 | 0.986 / 0.944 | 0.978 | 842 / 1222 ms | 1649 ms |
+
+Every value under 3 loses a multihop Gold Passage, and the latency saving is smaller than run-to-run noise on a shared CPU (the eval chunks are long, so the cost per candidate varies). Both stay unchanged. On the cache paths, an exact Tier 1 hit costs under 0.1 ms, and a lookup that is not exact costs the query embedding plus the cosine scan (about 10–20 ms) before any routing starts.
+
+The optional rerank-score Noul skip (`GUARDRAIL_SKIP_RERANK_SCORE`) affects only the guardrail, which the retrieval-only benchmark does not run. It ships off; see [production-readiness.md, section 6](production-readiness.md#rerank-score-noul-skip-off-by-default) for how to enable it.
+
 ---
 
 ## 3. Resource & Memory Footprint

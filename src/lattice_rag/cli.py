@@ -57,7 +57,7 @@ async def _build_harness() -> dict[str, Any]:
     from lattice_rag.orchestration.graph import RAGOrchestrator
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
-    from lattice_rag.routing.guardrail import ContextGuardrail
+    from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
     from lattice_rag.routing.router import QueryRouter
     from lattice_rag.storage.db import LatticeStore
 
@@ -70,7 +70,9 @@ async def _build_harness() -> dict[str, Any]:
         onnx_reranker_revision=config.reranker_onnx_revision,
     )
     router = QueryRouter()
-    guardrail = ContextGuardrail(threshold=0.5)
+    guardrail = with_rerank_skip(
+        ContextGuardrail(threshold=0.5), config.guardrail_skip_rerank_score
+    )
     sem_cache = SemanticCache()
     fb_cache = FallbackCache(config.redis_url)
     await fb_cache.connect()
@@ -162,7 +164,13 @@ def query(text: str, stream: bool) -> None:
 @click.argument("filepath", type=click.Path(exists=True))
 @click.option("--doc-id", default=None, help="Document ID")
 @click.option("--title", default=None, help="Document title")
-def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
+@click.option(
+    "--replace",
+    is_flag=True,
+    default=False,
+    help="Atomically replace an existing document with this doc_id",
+)
+def ingest(filepath: str, doc_id: str | None, title: str | None, replace: bool) -> None:
     """Ingest a text file into the knowledge graph."""
     import asyncio
 
@@ -170,7 +178,7 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
-    from lattice_rag.storage.db import LatticeStore
+    from lattice_rag.storage.db import IngestValidationError, LatticeStore
     from lattice_rag.storage.extract import EntityExtractor
 
     path = Path(filepath)
@@ -189,9 +197,11 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
         try:
-            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title)
+            stats = await ingester.ingest_file(path, doc_id=doc_id, title=title, replace=replace)
         except DocumentExistsError as e:
-            raise click.ClickException(f"{e}. Use a different --doc-id.") from e
+            raise click.ClickException(f"{e}. Use a different --doc-id, or --replace.") from e
+        except IngestValidationError as e:
+            raise click.ClickException(f"Ingest rejected, nothing was written: {e}") from e
         finally:
             store.close()
         click.echo(
@@ -204,11 +214,11 @@ def ingest(filepath: str, doc_id: str | None, title: str | None) -> None:
 @main.command()
 @click.option("--dataset", default="eval_dataset.json", help="Path to dataset containing corpus")
 def seed(dataset: str) -> None:
-    """Pre-seed LatticeDB with the golden corpus documents."""
+    """Pre-seed LatticeDB with the corpus of a validated Gold Set."""
     import asyncio
-    import json
 
     from lattice_rag.config import load_config
+    from lattice_rag.eval.gold_set import GoldSetError, load_gold_set
     from lattice_rag.ingestion import DocumentIngester
     from lattice_rag.ingestion.ingester import DocumentExistsError
     from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -220,8 +230,10 @@ def seed(dataset: str) -> None:
         click.echo(f"Error: Dataset {dataset} not found.")
         return
 
-    data = json.loads(path.read_text(encoding="utf-8"))
-    corpus = data.get("corpus", [])
+    try:
+        corpus = load_gold_set(path).corpus
+    except GoldSetError as e:
+        raise click.ClickException(str(e)) from e
     if not corpus:
         click.echo("No corpus documents found in dataset.")
         return
@@ -241,9 +253,7 @@ def seed(dataset: str) -> None:
         ingester = DocumentIngester(store=store, embedding_service=embed_svc, extractor=extractor)
 
         for doc in corpus:
-            d_id = doc.get("document_id", "doc")
-            d_title = doc.get("title", d_id)
-            d_text = doc.get("text", "")
+            d_id, d_title, d_text = doc.document_id, doc.title, doc.text
             try:
                 await ingester.ingest(d_id, d_title, d_text)
                 click.echo(f"  Ingested '{d_title}' ({len(d_text)} chars)")
@@ -254,6 +264,80 @@ def seed(dataset: str) -> None:
         store.close()
 
     asyncio.run(_seed())
+
+
+@main.command()
+@click.option("--dataset", default="eval_dataset.json", help="Path to the Gold Set")
+@click.option(
+    "--thresholds",
+    default="hermetic_thresholds.json",
+    help="Path to the versioned recall/MRR floors",
+)
+@click.option(
+    "--output",
+    default=None,
+    type=click.Path(writable=True),
+    help="Export the full report to a JSON file",
+)
+def hermetic(dataset: str, thresholds: str, output: str | None) -> None:
+    """Run the key-free Hermetic Tier: Gold Passage recall and MRR per Slice (the PR gate)."""
+    import asyncio
+
+    import msgspec
+
+    from lattice_rag.config import load_config
+    from lattice_rag.eval.gold_set import GoldSetError, load_gold_set
+    from lattice_rag.eval.hermetic import HermeticError, load_thresholds, run_hermetic_tier
+    from lattice_rag.retrieval.embeddings import EmbeddingService
+
+    try:
+        gold_set = load_gold_set(dataset)
+        gate = load_thresholds(thresholds)
+    except (FileNotFoundError, GoldSetError, HermeticError) as e:
+        raise click.ClickException(str(e)) from e
+
+    config = load_config(require_typesafe=False)
+    embed_svc = EmbeddingService(
+        config.embed_model,
+        config.reranker_model,
+        onnx_reranker_repo=config.reranker_onnx_repo,
+        onnx_reranker_revision=config.reranker_onnx_revision,
+    )
+    click.echo(f"Hermetic Tier: {len(gold_set.queries)} queries from {dataset}\n")
+    try:
+        report = asyncio.run(run_hermetic_tier(gold_set, gate, embed_svc))
+    except HermeticError as e:
+        raise click.ClickException(str(e)) from e
+
+    def fmt(value: float | None) -> str:
+        return "-" if value is None else f"{value:.3f}"
+
+    click.echo(f"{'Query ID':<12} {'Slice':<14} {'Recall':>7} {'RR':>7} {'Top score':>10}  Status")
+    click.echo("-" * 64)
+    for q in report.queries:
+        status = "FAIL" if q.problems else "ok"
+        click.echo(
+            f"{q.id:<12} {q.slice:<14} {fmt(q.recall):>7} {fmt(q.reciprocal_rank):>7} "
+            f"{fmt(q.top_rerank_score):>10}  {status}"
+        )
+    click.echo("")
+    click.echo(f"{'Group':<14} {'Queries':>7} {'Recall':>7} {'MRR':>7} {'Floor R/MRR':>14}")
+    click.echo("-" * 54)
+    for m in [report.overall, *report.slices]:
+        floor = f"{m.floor.recall:.2f}/{m.floor.mrr:.2f}" if m.floor else "none"
+        click.echo(f"{m.slice:<14} {m.queries:>7} {m.recall:>7.3f} {m.mrr:>7.3f} {floor:>14}")
+
+    if output:
+        Path(output).write_bytes(msgspec.json.encode(report))
+        click.echo(f"\nReport written to {output}")
+
+    if report.passed:
+        click.echo("\n✓ HERMETIC TIER PASSED")
+        return
+    click.echo("\n✗ HERMETIC TIER FAILED")
+    for failure in report.failures:
+        click.echo(f"  - {failure}")
+    sys.exit(1)
 
 
 @main.command()
@@ -381,12 +465,36 @@ def benchmark(
     default=True,
     help="Exit with 1 if regression occurs",
 )
-def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
-    """Run the CI/CD evaluation gate against the golden benchmark dataset."""
+@click.option(
+    "--output",
+    default=None,
+    help="Write the full run report (JSON) here, whether or not the gate passes",
+)
+def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str | None) -> None:
+    """Run the Live Tier: Jev-judged metrics over the Gold Set, compared with the baseline."""
     import asyncio
 
+    from lattice_rag.config import load_config
     from lattice_rag.eval import EvalRunner, JevEvaluator
+    from lattice_rag.eval.gate import format_metric
     from lattice_rag.storage.extract import EntityExtractor
+
+    # Without the judge key nothing can be scored; without Groq every answer would come
+    # from the fallback, so the run would measure the wrong system. Either is a failure.
+    keys = load_config(require_typesafe=False)
+    missing = [
+        name
+        for name, value in (
+            ("TYPESAFE_API_KEY", keys.typesafe_api_key),
+            ("GROQ_API_KEY", keys.groq_api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise click.ClickException(
+            f"The Live Tier needs {', '.join(missing)}; set it in the environment or .env "
+            "(in CI, as a repository secret). Refusing to run a skipped or degraded evaluation."
+        )
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
 
@@ -404,24 +512,35 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
             resp = await runner.run_evaluation(
                 dataset_path=dataset, baseline_path=baseline, use_temp_db=True
             )
+            if output:
+                import msgspec
+
+                Path(output).write_bytes(msgspec.json.encode(resp))
+                click.echo(f"Report written to {output}")
 
             click.echo("\n=================== Evaluation Results ===================")
             click.echo(
-                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} {'Status':<10}"
+                f"{'Query ID':<10} {'Faithfulness':<15} {'Precision':<15} {'Relevance':<15} "
+                f"{'Correctness':<15} {'Status':<10}"
             )
-            click.echo("-" * 65)
+            click.echo("-" * 80)
             for idx, r in enumerate(resp.results):
-                status_str = "✓ PASS" if r.passed else "✗ FAIL"
+                status_str = "✓ PASS" if r.passed else f"✗ FAIL {r.error or ''}".rstrip()
                 q_id = f"eval_{idx + 1:02d}"
                 click.echo(
-                    f"{q_id:<10} {r.faithfulness:<15.4f} {r.context_precision:<15.4f} {r.answer_relevance:<15.4f} {status_str:<10}"
+                    f"{q_id:<10} {format_metric(r.faithfulness):<15} "
+                    f"{format_metric(r.context_precision):<15} "
+                    f"{format_metric(r.answer_relevance):<15} "
+                    f"{format_metric(r.answer_correctness):<15} {status_str:<10}"
                 )
 
-            click.echo("=" * 65)
+            click.echo("=" * 80)
             click.echo(f"Total Evaluated Queries: {resp.total_queries}")
-            click.echo(f"Mean Faithfulness:       {resp.mean_faithfulness:.4f}")
-            click.echo(f"Mean Context Precision:  {resp.mean_context_precision:.4f}")
-            click.echo(f"Mean Answer Relevance:   {resp.mean_answer_relevance:.4f}")
+            click.echo(f"Failed (not judged):     {resp.failed_queries}")
+            click.echo(f"Mean Faithfulness:       {format_metric(resp.mean_faithfulness)}")
+            click.echo(f"Mean Context Precision:  {format_metric(resp.mean_context_precision)}")
+            click.echo(f"Mean Answer Relevance:   {format_metric(resp.mean_answer_relevance)}")
+            click.echo(f"Mean Answer Correctness: {format_metric(resp.mean_answer_correctness)}")
             click.echo(f"Max Regression Delta:    {resp.regression_delta:+.4f}")
 
             if resp.passed_gate:
@@ -429,7 +548,8 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
                 return True
             else:
                 click.echo(
-                    "\n✗ CI/CD QUALITY GATE FAILED (Regression delta < -0.03 or floor violation)"
+                    "\n✗ CI/CD QUALITY GATE FAILED (failed query, floor violation, or regression; "
+                    "thresholds are in the baseline file)"
                 )
                 return False
         finally:
@@ -439,6 +559,39 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool) -> None:
     passed = asyncio.run(_run())
     if fail_on_regression and not passed:
         sys.exit(1)
+
+
+@main.command(name="measure-baseline")
+@click.argument("reports", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--baseline", default="eval_baseline.json", help="Baseline file to update")
+def measure_baseline(reports: tuple[str, ...], baseline: str) -> None:
+    """Set baseline means and tolerance from repeated `eval --output` reports.
+
+    Run the Live Tier three times on unchanged code, then pass the three reports here.
+    """
+    from datetime import UTC, datetime
+
+    import msgspec
+
+    from lattice_rag.api.dtos import EvalRunResponse
+    from lattice_rag.eval.gate import BaselineError, format_metric, measure, write_measurement
+
+    runs = [msgspec.json.decode(Path(p).read_bytes(), type=EvalRunResponse) for p in reports]
+    sizes = {r.total_queries for r in runs}
+    if len(sizes) != 1:
+        raise click.ClickException(f"Reports cover different query counts: {sorted(sizes)}")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        measurement = measure(runs, measured_at=stamp)
+        write_measurement(baseline, measurement, total_queries=sizes.pop())
+    except BaselineError as e:
+        raise click.ClickException(str(e)) from e
+
+    for metric, mean in measurement.means.items():
+        click.echo(
+            f"{metric:<20} mean {format_metric(mean)}  sd {format_metric(measurement.stdev[metric])}"
+        )
+    click.echo(f"max_regression_delta -> {measurement.tolerance:.2f} (written to {baseline})")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "seed.db"))
     dataset = tmp_path / "ds.json"
-    dataset.write_text(json.dumps({"corpus": [{"document_id": "d1", "text": "Hello."}]}))
+    dataset.write_text(json.dumps(_gold_set_with_one_document()))
 
     ingester = MagicMock()
     ingester.ingest = AsyncMock()
@@ -26,6 +26,59 @@ def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli.main, ["seed", "--dataset", str(dataset)])
     assert result.exit_code == 0, result.output
     ingester.ingest.assert_awaited_once()
+
+
+def _gold_set_with_one_document() -> dict[str, object]:
+    return {
+        "version": "2.0.0",
+        "domain": "test",
+        "corpus": [{"document_id": "d1", "title": "D1", "text": "Hello world."}],
+        "queries": [
+            {
+                "id": "q1",
+                "query": "What is said?",
+                "slice": "factoid",
+                "expected_route": "vector_exact",
+                "reference_answer": "Hello world.",
+                "gold_passages": [{"document_id": "d1", "text": "Hello world."}],
+            }
+        ],
+    }
+
+
+def test_seed_refuses_an_invalid_gold_set(monkeypatch, tmp_path):
+    """A Gold Passage that is not verbatim fails seeding (and so the Docker build) loudly."""
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "seed.db"))
+    data = _gold_set_with_one_document()
+    data["queries"][0]["gold_passages"][0]["text"] = "Hello there."  # type: ignore[index]
+    dataset = tmp_path / "ds.json"
+    dataset.write_text(json.dumps(data))
+    ingester = MagicMock()
+    ingester.ingest = AsyncMock()
+    monkeypatch.setattr("lattice_rag.ingestion.DocumentIngester", lambda **_: ingester)
+
+    result = CliRunner().invoke(cli.main, ["seed", "--dataset", str(dataset)])
+
+    assert result.exit_code != 0
+    assert "q1: gold_passages[0] is not verbatim" in result.output
+    ingester.ingest.assert_not_called()
+
+
+def test_ingest_replace_flag_reaches_the_ingester(monkeypatch, tmp_path):
+    """`ingest --replace` asks for an atomic replace instead of failing on an existing id."""
+    monkeypatch.setenv("LATTICEDB_PATH", str(tmp_path / "ingest.db"))
+    doc = tmp_path / "doc.txt"
+    doc.write_text("Hello world.")
+    ingester = MagicMock()
+    ingester.ingest_file = AsyncMock(return_value=MagicMock(chunk_count=1))
+    monkeypatch.setattr("lattice_rag.ingestion.DocumentIngester", lambda **_: ingester)
+    monkeypatch.setattr("lattice_rag.retrieval.embeddings.EmbeddingService", MagicMock())
+    monkeypatch.setattr("lattice_rag.storage.extract.EntityExtractor", MagicMock())
+
+    result = CliRunner().invoke(cli.main, ["ingest", str(doc), "--replace"])
+
+    assert result.exit_code == 0, result.output
+    assert ingester.ingest_file.await_args.kwargs["replace"] is True
 
 
 def test_serve_passes_host_and_port_through(monkeypatch):

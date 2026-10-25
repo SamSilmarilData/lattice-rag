@@ -9,10 +9,14 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from litestar import Litestar
+from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers.graph import GraphController
+from lattice_rag.api.guards import ADMIN_KEY_HEADER
+from lattice_rag.config import AppConfig
+from lattice_rag.security import SecretStr
 from lattice_rag.storage.db import (
     ChunkData,
     EntityData,
@@ -20,6 +24,9 @@ from lattice_rag.storage.db import (
     RelationData,
     SubgraphResult,
 )
+
+ADMIN_KEY = "admin-secret"
+ADMIN_HEADERS = {ADMIN_KEY_HEADER: ADMIN_KEY}
 
 
 @pytest.fixture
@@ -35,18 +42,35 @@ def mock_graph_app():
         ],
     )
 
+    config = AppConfig(
+        typesafe_api_key=SecretStr("ts"),
+        groq_api_key=SecretStr(""),
+        gemini_api_key=SecretStr(""),
+        admin_api_key=SecretStr(ADMIN_KEY),
+    )
     app = Litestar(
         route_handlers=[GraphController],
         dependencies={"store": Provide(lambda: mock_store, sync_to_thread=False)},
+        state=State({"config": config}),
     )
     return app, mock_store
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headers", [{}, {ADMIN_KEY_HEADER: "wrong-key"}])
+async def test_get_subgraph_requires_admin_key(mock_graph_app, headers):
+    app, mock_store = mock_graph_app
+    async with AsyncTestClient(app) as client:
+        response = await client.get("/api/v1/graph/subgraph", headers=headers)
+        assert response.status_code == 401
+        mock_store.get_subgraph_snapshot.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_subgraph_endpoint(mock_graph_app):
     app, mock_store = mock_graph_app
     async with AsyncTestClient(app) as client:
-        response = await client.get("/api/v1/graph/subgraph?limit=25")
+        response = await client.get("/api/v1/graph/subgraph?limit=25", headers=ADMIN_HEADERS)
         assert response.status_code == 200
         data = response.json()
         assert "nodes" in data
@@ -64,7 +88,7 @@ async def test_get_subgraph_endpoint(mock_graph_app):
 async def test_get_subgraph_rejects_out_of_range_limit(mock_graph_app, limit):
     app, mock_store = mock_graph_app
     async with AsyncTestClient(app) as client:
-        response = await client.get(f"/api/v1/graph/subgraph?limit={limit}")
+        response = await client.get(f"/api/v1/graph/subgraph?limit={limit}", headers=ADMIN_HEADERS)
         assert response.status_code == 400
         mock_store.get_subgraph_snapshot.assert_not_called()
 
@@ -86,12 +110,8 @@ def test_lattice_store_get_subgraph_snapshot():
         chunk_id = stats.chunk_ids[0]
 
         entities = [
-            EntityData(
-                name="LatticeDB", entity_type="Database", embedding=np.zeros(384, dtype=np.float32)
-            ),
-            EntityData(
-                name="FastEmbed", entity_type="Library", embedding=np.zeros(384, dtype=np.float32)
-            ),
+            EntityData(name="LatticeDB", entity_type="Database"),
+            EntityData(name="FastEmbed", entity_type="Library"),
         ]
         relations = [
             RelationData(source_name="LatticeDB", target_name="FastEmbed", relation_type="USES"),

@@ -21,6 +21,7 @@ import {
   Boxes,
 } from 'lucide-react';
 import { SubgraphDTO } from '../types';
+import { adminFetch, hasAdminKey } from '../adminKey';
 
 interface GraphExplorerProps {
   traversedPath: SubgraphDTO | null;
@@ -72,24 +73,33 @@ export const GraphExplorer: React.FC<GraphExplorerProps> = ({ traversedPath }) =
   const [simNodes, setSimNodes] = useState<SimNode[]>([]);
   const [simEdges, setSimEdges] = useState<SimEdge[]>([]);
 
-  // Fetch full knowledge graph on mount
+  // The full-graph snapshot is admin-only; it stays locked until an admin key is entered
+  const [locked, setLocked] = useState(() => !hasAdminKey());
+
   const fetchFullGraph = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/graph/subgraph?limit=60');
+      const res = await adminFetch('/api/v1/graph/subgraph?limit=60');
       if (res.ok) {
         const data: SubgraphDTO = await res.json();
         setFullGraph(data);
+        setLocked(false);
+      } else if (res.status === 401) {
+        setLocked(true);
       }
     } catch (err) {
+      // Thrown when the admin-key prompt is cancelled, or on a network failure
       console.error('Failed to load full graph:', err);
+      setLocked(!hasAdminKey());
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Load the full graph on mount only when a key is already known, so the studio never prompts
+  // for one unasked
   useEffect(() => {
-    fetchFullGraph();
+    if (hasAdminKey()) fetchFullGraph();
   }, [fetchFullGraph]);
 
   // When a traversed path arrives, default view mode to traversed if there are nodes
@@ -322,8 +332,18 @@ export const GraphExplorer: React.FC<GraphExplorerProps> = ({ traversedPath }) =
                 ? 'Loading LatticeDB knowledge graph...'
                 : mode === 'traversed'
                 ? 'No query path traversed yet. Execute a query in the Query Studio to see multi-hop graph hops.'
+                : locked
+                ? 'The full knowledge graph is admin-only. Enter the admin key to load it.'
                 : 'Knowledge graph is currently empty. Click "Ingest Document" above to populate entities and relations.'}
             </p>
+            {!loading && mode === 'full' && locked && (
+              <button
+                onClick={fetchFullGraph}
+                className="px-3 py-1.5 text-[11px] font-medium rounded border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10 transition"
+              >
+                Enter admin key
+              </button>
+            )}
           </div>
         ) : (
           <svg

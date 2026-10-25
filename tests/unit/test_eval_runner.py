@@ -11,38 +11,62 @@ import pytest
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
 from lattice_rag.eval.runner import EvalRunner
 
+PASS_THRESHOLDS = {
+    "faithfulness": 0.70,
+    "context_precision": 0.65,
+    "answer_relevance": 0.70,
+    "answer_correctness": 0.70,
+}
+
+
+def _baseline(**metrics: float) -> dict:
+    return {
+        "version": "2.0.0",
+        "metrics": metrics
+        or {"faithfulness": 0.85, "context_precision": 0.80, "answer_relevance": 0.88},
+        "gate_thresholds": {
+            "max_regression_delta": 0.03,
+            "min_query_floor": 0.50,
+            "pass_thresholds": PASS_THRESHOLDS,
+        },
+    }
+
+
+def _result(query: str = "q", score: float = 0.9, **overrides: float) -> EvalQueryResult:
+    scores = dict.fromkeys(
+        ("faithfulness", "context_precision", "answer_relevance", "answer_correctness"), score
+    )
+    scores.update(overrides)
+    return EvalQueryResult(query=query, passed=True, **scores)
+
 
 @pytest.fixture
 def mock_dataset_and_baseline(tmp_path: Path):
     """Create sample dataset and baseline files."""
     dataset = {
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "domain": "test",
         "corpus": [],
         "queries": [
             {
                 "id": "q1",
                 "query": "Test query 1",
-                "ground_truth": "Expected 1",
+                "slice": "unanswerable",
+                "expected_route": "hybrid",
+                "reference_answer": "Expected 1",
+                "gold_passages": [],
             },
             {
                 "id": "q2",
                 "query": "Test query 2",
-                "ground_truth": "Expected 2",
+                "slice": "unanswerable",
+                "expected_route": "vector_exact",
+                "reference_answer": "Expected 2",
+                "gold_passages": [],
             },
         ],
     }
-    baseline = {
-        "version": "0.4.0",
-        "metrics": {
-            "faithfulness": 0.85,
-            "context_precision": 0.80,
-            "answer_relevance": 0.88,
-        },
-        "gate_thresholds": {
-            "max_regression_delta": 0.03,
-            "min_query_floor": 0.50,
-        },
-    }
+    baseline = _baseline()
 
     ds_path = tmp_path / "test_ds.json"
     base_path = tmp_path / "test_base.json"
@@ -259,5 +283,245 @@ async def test_eval_runner_records_evaluator_failure_instead_of_aborting(mock_da
     failed = resp.results[0]
     assert failed.query == "Test query 1"
     assert failed.passed is False
-    assert failed.faithfulness == 0.0
+    assert failed.error == "judge_error"
+    assert failed.faithfulness is None  # not judged, so not scored
+    assert resp.failed_queries == 1
     assert resp.passed_gate is False
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_judges_against_the_reference_answer(mock_dataset_and_baseline):
+    """The Gold Set's reference answer is what the judge compares the answer to."""
+    ds_path, base_path = mock_dataset_and_baseline
+
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = EvalQueryResult(
+        query="q", faithfulness=0.9, context_precision=0.9, answer_relevance=0.9, passed=True
+    )
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    refs = {c.kwargs["ground_truth"] for c in mock_evaluator.evaluate_query.await_args_list}
+    assert refs == {"Expected 1", "Expected 2"}
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_rejects_invalid_gold_set_before_running(tmp_path: Path):
+    """A malformed Gold Set fails fast with the missing field named; no query is run."""
+    from lattice_rag.eval.gold_set import GoldSetError
+
+    ds_path = tmp_path / "bad.json"
+    ds_path.write_text(
+        json.dumps(
+            {
+                "version": "2.0.0",
+                "domain": "test",
+                "corpus": [],
+                "queries": [{"id": "q1", "query": "Q", "ground_truth": "old v1 field"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    mock_orch = AsyncMock()
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=AsyncMock())
+    with pytest.raises(GoldSetError, match=r"queries\[0\]"):
+        await runner.run_evaluation(dataset_path=ds_path, baseline_path="eval_baseline.json")
+    mock_orch.run.assert_not_called()
+
+
+def _gold_query(qid: str, query: str, slice_name: str, **extra: object) -> dict:
+    return {
+        "id": qid,
+        "query": query,
+        "slice": slice_name,
+        "expected_route": "hybrid",
+        "reference_answer": "R",
+        "gold_passages": [],
+        **extra,
+    }
+
+
+def _write(path: Path, payload: dict) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_pipeline_error_fails_query_without_judging(mock_dataset_and_baseline):
+    """A query whose pipeline raises is reported failed and is never sent to the judge."""
+    ds_path, base_path = mock_dataset_and_baseline
+
+    mock_orch = AsyncMock()
+    mock_orch.run.side_effect = [
+        RuntimeError("groq exploded"),
+        MagicMock(answer="fine", filtered_chunks=[]),
+    ]
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = _result("Test query 2")
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    assert mock_evaluator.evaluate_query.await_count == 1
+    assert mock_evaluator.evaluate_query.await_args.kwargs["query"] == "Test query 2"
+
+    failed = resp.results[0]
+    assert failed.query == "Test query 1"
+    assert failed.passed is False
+    assert failed.error == "pipeline_error"
+    assert failed.faithfulness is None
+    assert failed.answer_correctness is None
+    assert resp.failed_queries == 1
+    assert resp.passed_gate is False
+    # The failed query is not scored, so it does not drag the means
+    assert resp.mean_answer_correctness == 0.9
+
+
+@pytest.mark.asyncio
+async def test_floor_applies_to_answer_correctness(mock_dataset_and_baseline):
+    """The per-query floor from the baseline covers every metric, not just faithfulness."""
+    ds_path, base_path = mock_dataset_and_baseline
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.side_effect = [
+        _result("Test query 1", 0.95),
+        _result("Test query 2", 0.95, answer_correctness=0.40),
+    ]
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    # The fixture baseline has no correctness mean to regress against; only the floor trips
+    assert resp.mean_answer_correctness == 0.675
+    assert resp.passed_gate is False
+
+
+@pytest.mark.asyncio
+async def test_floor_and_pass_thresholds_come_from_the_baseline_file(tmp_path: Path):
+    """Raising the floor in the baseline file fails a run that the default floor passes."""
+    ds_path = _write(
+        tmp_path / "ds.json",
+        {
+            "version": "2.0.0",
+            "domain": "t",
+            "corpus": [],
+            "queries": [_gold_query("q1", "Q", "unanswerable")],
+        },
+    )
+    baseline = _baseline()
+    baseline["gate_thresholds"]["min_query_floor"] = 0.95
+    baseline["gate_thresholds"]["pass_thresholds"] = dict.fromkeys(PASS_THRESHOLDS, 0.85)
+    base_path = _write(tmp_path / "base.json", baseline)
+
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = _result("Q", 0.9)
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    assert resp.passed_gate is False
+    thresholds = mock_evaluator.evaluate_query.await_args.kwargs["thresholds"]
+    assert thresholds.answer_correctness == 0.85
+
+
+@pytest.mark.asyncio
+async def test_correctness_regression_against_baseline_fails_gate(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, _ = mock_dataset_and_baseline
+    base_path = _write(
+        tmp_path / "with_correctness.json",
+        _baseline(
+            faithfulness=0.85,
+            context_precision=0.80,
+            answer_relevance=0.88,
+            answer_correctness=0.90,
+        ),
+    )
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = _result(score=0.9, answer_correctness=0.75)
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    assert resp.regression_delta == -0.15
+    assert resp.passed_gate is False
+
+
+@pytest.mark.asyncio
+async def test_baseline_without_pass_thresholds_is_rejected(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    from lattice_rag.eval.gate import BaselineError
+
+    ds_path, _ = mock_dataset_and_baseline
+    base_path = _write(
+        tmp_path / "old.json",
+        {
+            "version": "1.0.0",
+            "metrics": {"faithfulness": 0.88},
+            "gate_thresholds": {"max_regression_delta": 0.03, "min_query_floor": 0.5},
+        },
+    )
+    mock_orch = AsyncMock()
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=AsyncMock())
+
+    with pytest.raises(BaselineError, match="pass_thresholds"):
+        await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+    mock_orch.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_dataset_and_baseline):
+    """Chitchat is judged on the reply only; unanswerable has no context-precision target."""
+    _, base_path = mock_dataset_and_baseline
+    doc_text = "LatticeDB is embedded."
+    ds_path = _write(
+        tmp_path / "slices.json",
+        {
+            "version": "2.0.0",
+            "domain": "t",
+            "corpus": [{"document_id": "d", "title": "D", "text": doc_text}],
+            "queries": [
+                _gold_query("c", "hello", "chitchat"),
+                _gold_query("u", "unknowable", "unanswerable"),
+                _gold_query(
+                    "f",
+                    "what is it",
+                    "factoid",
+                    gold_passages=[{"document_id": "d", "text": doc_text}],
+                ),
+            ],
+        },
+    )
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.return_value = _result()
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+    await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    by_query = {
+        c.kwargs["query"]: set(c.kwargs["metrics"])
+        for c in mock_evaluator.evaluate_query.await_args_list
+    }
+    assert by_query == {
+        "hello": {"answer_relevance", "answer_correctness"},
+        "unknowable": {"faithfulness", "answer_relevance", "answer_correctness"},
+        "what is it": {
+            "faithfulness",
+            "context_precision",
+            "answer_relevance",
+            "answer_correctness",
+        },
+    }

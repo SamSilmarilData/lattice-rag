@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -24,9 +25,11 @@ from litestar.plugins.problem_details import ProblemDetailsConfig, ProblemDetail
 from typesafe_sdk import AsyncTypeSafeClient
 
 from lattice_rag import __version__
+from lattice_rag.api.client_identity import client_address
 from lattice_rag.api.controllers import (
     BenchmarkController,
     CacheController,
+    DocumentController,
     EvalController,
     GraphController,
     HealthController,
@@ -38,6 +41,7 @@ from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.config import AppConfig as LatticeAppConfig
 from lattice_rag.config import get_config, load_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
+from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.generation.chitchat import ChitchatHandler
 from lattice_rag.generation.gemini_fallback import GeminiFallback
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
@@ -45,7 +49,7 @@ from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.routing.guardrail import ContextGuardrail
+from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
@@ -65,8 +69,10 @@ def _resolve_config(config: LatticeAppConfig | None) -> LatticeAppConfig:
     except SystemExit:
         # Keep every other env setting (DB path, admin key, CORS); only the key is mocked
         logger.warning(
-            "TYPESAFE_API_KEY is not set: starting in degraded mode (routing falls back to "
-            "hybrid, guardrail and semantic-cache verification are disabled)"
+            "TYPESAFE_API_KEY is not set: starting in degraded mode. Jev is not called: "
+            "routing falls back to hybrid (pure small talk still goes to chitchat), the "
+            "context guardrail and semantic-cache verification are off, answers are flagged "
+            "unverified and are not cached."
         )
         return dataclasses.replace(
             load_config(require_typesafe=False),
@@ -96,9 +102,14 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     )
     extractor = EntityExtractor()
 
-    # 3. Decision routing & context guardrail
-    router = QueryRouter(ts_client=typesafe_client())
-    guardrail = ContextGuardrail(ts_client=typesafe_client())
+    # 3. Decision routing & context guardrail. In mock-key mode neither is called, so no
+    #    query pays for failing Jev calls; the resulting answers are flagged unverified.
+    router = QueryRouter.offline() if config.using_mock_keys else QueryRouter(typesafe_client())
+    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set.
+    guardrail = with_rerank_skip(
+        None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client()),
+        config.guardrail_skip_rerank_score,
+    )
 
     # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
     semantic_cache = SemanticCache(ts_client=None if config.using_mock_keys else typesafe_client())
@@ -129,7 +140,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         router_guardrail=guardrail,
     )
 
-    # 7. LangGraph RAG Agentic Orchestrator
+    # 7. RAG Orchestrator (one pipeline core behind run() and stream_query())
     orchestrator = RAGOrchestrator(
         router=router,
         semantic_cache=semantic_cache,
@@ -157,6 +168,8 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         embedding_service=embedding_service,
         extractor=extractor,
     )
+    # HTTP eval runs go through the job manager: one at a time, polled by handle
+    eval_jobs = EvalJobManager(eval_runner)
 
     # Store state on application for DI resolution
     app.state.config = config
@@ -169,16 +182,19 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     app.state.orchestrator = orchestrator
     app.state.evaluator = evaluator
     app.state.eval_runner = eval_runner
+    app.state.eval_jobs = eval_jobs
 
     try:
         yield
     finally:
         # Graceful shutdown of connections
+        await eval_jobs.close()
         await evaluator.close()
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
-        await guardrail.close()
+        if guardrail is not None:
+            await guardrail.close()
         store.close()
 
 
@@ -219,6 +235,10 @@ def provide_ingester(state: State) -> DocumentIngester:
 
 def provide_eval_runner(state: State) -> EvalRunner:
     return cast(EvalRunner, state.eval_runner)
+
+
+def provide_eval_jobs(state: State) -> EvalJobManager:
+    return cast(EvalJobManager, state.eval_jobs)
 
 
 # ── RFC 9457 Secret-Sanitizing Error Handler ──────────────────────────
@@ -263,14 +283,6 @@ def secret_sanitizing_exception_handler(
         status_code=500,
         media_type="application/problem+json",
     )
-
-
-def client_identifier(request: Request[Any, Any, Any]) -> str:
-    """Rate-limit key: the address appended by the fronting proxy, else the socket peer."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
-    return request.client.host if request.client else "unknown"
 
 
 @get("/", media_type=MediaType.HTML, include_in_schema=False)
@@ -323,11 +335,15 @@ class ApplicationCore(InitPluginProtocol):
                     middleware=[
                         RateLimitConfig(
                             rate_limit=("minute", self.config.query_rate_limit_per_minute),
-                            identifier_for_request=client_identifier,
+                            identifier_for_request=functools.partial(
+                                client_address,
+                                trusted_proxy_hops=self.config.trusted_proxy_hops,
+                            ),
                         ).middleware
                     ],
                 ),
                 IngestController,
+                DocumentController,
                 CacheController,
                 HealthController,
                 EvalController,
@@ -363,6 +379,7 @@ class ApplicationCore(InitPluginProtocol):
                 "orchestrator": Provide(provide_orchestrator, sync_to_thread=False),
                 "config": Provide(provide_config, sync_to_thread=False),
                 "eval_runner": Provide(provide_eval_runner, sync_to_thread=False),
+                "eval_jobs": Provide(provide_eval_jobs, sync_to_thread=False),
             }
         )
 

@@ -1,9 +1,11 @@
-"""Unit tests for EvalController endpoint."""
+"""HTTP-seam tests for the eval job API (serialized runs behind a handle)."""
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
-from unittest.mock import AsyncMock
+from typing import Any
 
 import pytest
 from litestar import Litestar
@@ -12,44 +14,65 @@ from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers.eval import EvalController
-from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.config import AppConfig
+from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.security import SecretStr
 
 ADMIN_HEADERS = {ADMIN_KEY_HEADER: "admin-secret"}
+JOBS = "/api/v1/eval/jobs"
+
+REPORT = EvalRunResponse(
+    total_queries=20,
+    mean_faithfulness=0.89,
+    mean_context_precision=0.86,
+    mean_answer_relevance=0.91,
+    mean_answer_correctness=0.84,
+    passed_gate=True,
+    regression_delta=0.01,
+    failed_queries=1,
+    results=[
+        EvalQueryResult(
+            query="Sample query",
+            faithfulness=0.90,
+            context_precision=0.88,
+            answer_relevance=0.92,
+            answer_correctness=0.84,
+            passed=True,
+        ),
+        EvalQueryResult(query="Broken query", passed=False, error=EvalQueryError.PIPELINE_ERROR),
+    ],
+)
+
+
+class BlockingRunner:
+    """Fake EvalRunner whose runs finish only when the test releases them."""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.calls: list[dict[str, Any]] = []
+        self.error: Exception | None = None
+
+    async def run_evaluation(self, **kwargs: Any) -> EvalRunResponse:
+        self.calls.append(kwargs)
+        await self.release.wait()
+        if self.error is not None:
+            raise self.error
+        return REPORT
 
 
 @pytest.fixture
-def mock_eval_runner():
-    runner = AsyncMock()
-    runner.run_evaluation.return_value = EvalRunResponse(
-        total_queries=20,
-        mean_faithfulness=0.89,
-        mean_context_precision=0.86,
-        mean_answer_relevance=0.91,
-        passed_gate=True,
-        regression_delta=0.01,
-        results=[
-            EvalQueryResult(
-                query="Sample query",
-                faithfulness=0.90,
-                context_precision=0.88,
-                answer_relevance=0.92,
-                passed=True,
-            )
-        ],
-    )
-    return runner
+def runner() -> BlockingRunner:
+    return BlockingRunner()
 
 
 @pytest.fixture
-def test_app(mock_eval_runner):
-    return Litestar(
+async def client(runner: BlockingRunner) -> AsyncIterator[AsyncTestClient[Litestar]]:
+    jobs = EvalJobManager(runner)  # type: ignore[arg-type]
+    app = Litestar(
         route_handlers=[EvalController],
-        dependencies={
-            "eval_runner": Provide(lambda: mock_eval_runner, sync_to_thread=False),
-        },
+        dependencies={"eval_jobs": Provide(lambda: jobs, sync_to_thread=False)},
         state=State(
             {
                 "config": AppConfig(
@@ -61,64 +84,129 @@ def test_app(mock_eval_runner):
             }
         ),
     )
+    async with AsyncTestClient(app=app) as c:
+        yield c
+    await jobs.close()
 
 
-@pytest.mark.asyncio
-async def test_api_eval_run_endpoint(test_app, mock_eval_runner):
-    """Verify POST /api/v1/eval/run calls eval runner and returns EvalRunResponse."""
-    async with AsyncTestClient(app=test_app) as client:
-        resp = await client.post("/api/v1/eval/run", headers=ADMIN_HEADERS)
-        assert resp.status_code == 201
-
-        data = resp.json()
-        assert data["totalQueries"] == 20
-        assert data["meanFaithfulness"] == 0.89
-        assert data["passedGate"] is True
-        assert len(data["results"]) == 1
-        assert data["results"][0]["query"] == "Sample query"
-
-        mock_eval_runner.run_evaluation.assert_awaited_once_with(
-            dataset_path=Path("eval_dataset.json").resolve(),
-            baseline_path=Path("eval_baseline.json").resolve(),
-            use_temp_db=True,
-            limit=None,
-        )
+async def _wait_for_status(client: AsyncTestClient[Litestar], job_id: str, status: str) -> Any:
+    for _ in range(200):
+        body = (await client.get(f"{JOBS}/{job_id}", headers=ADMIN_HEADERS)).json()
+        if body["status"] == status:
+            return body
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"job {job_id} never reached {status!r}: {body}")
 
 
-@pytest.mark.asyncio
-async def test_api_eval_run_endpoint_with_limit(test_app, mock_eval_runner):
-    """Verify POST /api/v1/eval/run?limit=5 passes limit parameter to eval runner."""
-    mock_eval_runner.run_evaluation.reset_mock()
-    async with AsyncTestClient(app=test_app) as client:
-        resp = await client.post("/api/v1/eval/run?limit=5", headers=ADMIN_HEADERS)
-        assert resp.status_code == 201
+async def test_start_returns_handle_while_run_is_still_in_progress(client, runner):
+    resp = await client.post(JOBS, headers=ADMIN_HEADERS)
 
-        mock_eval_runner.run_evaluation.assert_awaited_once_with(
-            dataset_path=Path("eval_dataset.json").resolve(),
-            baseline_path=Path("eval_baseline.json").resolve(),
-            use_temp_db=True,
-            limit=5,
-        )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["jobId"]
+    assert body["status"] == "running"
+    assert body["report"] is None
+    assert not runner.release.is_set()
 
 
-@pytest.mark.asyncio
-async def test_api_eval_requires_admin_key(test_app, mock_eval_runner):
-    mock_eval_runner.run_evaluation.reset_mock()
-    async with AsyncTestClient(app=test_app) as client:
-        resp = await client.post("/api/v1/eval/run")
-        assert resp.status_code == 401
-        mock_eval_runner.run_evaluation.assert_not_called()
+async def test_second_start_while_running_is_rejected_with_conflict(client, runner):
+    first = (await client.post(JOBS, headers=ADMIN_HEADERS)).json()
+
+    resp = await client.post(JOBS, headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 409
+    assert first["jobId"] in resp.json()["detail"]
+    assert len(runner.calls) == 1
 
 
-@pytest.mark.asyncio
+async def test_report_is_fetchable_by_handle_once_the_run_finishes(client, runner):
+    job_id = (await client.post(JOBS, params={"limit": 5}, headers=ADMIN_HEADERS)).json()["jobId"]
+
+    running = (await client.get(f"{JOBS}/{job_id}", headers=ADMIN_HEADERS)).json()
+    assert running["status"] == "running"
+    assert running["finishedAt"] is None
+
+    runner.release.set()
+    done = await _wait_for_status(client, job_id, "succeeded")
+
+    assert done["finishedAt"] is not None
+    assert done["error"] is None
+    assert done["report"]["totalQueries"] == 20
+    assert done["report"]["passedGate"] is True
+    assert done["report"]["results"][0]["query"] == "Sample query"
+    assert done["report"]["meanAnswerCorrectness"] == 0.84
+    assert done["report"]["failedQueries"] == 1
+    assert done["report"]["results"][0]["answerCorrectness"] == 0.84
+    broken = done["report"]["results"][1]
+    assert broken["error"] == "pipeline_error"
+    assert broken["answerCorrectness"] is None
+    assert runner.calls == [
+        {
+            "dataset_path": Path("eval_dataset.json").resolve(),
+            "baseline_path": Path("eval_baseline.json").resolve(),
+            "use_temp_db": True,
+            "limit": 5,
+        }
+    ]
+
+
+async def test_a_new_run_can_start_after_the_previous_one_finished(client, runner):
+    first = (await client.post(JOBS, headers=ADMIN_HEADERS)).json()["jobId"]
+    runner.release.set()
+    await _wait_for_status(client, first, "succeeded")
+
+    resp = await client.post(JOBS, headers=ADMIN_HEADERS)
+
+    assert resp.status_code == 202
+    assert resp.json()["jobId"] != first
+
+
+async def test_failed_run_reports_failure_without_exception_text(client, runner):
+    runner.error = RuntimeError("boom at /secret/path")
+    job_id = (await client.post(JOBS, headers=ADMIN_HEADERS)).json()["jobId"]
+    runner.release.set()
+
+    failed = await _wait_for_status(client, job_id, "failed")
+
+    assert failed["report"] is None
+    assert job_id in failed["error"]
+    assert "boom" not in failed["error"]
+    assert (await client.post(JOBS, headers=ADMIN_HEADERS)).status_code == 202
+
+
+async def test_unknown_handle_is_not_found(client):
+    resp = await client.get(f"{JOBS}/does-not-exist", headers=ADMIN_HEADERS)
+    assert resp.status_code == 404
+
+
+async def test_eval_job_endpoints_require_admin_key(client, runner):
+    assert (await client.post(JOBS)).status_code == 401
+    assert (await client.post(JOBS, headers={ADMIN_KEY_HEADER: "wrong"})).status_code == 401
+    job_id = (await client.post(JOBS, headers=ADMIN_HEADERS)).json()["jobId"]
+    assert (await client.get(f"{JOBS}/{job_id}")).status_code == 401
+    assert len(runner.calls) == 1
+
+
 @pytest.mark.parametrize(
     "dataset", ["/etc/hosts", "../eval_dataset.json", "sub/eval.json", ".env", "pyproject.toml"]
 )
-async def test_api_eval_rejects_paths_outside_project_root(test_app, mock_eval_runner, dataset):
-    mock_eval_runner.run_evaluation.reset_mock()
-    async with AsyncTestClient(app=test_app) as client:
-        resp = await client.post(
-            "/api/v1/eval/run", params={"dataset": dataset}, headers=ADMIN_HEADERS
+async def test_start_rejects_paths_outside_project_root(client, runner, dataset):
+    resp = await client.post(JOBS, params={"dataset": dataset}, headers=ADMIN_HEADERS)
+    assert resp.status_code == 400
+    assert runner.calls == []
+
+
+def test_eval_query_error_is_a_closed_set_of_wire_codes():
+    """``error`` round-trips the two codes types.ts knows and rejects anything else."""
+    import msgspec
+
+    for code in ("pipeline_error", "judge_error"):
+        wire = msgspec.json.encode(EvalQueryResult(query="q", passed=False, error=code))
+        assert msgspec.json.decode(wire)["error"] == code
+        assert msgspec.json.decode(wire, type=EvalQueryResult).error == code
+
+    with pytest.raises(msgspec.ValidationError):
+        msgspec.json.decode(
+            b'{"query": "q", "passed": false, "error": "Groq 503: key gsk_x"}',
+            type=EvalQueryResult,
         )
-        assert resp.status_code == 400
-        mock_eval_runner.run_evaluation.assert_not_called()

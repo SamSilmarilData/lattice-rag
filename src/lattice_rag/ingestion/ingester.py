@@ -24,6 +24,14 @@ class DocumentExistsError(ValueError):
         self.doc_id = doc_id
 
 
+class DocumentNotFoundError(LookupError):
+    """Raised when deleting a doc_id that is not stored."""
+
+    def __init__(self, doc_id: str) -> None:
+        super().__init__(f"Document {doc_id!r} not found")
+        self.doc_id = doc_id
+
+
 def chunk_text(text: str, target_size: int = 512, overlap: int = 64) -> list[str]:
     """Paragraph and sentence-aware chunking targeting ~512 chars with 64 overlap."""
     if not text or not text.strip():
@@ -109,13 +117,17 @@ class DocumentIngester:
         tags: list[str] | None = None,
         target_chunk_size: int | None = None,
         chunk_overlap: int | None = None,
+        replace: bool = False,
     ) -> IngestStats:
         """Ingest a text document: chunk, embed, extract entities/relations, and commit to LatticeDB.
 
+        With ``replace``, an existing document with this ``doc_id`` is deleted and the new
+        version inserted in one transaction; a failed replace leaves the old one intact.
+
         Raises:
-            DocumentExistsError: if ``doc_id`` is already stored.
+            DocumentExistsError: if ``doc_id`` is already stored and ``replace`` is False.
         """
-        if await asyncio.to_thread(self.store.has_document, doc_id):
+        if not replace and await asyncio.to_thread(self.store.has_document, doc_id):
             raise DocumentExistsError(doc_id)
 
         t_size = target_chunk_size or self.target_chunk_size
@@ -138,41 +150,15 @@ class DocumentIngester:
             self.extractor.extract_entities_batch, text_chunks
         )
 
+        # Entities are graph nodes only; they carry no vector (only Chunks are vector-searched)
         chunk_extractions: list[tuple[int, list[EntityData], list[RelationData]]] = []
-        all_entity_names: set[str] = set()
-
         for i, (c_text, entities) in enumerate(zip(text_chunks, chunk_entities_list, strict=False)):
             triples = self.extractor.extract_triples(c_text, entities) if entities else []
             chunk_extractions.append((i, entities, triples))
-            for e in entities:
-                all_entity_names.add(e.name)
 
-        # 3. Batched entity embedding: embed all unique entity names in a single ONNX call
-        entity_embedding_map: dict[str, Any] = {}
-        if all_entity_names:
-            unique_names_list = list(all_entity_names)
-            embedded_vectors = await asyncio.to_thread(
-                self.embedding_service.embed_texts, unique_names_list
-            )
-            for name, vec in zip(unique_names_list, embedded_vectors, strict=False):
-                entity_embedding_map[name] = vec
-
-        # Prepare embedded entities
-        prepared_chunk_extractions: list[tuple[int, list[EntityData], list[RelationData]]] = []
-        for i, entities, triples in chunk_extractions:
-            embedded_entities = [
-                EntityData(
-                    name=e.name,
-                    entity_type=e.entity_type,
-                    embedding=entity_embedding_map.get(e.name),
-                )
-                for e in entities
-            ]
-            prepared_chunk_extractions.append((i, embedded_entities, triples))
-
-        # 4. Atomic single-transaction ingestion
+        # 3. Atomic single-transaction ingestion
         async with self._write_lock:
-            if await asyncio.to_thread(self.store.has_document, doc_id):
+            if not replace and await asyncio.to_thread(self.store.has_document, doc_id):
                 raise DocumentExistsError(doc_id)
             # The WAL write runs off the event loop so it does not stall other requests
             ingest_stats: IngestStats = await asyncio.to_thread(
@@ -180,16 +166,33 @@ class DocumentIngester:
                 doc_id=doc_id,
                 title=title,
                 chunks=chunk_data_list,
-                chunk_entities_relations=prepared_chunk_extractions,
+                chunk_entities_relations=chunk_extractions,
                 tags=tags,
+                replace=replace,
             )
 
-        # 5. Invalidate Tier 1 Semantic Cache to ensure stale answers are evicted
+        # 4. Invalidate Tier 1 Semantic Cache to ensure stale answers are evicted
         if self.cache is not None:
             self.cache.clear()
             logger.info("tier1_cache_cleared_on_ingestion", extra={"doc_id": doc_id})
 
         return ingest_stats
+
+    async def delete(self, doc_id: str) -> None:
+        """Delete a document, its chunks and its orphaned entities, then clear Tier 1.
+
+        Raises:
+            DocumentNotFoundError: if ``doc_id`` is not stored.
+        """
+        # Same lock as ingest, so a delete cannot interleave with an ingest's duplicate check
+        async with self._write_lock:
+            deleted: bool = await asyncio.to_thread(self.store.delete_document, doc_id)
+        if not deleted:
+            raise DocumentNotFoundError(doc_id)
+
+        if self.cache is not None:
+            self.cache.clear()
+            logger.info("tier1_cache_cleared_on_delete", extra={"doc_id": doc_id})
 
     async def ingest_file(
         self,
@@ -197,8 +200,9 @@ class DocumentIngester:
         doc_id: str | None = None,
         title: str | None = None,
         tags: list[str] | None = None,
+        replace: bool = False,
     ) -> IngestStats:
-        """Ingest a text document from a local file path."""
+        """Ingest a text document from a local file path (``replace`` as in ``ingest``)."""
         path = Path(filepath)
         text = path.read_text(encoding="utf-8")
         resolved_doc_id = doc_id or path.stem
@@ -209,4 +213,5 @@ class DocumentIngester:
             title=resolved_title,
             text=text,
             tags=tags,
+            replace=replace,
         )

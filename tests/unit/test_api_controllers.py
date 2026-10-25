@@ -14,6 +14,7 @@ from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers import (
     CacheController,
+    DocumentController,
     HealthController,
     IngestController,
     QueryController,
@@ -23,7 +24,11 @@ from lattice_rag.config import AppConfig
 from lattice_rag.ingestion.ingester import DocumentIngester
 from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.security import SecretStr
-from lattice_rag.storage.db import IngestStats
+from lattice_rag.storage.db import (
+    EmbeddingDimensionError,
+    IngestStats,
+    UnresolvedChunkReferenceError,
+)
 
 
 @pytest.fixture
@@ -111,6 +116,7 @@ def mock_controllers_app():
         route_handlers=[
             QueryController,
             IngestController,
+            DocumentController,
             CacheController,
             HealthController,
         ],
@@ -163,6 +169,7 @@ async def test_api_query_endpoint(mock_controllers_app):
         assert data["sources"][0]["documentId"] == "doc1"
         assert len(data["timings"]) == 1
         assert data["graphPath"]["nodes"][0]["name"] == "LatticeDB"
+        assert data["unverified"] is False
 
 
 @pytest.mark.asyncio
@@ -191,6 +198,42 @@ async def test_api_query_stream_sse(mock_controllers_app):
         assert done["graphPath"]["nodes"][0]["nodeId"] == 1
         assert done["timings"][0] == {"stage": "retrieval", "durationMs": 2.0}
         assert "latency_ms" not in done_line
+
+
+@pytest.mark.asyncio
+async def test_api_query_reports_unverified_answer(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["orchestrator"].run = AsyncMock(
+        return_value=PipelineState(
+            query="q", route="hybrid", answer="Unchecked answer.", unverified=True
+        )
+    )
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query", json={"query": "What is LatticeDB?"})
+        assert resp.json()["unverified"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_query_stream_done_reports_unverified_answer(mock_controllers_app):
+    app, mocks = mock_controllers_app
+
+    async def unverified_stream(q):
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "Unchecked answer.",
+                "route": "hybrid",
+                "cached": False,
+                "latency_ms": 1.0,
+                "unverified": True,
+            },
+        }
+
+    mocks["orchestrator"].stream_query = unverified_stream
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query/stream", json={"query": "What is LatticeDB?"})
+        done_line = resp.text.split("event: done", 1)[1].split("data: ", 1)[1].splitlines()[0]
+        assert json.loads(done_line)["unverified"] is True
 
 
 @pytest.mark.asyncio
@@ -233,7 +276,7 @@ async def test_api_ingest_endpoint(mock_controllers_app):
 async def test_api_cache_stats_endpoint(mock_controllers_app):
     app, mocks = mock_controllers_app
     async with AsyncTestClient(app=app) as client:
-        resp = await client.get("/api/v1/cache/stats")
+        resp = await client.get("/api/v1/cache/stats", headers={ADMIN_KEY_HEADER: "admin-secret"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["tier1Hits"] == 5
@@ -329,3 +372,103 @@ async def test_api_ingest_duplicate_document_returns_409(mock_controllers_app):
         )
         assert resp.status_code == 409
         mocks["store"].ingest_document_bundle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_with_replace_replaces_an_existing_document(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].has_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_arch", "title": "T", "text": "New text.", "replace": True}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 201
+        assert mocks["store"].ingest_document_bundle.call_args.kwargs["replace"] is True
+        mocks["semantic_cache"].clear.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_api_ingest_response_states_runtime_documents_are_ephemeral(mock_controllers_app):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_eph", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 201
+        assert "ephemeral" in resp.json()["persistence"].lower()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_document_clears_tier1(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].delete_document.return_value = True
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete(
+            "/api/v1/documents/doc_arch", headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 204
+        mocks["store"].delete_document.assert_called_once_with("doc_arch")
+        mocks["semantic_cache"].clear.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_api_delete_unknown_document_returns_404(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["store"].delete_document.return_value = False
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete(
+            "/api/v1/documents/missing", headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 404
+        mocks["semantic_cache"].clear.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headers", [{}, {ADMIN_KEY_HEADER: "wrong"}])
+async def test_api_delete_document_requires_admin_key(mock_controllers_app, headers):
+    app, mocks = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.delete("/api/v1/documents/doc_arch", headers=headers)
+        assert resp.status_code == 401
+        mocks["store"].delete_document.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [EmbeddingDimensionError("chunk 0", 192, 384), UnresolvedChunkReferenceError(5, 1)],
+)
+async def test_api_ingest_validation_error_returns_422(mock_controllers_app, error):
+    app, mocks = mock_controllers_app
+    mocks["store"].ingest_document_bundle.side_effect = error
+    async with AsyncTestClient(app=app) as client:
+        payload = {"documentId": "doc_bad", "title": "T", "text": "Some text."}
+        resp = await client.post(
+            "/api/v1/ingest", json=payload, headers={ADMIN_KEY_HEADER: "admin-secret"}
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == str(error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("headers", [{}, {ADMIN_KEY_HEADER: "wrong-key"}])
+async def test_api_cache_stats_requires_admin_key(mock_controllers_app, headers):
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.get("/api/v1/cache/stats", headers=headers)
+        assert resp.status_code == 401
+        assert "tier1Hits" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_public_endpoints_need_no_admin_key(mock_controllers_app):
+    """Health, query and streaming query stay reachable without X-Admin-Key."""
+    app, _ = mock_controllers_app
+    async with AsyncTestClient(app=app) as client:
+        assert (await client.get("/health")).status_code == 200
+        assert (await client.post("/api/v1/query", json={"query": "q"})).status_code == 201
+        stream = await client.post("/api/v1/query/stream", json={"query": "q"})
+        assert stream.status_code == 201
+        assert "event: done" in stream.text

@@ -70,6 +70,81 @@ def test_bm25_full_text_search(temp_store: LatticeStore):
     assert "Quantum" in results[0].text
 
 
+_KEYWORD_CORPUS = [
+    "The quick brown fox jumps over the lazy dog.",
+    "Quantum computing utilizes qubits for superposition.",
+    "Granian serves the Litestar application over HTTP.",
+    "Reranking runs a cross-encoder on every candidate.",
+]
+
+
+def _count_fts_calls(store: LatticeStore, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every full-text call LatticeStore makes against the database."""
+    calls: list[str] = []
+    for name in ("fts_search", "fts_search_fuzzy"):
+        real = getattr(store.db, name)
+
+        def spy(*args, _real=real, _name=name, **kwargs):
+            calls.append(_name)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(store.db, name, spy)
+    return calls
+
+
+def test_bm25_keyword_fallback_is_one_query(
+    temp_store: LatticeStore, monkeypatch: pytest.MonkeyPatch
+):
+    """No Chunk holds every keyword: the fallback finds each Chunk holding any of them,
+    with one store call for the fallback however many keywords the query has."""
+    vec = np.zeros(384, dtype=np.float32)
+    chunks = [ChunkData(text=t, embedding=vec, position=i) for i, t in enumerate(_KEYWORD_CORPUS)]
+    temp_store.ingest_document(doc_id="kw", title="Keywords", chunks=chunks)
+    calls = _count_fts_calls(temp_store, monkeypatch)
+
+    results = temp_store.bm25_search("How does the brown qubits Granian reranking work?", top_k=10)
+
+    assert {r.text for r in results} == {
+        _KEYWORD_CORPUS[0],
+        _KEYWORD_CORPUS[1],
+        _KEYWORD_CORPUS[2],
+        _KEYWORD_CORPUS[3],
+    }
+    assert len(calls) == 2  # the conjunctive query, then one keyword query
+
+
+def test_bm25_keyword_fallback_respects_top_k_and_skips_unmatched(temp_store: LatticeStore):
+    vec = np.zeros(384, dtype=np.float32)
+    chunks = [ChunkData(text=t, embedding=vec, position=i) for i, t in enumerate(_KEYWORD_CORPUS)]
+    temp_store.ingest_document(doc_id="kw", title="Keywords", chunks=chunks)
+
+    results = temp_store.bm25_search("brown fox qubits", top_k=1)
+    assert len(results) == 1
+    both = temp_store.bm25_search("brown qubits", top_k=10)
+    assert {r.text for r in both} == {_KEYWORD_CORPUS[0], _KEYWORD_CORPUS[1]}
+    assert temp_store.bm25_search("zebra xylophone", top_k=10) == []
+
+
+def test_bm25_search_failure_is_logged_not_swallowed(
+    temp_store: LatticeStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """A failing full-text call degrades to no BM25 hits and leaves a WARNING record."""
+    from latticedb import LatticeError
+
+    def boom(*_args, **_kwargs):
+        raise LatticeError("index unavailable")
+
+    monkeypatch.setattr(temp_store.db, "fts_search", boom)
+    monkeypatch.setattr(temp_store.db, "fts_search_fuzzy", boom)
+
+    with caplog.at_level("WARNING", logger="lattice_rag.storage.db"):
+        assert temp_store.bm25_search("brown qubits", top_k=5) == []
+
+    failures = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(failures) == 2  # the conjunctive query and the keyword fallback
+    assert all(r.name == "lattice_rag.storage.db" for r in failures)
+
+
 def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
     """Verify entity node creation, CONTAINS edge, RELATION edge, and multi-hop traversal."""
     vec = np.ones(384, dtype=np.float32)
@@ -85,9 +160,9 @@ def test_entity_ingestion_and_multi_hop_traversal(temp_store: LatticeStore):
 
     # Ingest entities
     entities = [
-        EntityData(name="FastEmbed", entity_type="TECHNOLOGY", embedding=vec),
-        EntityData(name="ONNX Runtime", entity_type="ENGINE", embedding=vec),
-        EntityData(name="CPU", entity_type="HARDWARE", embedding=vec),
+        EntityData(name="FastEmbed", entity_type="TECHNOLOGY"),
+        EntityData(name="ONNX Runtime", entity_type="ENGINE"),
+        EntityData(name="CPU", entity_type="HARDWARE"),
     ]
     relations = [
         RelationData(
@@ -129,19 +204,19 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
     # Ingest LatticeDB entity for chunk 1
     temp_store.ingest_entities(
         chunk_id=c1,
-        entities=[EntityData(name="LatticeDB", entity_type="database", embedding=vec)],
+        entities=[EntityData(name="LatticeDB", entity_type="database")],
         relations=[],
     )
-    ent_id_1 = temp_store.get_canonical_entity_id("LatticeDB")
+    ent_id_1 = temp_store.get_canonical_entity_id("LatticeDB", "database")
     assert ent_id_1 is not None
 
     # Ingest LatticeDB entity again for chunk 2 (case-insensitive)
     temp_store.ingest_entities(
         chunk_id=c2,
-        entities=[EntityData(name="latticedb", entity_type="database", embedding=vec)],
+        entities=[EntityData(name="latticedb", entity_type="database")],
         relations=[],
     )
-    ent_id_2 = temp_store.get_canonical_entity_id("latticedb")
+    ent_id_2 = temp_store.get_canonical_entity_id("latticedb", "database")
     # Must reuse the same node ID!
     assert ent_id_1 == ent_id_2
 
@@ -152,20 +227,14 @@ def test_canonical_entity_deduplication(temp_store: LatticeStore):
     assert ent_id_1 in c2_ents
 
 
-class _BadVector:
-    """Passes the dimension check but makes set_vector fail mid-transaction."""
-
-    def __len__(self) -> int:
-        return 384
-
-
 def _chunk(text: str) -> ChunkData:
     return ChunkData(text=text, embedding=np.zeros(384, dtype=np.float32), position=0)
 
 
 def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
     """A rolled-back ingest must not leave cache entries pointing at nodes that don't exist."""
-    with pytest.raises(TypeError):
+    # A non-string label makes create_node fail after LatticeDB was already created
+    with pytest.raises(AttributeError):
         temp_store.ingest_document_bundle(
             "d1",
             "t",
@@ -175,14 +244,14 @@ def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
                     0,
                     [
                         EntityData(name="LatticeDB", entity_type="tech"),
-                        EntityData(name="Ghost", entity_type="tech", embedding=_BadVector()),  # type: ignore[arg-type]
+                        EntityData(name="Ghost", entity_type=123),  # type: ignore[arg-type]
                     ],
                     [],
                 )
             ],
         )
 
-    assert temp_store.get_canonical_entity_id("LatticeDB") is None
+    assert temp_store.get_canonical_entity_id("LatticeDB", "tech") is None
 
     # A later ingest of the same entity creates a real node
     temp_store.ingest_document_bundle(
@@ -191,8 +260,45 @@ def test_failed_bundle_does_not_poison_entity_cache(temp_store: LatticeStore):
         [_chunk("LatticeDB again.")],
         [(0, [EntityData(name="LatticeDB", entity_type="tech")], [])],
     )
-    ent_id = temp_store.get_canonical_entity_id("LatticeDB")
+    ent_id = temp_store.get_canonical_entity_id("LatticeDB", "tech")
     assert ent_id in temp_store.db.get_nodes_by_label("Entity")
+
+
+def _unit(seed: int) -> np.ndarray:
+    v = np.random.default_rng(seed).standard_normal(384).astype(np.float32)
+    return v / np.linalg.norm(v)
+
+
+def test_vector_search_returns_top_k_chunks_when_legacy_entity_vectors_are_nearest(
+    temp_store: LatticeStore,
+):
+    """Databases seeded before entity vectors were dropped still yield the requested chunks."""
+    query = _unit(0)
+    chunk_texts = [f"Chunk number {i} about vector search." for i in range(6)]
+    temp_store.ingest_document_bundle(
+        "doc_chunks",
+        "Chunks",
+        [
+            ChunkData(text=t, embedding=_unit(100 + i), position=i)
+            for i, t in enumerate(chunk_texts)
+        ],
+        [],
+    )
+
+    # Legacy layout: many Entity nodes carrying vectors that sit right on top of the query
+    with temp_store.db.write() as txn:
+        for i in range(80):
+            node = txn.create_node(
+                labels=["Entity", "legacy"], properties={"name": f"E{i}", "entity_type": "legacy"}
+            )
+            near = query + 0.001 * _unit(1000 + i)
+            txn.set_vector(node.id, "embedding", (near / np.linalg.norm(near)).astype(np.float32))
+        txn.commit()
+
+    results = temp_store.vector_search(query, top_k=5)
+
+    assert len(results) == 5
+    assert {r.text for r in results} <= set(chunk_texts)
 
 
 def test_has_document(temp_store: LatticeStore):
@@ -222,7 +328,7 @@ def test_get_entities_for_chunks_is_rank_ordered_and_budgeted(temp_store: Lattic
         ],
     )
     c1, c2 = stats.chunk_ids
-    ids = {n: temp_store.get_canonical_entity_id(n) for n in "ABCD"}
+    ids = {n: temp_store.get_canonical_entity_id(n, "x") for n in "ABCD"}
 
     assert temp_store.get_entities_for_chunks([c1, c2], budget=3) == [ids["A"], ids["B"], ids["C"]]
     assert temp_store.get_entities_for_chunks([c2, c1], budget=10)[0] == ids["B"]

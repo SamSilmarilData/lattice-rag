@@ -44,7 +44,7 @@ Traditional GraphRAG architectures suffer from heavy JVM database footprints (Ne
 | **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 in-process exact + semantic cache (fuzzy hits verified by Jev Noul); Tier 2 Redis hash of pre-computed FAQ answers used when every LLM provider fails. |
 | **Primary Synthesis** | **GroqCloud** | Ultra-fast token streaming (200+ tok/s) via `qwen/qwen3.8-27b` with structured citation grounding. |
 | **Context Fallback** | **Gemini 3.8 Flash** | Large-context model for cross-document synthesis and for failover when the Groq circuit breaker opens. |
-| **CI/CD Quality Gate** | **TypeSafe Jev Score + Noul** | Automated 20-query evaluation gate blocking PRs on regression ($\Delta \ge -0.03$), floor drop ($< 0.50$), and contradiction veto. |
+| **CI/CD Quality Gate** | **Hermetic Tier + Live Tier (Jev Score + Noul)** | Key-free retrieval gate (recall/MRR per Slice) on every PR; advisory nightly Live Tier judging four metrics against a measured baseline (tolerance = 2 sd of judge noise), a 0.50 floor, and contradiction veto. |
 | **Secret Hygiene** | **Defense in Depth** | Admin-key guard on write/cost endpoints, rate limits and input bounds, `SecretStr` masking, log redaction, RFC 9457 error shielding, prompt-injection delimiting, and `apikeys.md` migration. |
 
 ---
@@ -59,10 +59,11 @@ lattice-rag/
 ├── LICENSE                      # MIT License
 ├── .gitignore                   # Strict boundary blocking .env, apikeys.md, and databases
 ├── .env.example                 # Sanitized configuration template
-├── eval_dataset.json            # Version-controlled 20-query golden benchmark dataset
+├── eval_dataset.json            # Gold Set v2 (format 2.0.0): corpus + 30 sliced queries with verbatim Gold Passages
 ├── eval_baseline.json           # Tracked main-branch baseline metrics & gate thresholds
 ├── .github/workflows/           # GitHub Actions CI/CD workflows
-│   └── eval-gate.yml            # Two-tier PR regression gate (hermetic tests + live Jev evaluation)
+│   ├── eval-gate.yml            # PR gate: lint, unit tests, studio build, Hermetic Tier
+│   └── live-tier.yml            # Advisory Live Tier (Jev-judged), nightly and on demand
 ├── docs/                        # In-depth architectural guides
 │   ├── architecture.md          # Multi-layer system architecture
 │   ├── security.md              # Zero-trust secret management
@@ -106,8 +107,8 @@ lattice-rag/
 │   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
 │   ├── orchestration/
-│   │   ├── state.py             # LangGraph typed PipelineState
-│   │   └── graph.py             # RAGOrchestrator StateGraph pipeline
+│   │   ├── state.py             # PipelineState (buffered run() result)
+│   │   └── graph.py             # RAGOrchestrator: one core for run() and stream_query()
 │   └── eval/
 │       ├── triage_gate.py       # TypeSafe AI Jev Score & Noul continuous evaluation engine
 │       └── runner.py            # Ephemeral isolated database evaluation runner & regression gate
@@ -201,8 +202,14 @@ lattice-rag ingest path/to/document.txt
 # Run latency benchmarks on the retrieval pipeline
 lattice-rag benchmark
 
-# Run the 20-query CI/CD evaluation gate against baseline
-lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json
+# Hermetic Tier: key-free retrieval gate (what PRs must pass)
+lattice-rag hermetic --dataset eval_dataset.json
+
+# Live Tier: Jev-judged metrics against the baseline (needs TYPESAFE_API_KEY and GROQ_API_KEY)
+lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output run.json
+
+# Re-measure the baseline and tolerance from three Live Tier reports
+lattice-rag measure-baseline run1.json run2.json run3.json
 ```
 
 ---
@@ -246,15 +253,17 @@ lattice-rag serve
 | `GET` | `/` | Root Embedded Visual Playground & Studio SPA (or graceful fallback). |
 | `POST` | `/api/v1/query` | Standard JSON query endpoint returning answer, sources, graph path, and latency breakdown. |
 | `POST` | `/api/v1/query/stream` | Server-Sent Events (SSE) streaming real-time tokens and stage progress. |
-| `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). |
-| `GET` | `/api/v1/graph/subgraph` | Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
-| `GET` | `/api/v1/cache/stats` | Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
-| `POST` | `/api/v1/eval/run` | **Admin key.** Runs the evaluation gate (dataset/baseline must be `*.json` files in the project root). |
+| `POST` | `/api/v1/ingest` | **Admin key.** Ingests document text: chunks, computes ONNX embeddings, extracts entities, and commits to LatticeDB (`409` if the document ID exists). On the deployed instance runtime documents are ephemeral: they do not survive a restart or redeploy (ADR-0001). |
+| `DELETE` | `/api/v1/documents/{documentId}` | **Admin key.** Deletes a document, its chunks, and entities no other document references, then clears Tier 1 (`404` if unknown). |
+| `GET` | `/api/v1/graph/subgraph` | **Admin key.** Subgraph snapshot (nodes & edges) for the interactive 2D knowledge graph. |
+| `GET` | `/api/v1/cache/stats` | **Admin key.** Tier 1 cache hit/miss counts and the generation circuit-breaker state. |
+| `POST` | `/api/v1/eval/jobs` | **Admin key.** Starts an evaluation run in the background and returns a job handle (`202`); `409` while another run is in progress (dataset/baseline must be `*.json` files in the project root). |
+| `GET` | `/api/v1/eval/jobs/{jobId}` | **Admin key.** Status of an evaluation job and, once finished, its report. |
 | `POST` | `/api/v1/benchmark/run` | **Admin key.** Retrieval-only latency benchmark with SLA verification ($p50, p90, p95, p99$, QPS). |
 | `GET` | `/health` | Service health, LatticeDB connection state, and API configuration flags. |
 | `GET` | `/schema/scalar` | Interactive OpenAPI documentation powered by Scalar. |
 
-Admin endpoints require the `X-Admin-Key` header (`ADMIN_API_KEY`); query endpoints are rate-limited per client. See [`docs/api-reference.md`](docs/api-reference.md).
+Admin endpoints require the `X-Admin-Key` header (`ADMIN_API_KEY`); `/`, `/health` and the two query endpoints are public, and the query endpoints are rate-limited per client. See [`docs/api-reference.md`](docs/api-reference.md).
 
 ---
 
@@ -300,7 +309,7 @@ The unit suite covers security (secret masking, log redaction including structlo
 
 - **Zero Git Leaks:** `.env`, `apikeys.md`, `*.key`, and `data/*.db` are hard-blocked in `.gitignore`.
 - **Masked Runtime Logs:** Keys wrapped in `SecretStr` are masked as `sk-****{last_4}` in all `str()` and `repr()` representations.
-- **Access Control:** Ingest, eval and benchmark require `X-Admin-Key`; queries are rate-limited and input sizes are bounded.
+- **Access Control:** Ingest, graph snapshot, cache stats, eval and benchmark require `X-Admin-Key`; queries are rate-limited and input sizes are bounded.
 - **Log Sanitizer:** `RedactingFormatter` redacts API keys, bearer tokens and URI credentials from every rendered log line, including tracebacks and structlog events.
 - **RFC 9457 Error Shielding:** Unexpected errors return a generic problem document with a request id; exception text is only logged server-side.
 - **Prompt-Injection Delimiting:** Retrieved evidence is wrapped, escaped and marked untrusted in the shared LLM prompt.

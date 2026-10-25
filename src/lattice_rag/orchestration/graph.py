@@ -1,4 +1,4 @@
-"""LangGraph StateGraph assembling the full RAG pipeline."""
+"""RAG orchestrator: one pipeline core behind the buffered and streaming entry points."""
 
 from __future__ import annotations
 
@@ -6,11 +6,10 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from langgraph.graph import END, StateGraph
-from langgraph.graph.state import CompiledStateGraph
-
+from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
 
@@ -21,7 +20,7 @@ if TYPE_CHECKING:
     from lattice_rag.generation.gemini_fallback import GeminiFallback
     from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
-    from lattice_rag.routing.router import QueryRouter
+    from lattice_rag.routing.router import QueryRouter, RouteDecision
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +43,30 @@ def subgraph_as_dict(graph_context: Any) -> dict[str, Any] | None:
     return {"nodes": graph_context.nodes, "edges": graph_context.edges}
 
 
+@dataclass
+class _Triage:
+    """What the front door learned: a Tier 1 hit, or the embedding and route for a miss."""
+
+    cached: dict[str, Any] | None = None
+    query_embedding: Any = None
+    decision: RouteDecision | None = None
+    # A near-duplicate existed but Noul cache verification could not run
+    cache_unverified: bool = False
+
+
 class RAGOrchestrator:
-    """Assembles and runs the full GraphRAG pipeline via LangGraph StateGraph.
+    """Runs the GraphRAG pipeline through a single core, :meth:`_pipeline`.
 
     Pipeline flow::
 
-        query -> [concurrent: cache_check + jev_route]
-              -> route_dispatch
-              -> retrieval_pipeline (stages 1-2-3 + guardrail)
-              -> generation (with circuit breaker cascade)
-              -> response
+        query -> triage (exact cache | embed -> semantic cache | Jev route on a miss)
+              -> chitchat | retrieval (stages 1-2-3 + guardrail)
+              -> generation (circuit breaker cascade) -> Tier 1 write rule
+              -> done
+
+    ``stream_query()`` forwards the core's events; ``run()`` drains them into a
+    :class:`PipelineState`. Caching, degradation and Unverified Answer rules live only
+    in the core, so the two entry points cannot drift apart.
     """
 
     def __init__(
@@ -81,395 +94,218 @@ class RAGOrchestrator:
             gemini=self.gemini,
             fallback_cache=self.fallback_cache,
         )
-        self._graph = self._build_graph()
-
-    # ── Graph Construction ──────────────────────────────────────────────
-
-    def _build_graph(
-        self,
-    ) -> CompiledStateGraph[PipelineState, None, PipelineState, PipelineState]:
-        """Wire the LangGraph StateGraph nodes and edges."""
-        graph = StateGraph(PipelineState)
-
-        graph.add_node("triage", self._triage_node)
-        graph.add_node("route_dispatch", self._route_dispatch_node)
-        graph.add_node("chitchat", self._chitchat_node)
-        graph.add_node("retrieve", self._retrieve_node)
-        graph.add_node("generate", self._generate_node)
-        graph.add_node("massive_context", self._massive_context_node)
-
-        graph.set_entry_point("triage")
-
-        graph.add_conditional_edges(
-            "triage",
-            self._after_triage,
-            {
-                "cached": END,
-                "route_dispatch": "route_dispatch",
-            },
-        )
-
-        graph.add_conditional_edges(
-            "route_dispatch",
-            self._select_route,
-            {
-                "chitchat": "chitchat",
-                "massive_context": "massive_context",
-                "retrieve": "retrieve",
-            },
-        )
-
-        graph.add_edge("chitchat", END)
-        graph.add_edge("retrieve", "generate")
-        graph.add_edge("generate", END)
-        graph.add_edge("massive_context", END)
-
-        return graph.compile()
-
-    # ── Node Implementations ────────────────────────────────────────────
-
-    async def _triage_node(self, state: PipelineState) -> dict[str, Any]:
-        """Two-stage front-door triage: O(1) exact match check, then concurrent Jev routing + CPU embedding."""
-        t0 = time.perf_counter()
-
-        # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = self.semantic_cache.get_exact(state.query) if state.use_cache else None
-        if isinstance(exact_hit, dict):
-            elapsed = (time.perf_counter() - t0) * 1000
-            logger.info("Exact cache HIT for query in O(1) time")
-            return {
-                "cache_hit": True,
-                "cached_response": exact_hit,
-                "answer": exact_hit.get("answer", ""),
-                "filtered_chunks": exact_hit.get("sources", []),
-                "graph_context": exact_hit.get("graph_path"),
-                "route": exact_hit.get("route", "vector_exact"),
-                "timings": state.timings + [{"stage": "triage", "duration_ms": elapsed}],
-            }
-
-        # Step 2: Concurrently execute Jev routing and CPU embedding (offloaded to thread)
-        route_task = asyncio.create_task(self.router.route_query(state.query))
-        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, state.query)
-        cache_result = (
-            await self.semantic_cache.get(state.query, query_embedding) if state.use_cache else None
-        )
-        route_decision = await route_task
-
-        elapsed = (time.perf_counter() - t0) * 1000
-
-        updates: dict[str, Any] = {
-            "query_embedding": query_embedding,
-            "route": route_decision.route,
-            "timings": state.timings + [{"stage": "triage", "duration_ms": elapsed}],
-        }
-
-        if cache_result is not None:
-            updates["cache_hit"] = True
-            updates["cached_response"] = cache_result
-            updates["answer"] = cache_result.get("answer", "")
-            updates["filtered_chunks"] = cache_result.get("sources", [])
-            updates["graph_context"] = cache_result.get("graph_path")
-            logger.info("Cache HIT for query (route=%s)", route_decision.route)
-
-        return updates
-
-    async def _chitchat_node(self, state: PipelineState) -> dict[str, Any]:
-        """Handle chitchat queries with zero LLM cost."""
-        t0 = time.perf_counter()
-        answer = await self.chitchat.handle(state.query)
-        elapsed = (time.perf_counter() - t0) * 1000
-        return {
-            "answer": answer,
-            "timings": state.timings + [{"stage": "chitchat", "duration_ms": elapsed}],
-        }
-
-    async def _retrieve_node(self, state: PipelineState) -> dict[str, Any]:
-        """Execute 3-stage retrieval pipeline with guardrail."""
-        t0 = time.perf_counter()
-        result = await self.retrieval.execute(
-            state.query, state.route, query_embedding=state.query_embedding
-        )
-        elapsed = (time.perf_counter() - t0) * 1000
-
-        graph_dict = subgraph_as_dict(result.graph_context)
-
-        return {
-            "filtered_chunks": result.final_chunks,
-            "graph_context": graph_dict,
-            "low_grounding": result.low_grounding,
-            "timings": state.timings + [{"stage": "retrieval", "duration_ms": elapsed}],
-        }
-
-    async def _generate_node(self, state: PipelineState) -> dict[str, Any]:
-        """Generate answer with circuit breaker cascade: Groq -> Gemini -> Redis."""
-        t0 = time.perf_counter()
-
-        synth = await self.synthesizer.synthesize(
-            query=state.query,
-            context_chunks=state.filtered_chunks,
-            graph_context=state.graph_context,
-            route=state.route,
-        )
-        answer = synth.answer
-        degraded = synth.degraded
-        elapsed = (time.perf_counter() - t0) * 1000
-
-        # Cache only primary-provider answers grounded in evidence that passed the guardrail
-        if (
-            state.use_cache
-            and not degraded
-            and not state.low_grounding
-            and state.query_embedding is not None
-        ):
-            self.semantic_cache.put(
-                state.query,
-                state.query_embedding,
-                {
-                    "answer": answer,
-                    "route": state.route,
-                    "sources": state.filtered_chunks,
-                    "graph_path": state.graph_context,
-                },
-            )
-
-        return {
-            "answer": answer,
-            "degraded": degraded,
-            "timings": state.timings + [{"stage": "generation", "duration_ms": elapsed}],
-        }
-
-    async def _massive_context_node(self, state: PipelineState) -> dict[str, Any]:
-        """Handle massive context queries via Gemini failover cascade."""
-        t0 = time.perf_counter()
-
-        result = await self.retrieval.execute(
-            state.query,
-            state.route,
-            top_k=MASSIVE_CONTEXT_TOP_K,
-            query_embedding=state.query_embedding,
-        )
-        graph_dict = subgraph_as_dict(result.graph_context)
-
-        synth = await self.synthesizer.synthesize(
-            query=state.query,
-            context_chunks=result.final_chunks,
-            graph_context=graph_dict,
-            route="massive_context",
-        )
-        elapsed = (time.perf_counter() - t0) * 1000
-
-        return {
-            "answer": synth.answer,
-            "degraded": synth.degraded,
-            "low_grounding": result.low_grounding,
-            "filtered_chunks": result.final_chunks,
-            "graph_context": graph_dict,
-            "timings": state.timings + [{"stage": "massive_context", "duration_ms": elapsed}],
-        }
-
-    # ── Routing Logic ───────────────────────────────────────────────────
-
-    @staticmethod
-    def _after_triage(state: PipelineState) -> str:
-        """Decide whether to return cached result or proceed to routing."""
-        if state.cache_hit:
-            return "cached"
-        return "route_dispatch"
-
-    @staticmethod
-    def _route_dispatch_node(state: PipelineState) -> dict[str, Any]:
-        """Pass-through node; routing happens in conditional edges."""
-        return {}
-
-    @staticmethod
-    def _select_route(state: PipelineState) -> str:
-        """Select the pipeline branch based on Jev route decision."""
-        if state.route == "chitchat":
-            return "chitchat"
-        if state.route == "massive_context":
-            return "massive_context"
-        return "retrieve"
 
     # ── Public Interfaces ────────────────────────────────────────────────
 
     async def run(self, query: str, use_cache: bool = True) -> PipelineState:
-        """Execute the full pipeline and return the final state.
+        """Execute the full pipeline and return the buffered final state.
 
         ``use_cache=False`` bypasses Tier 1 entirely (no lookup, no store), so evaluation
         measures the live pipeline without touching the cache users are served from.
         """
-        t0 = time.perf_counter()
-        initial_state = PipelineState(query=query, use_cache=use_cache)
+        done: dict[str, Any] = {}
+        async for event in self._pipeline(query, use_cache=use_cache, streaming=False):
+            if event["event"] == "done":
+                done = event["data"]
 
-        result = await self._graph.ainvoke(initial_state)
-
-        if isinstance(result, dict):
-            final = PipelineState(
-                **{k: v for k, v in result.items() if k in PipelineState.__dataclass_fields__}
-            )
-        else:
-            final = result
-
-        final.total_latency_ms = (time.perf_counter() - t0) * 1000
-        return final
+        return PipelineState(
+            query=query,
+            use_cache=use_cache,
+            route=done["route"],
+            cache_hit=done["cached"],
+            graph_context=done["graph_path"],
+            filtered_chunks=done["sources"],
+            low_grounding=done["low_grounding"],
+            unverified=done["unverified"],
+            answer=done["answer"],
+            degraded=done["degraded"],
+            timings=done["timings"],
+            total_latency_ms=done["latency_ms"],
+        )
 
     async def stream_query(self, query: str) -> AsyncGenerator[dict[str, Any], None]:
-        """Stream typed SSE lifecycle events ('stage', 'token', 'done')."""
+        """Stream typed SSE lifecycle events ('stage', 'token', 'error', 'done')."""
+        async for event in self._pipeline(query, use_cache=True, streaming=True):
+            yield event
+
+    # ── Core ─────────────────────────────────────────────────────────────
+
+    async def _pipeline(
+        self, query: str, *, use_cache: bool, streaming: bool
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """The one pipeline. ``streaming`` only chooses how generation produces tokens."""
         t0 = time.perf_counter()
         timings: list[dict[str, Any]] = []
 
-        # 1. Triage Stage
+        def finish(**data: Any) -> dict[str, Any]:
+            data["timings"] = timings
+            data["latency_ms"] = (time.perf_counter() - t0) * 1000
+            return {"event": "done", "data": data}
+
+        # 1. Triage
         yield {"event": "stage", "data": {"stage": "triage", "status": "started"}}
-        t_triage = time.perf_counter()
+        t_stage = time.perf_counter()
+        triage = await self._triage(query, use_cache=use_cache)
+        timings.append({"stage": "triage", "duration_ms": (time.perf_counter() - t_stage) * 1000})
 
-        # Step 1: O(1) Exact-match cache shortcut
-        exact_hit = self.semantic_cache.get_exact(query)
-        if isinstance(exact_hit, dict):
-            cached_answer = exact_hit.get("answer", "")
-            route_val = exact_hit.get("route", "vector_exact")
-            triage_elapsed = (time.perf_counter() - t_triage) * 1000
-            timings.append({"stage": "triage", "duration_ms": triage_elapsed})
-            yield {"event": "stage", "data": {"stage": "cache_hit", "route": route_val}}
-            yield {"event": "token", "data": {"delta": cached_answer}}
-            total_elapsed = (time.perf_counter() - t0) * 1000
-            yield {
-                "event": "done",
-                "data": {
-                    "answer": cached_answer,
-                    "route": route_val,
-                    "cached": True,
-                    "sources": exact_hit.get("sources", []),
-                    "graph_path": exact_hit.get("graph_path"),
-                    "timings": timings,
-                    "latency_ms": total_elapsed,
-                    "degraded": False,
-                    "low_grounding": False,
-                },
-            }
+        if triage.cached is not None:
+            # A Tier 1 entry was verified, grounded and non-degraded when it was stored
+            cached = triage.cached
+            route = cached.get("route") or (
+                triage.decision.route if triage.decision else "vector_exact"
+            )
+            answer = cached.get("answer", "")
+            logger.info("Tier 1 cache HIT (route=%s)", route)
+            yield {"event": "stage", "data": {"stage": "cache_hit", "route": route}}
+            yield {"event": "token", "data": {"delta": answer}}
+            yield finish(
+                answer=answer,
+                route=route,
+                cached=True,
+                sources=cached.get("sources", []),
+                graph_path=cached.get("graph_path"),
+                degraded=False,
+                low_grounding=False,
+                unverified=False,
+            )
             return
 
-        # Step 2: Concurrently execute Jev routing and CPU embedding (offloaded to thread)
-        route_task = asyncio.create_task(self.router.route_query(query))
-        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
-        cache_result = await self.semantic_cache.get(query, query_embedding)
-        route_decision = await route_task
-        triage_elapsed = (time.perf_counter() - t_triage) * 1000
-        timings.append({"stage": "triage", "duration_ms": triage_elapsed})
+        decision = triage.decision
+        assert decision is not None  # a miss always carries a routing decision
+        route = decision.route
 
-        # Cache Hit short-circuit
-        if cache_result is not None:
-            cached_answer = cache_result.get("answer", "")
-            yield {"event": "stage", "data": {"stage": "cache_hit", "route": route_decision.route}}
-            yield {"event": "token", "data": {"delta": cached_answer}}
-            total_elapsed = (time.perf_counter() - t0) * 1000
-            yield {
-                "event": "done",
-                "data": {
-                    "answer": cached_answer,
-                    "route": route_decision.route,
-                    "cached": True,
-                    "sources": cache_result.get("sources", []),
-                    "graph_path": cache_result.get("graph_path"),
-                    "timings": timings,
-                    "latency_ms": total_elapsed,
-                    "degraded": False,
-                    "low_grounding": False,
-                },
-            }
-            return
-
-        # Chitchat short-circuit
-        if route_decision.route == "chitchat":
+        # 2a. Chitchat: deterministic, no LLM, never cached
+        if route == "chitchat":
             yield {"event": "stage", "data": {"stage": "chitchat", "route": "chitchat"}}
-            t_cc = time.perf_counter()
-            chitchat_answer = await self.chitchat.handle(query)
-            cc_elapsed = (time.perf_counter() - t_cc) * 1000
-            timings.append({"stage": "chitchat", "duration_ms": cc_elapsed})
-
-            yield {"event": "token", "data": {"delta": chitchat_answer}}
-            total_elapsed = (time.perf_counter() - t0) * 1000
-            yield {
-                "event": "done",
-                "data": {
-                    "answer": chitchat_answer,
-                    "route": "chitchat",
-                    "cached": False,
-                    "sources": [],
-                    "graph_path": None,
-                    "timings": timings,
-                    "latency_ms": total_elapsed,
-                    "degraded": False,
-                    "low_grounding": False,
-                },
-            }
+            t_stage = time.perf_counter()
+            answer = await self.chitchat.handle(query)
+            timings.append(
+                {"stage": "chitchat", "duration_ms": (time.perf_counter() - t_stage) * 1000}
+            )
+            yield {"event": "token", "data": {"delta": answer}}
+            yield finish(
+                answer=answer,
+                route="chitchat",
+                cached=False,
+                sources=[],
+                graph_path=None,
+                degraded=False,
+                low_grounding=False,
+                unverified=False,
+            )
             return
 
-        # 2. Retrieval Stage
-        yield {"event": "stage", "data": {"stage": "retrieval", "route": route_decision.route}}
-        t_ret = time.perf_counter()
-        ret_result = await self.retrieval.execute(
+        # 2b. Retrieval (massive_context gets a larger evidence budget)
+        yield {"event": "stage", "data": {"stage": "retrieval", "route": route}}
+        t_stage = time.perf_counter()
+        retrieved = await self.retrieval.execute(
             query,
-            route_decision.route,
-            top_k=top_k_for_route(route_decision.route),
-            query_embedding=query_embedding,
+            route,
+            top_k=top_k_for_route(route),
+            query_embedding=triage.query_embedding,
         )
-        ret_elapsed = (time.perf_counter() - t_ret) * 1000
-        timings.append({"stage": "retrieval", "duration_ms": ret_elapsed})
+        timings.append(
+            {"stage": "retrieval", "duration_ms": (time.perf_counter() - t_stage) * 1000}
+        )
+        chunks = retrieved.final_chunks
+        graph_dict = subgraph_as_dict(retrieved.graph_context)
 
-        graph_dict = subgraph_as_dict(ret_result.graph_context)
-
-        # 3. Generation Stage
-        yield {
-            "event": "stage",
-            "data": {"stage": "generation", "chunks_count": len(ret_result.final_chunks)},
-        }
-        t_gen = time.perf_counter()
-        full_tokens: list[str] = []
+        # 3. Generation
+        yield {"event": "stage", "data": {"stage": "generation", "chunks_count": len(chunks)}}
+        t_stage = time.perf_counter()
         outcome = StreamOutcome()
-
-        async for tok in self.synthesizer.stream(
-            query=query,
-            context_chunks=ret_result.final_chunks,
-            graph_context=graph_dict,
-            route=route_decision.route,
-            outcome=outcome,
-        ):
-            full_tokens.append(tok)
+        tokens: list[str] = []
+        async for tok in self._generate(query, chunks, graph_dict, route, outcome, streaming):
+            tokens.append(tok)
             yield {"event": "token", "data": {"delta": tok}}
-
-        degraded = outcome.degraded
         if outcome.error:
             yield {"event": "error", "data": {"detail": outcome.error}}
-        gen_elapsed = (time.perf_counter() - t_gen) * 1000
-        timings.append({"stage": "generation", "duration_ms": gen_elapsed})
+        timings.append(
+            {"stage": "generation", "duration_ms": (time.perf_counter() - t_stage) * 1000}
+        )
+        answer = "".join(tokens)
 
-        full_answer = "".join(full_tokens)
-
-        # Cache only primary-provider answers grounded in evidence that passed the guardrail
-        if not degraded and not ret_result.low_grounding and query_embedding is not None:
+        # 4. Tier 1 write rule: primary-provider answers grounded in verified evidence only
+        unverified = not decision.verified or retrieved.unverified or triage.cache_unverified
+        if (
+            use_cache
+            and not outcome.degraded
+            and not retrieved.low_grounding
+            and not unverified
+            and triage.query_embedding is not None
+        ):
             self.semantic_cache.put(
                 query,
-                query_embedding,
-                {
-                    "answer": full_answer,
-                    "route": route_decision.route,
-                    "sources": ret_result.final_chunks,
-                    "graph_path": graph_dict,
-                },
+                triage.query_embedding,
+                {"answer": answer, "route": route, "sources": chunks, "graph_path": graph_dict},
             )
 
-        total_elapsed = (time.perf_counter() - t0) * 1000
-        yield {
-            "event": "done",
-            "data": {
-                "answer": full_answer,
-                "route": route_decision.route,
-                "cached": False,
-                "sources": ret_result.final_chunks,
-                "graph_path": graph_dict,
-                "timings": timings,
-                "latency_ms": total_elapsed,
-                "degraded": degraded,
-                "low_grounding": ret_result.low_grounding,
-            },
-        }
+        yield finish(
+            answer=answer,
+            route=route,
+            cached=False,
+            sources=chunks,
+            graph_path=graph_dict,
+            degraded=outcome.degraded,
+            low_grounding=retrieved.low_grounding,
+            unverified=unverified,
+        )
+
+    async def _triage(self, query: str, *, use_cache: bool) -> _Triage:
+        """Front door: exact match, then embed + semantic match, and only on a miss the route.
+
+        Tier 1 is consulted before Jev routing so a hit (exact or semantic) never pays for a
+        routing call. Routing starts only after the embedding succeeded, so a failed
+        embedding leaves no routing task behind.
+        """
+        if use_cache:
+            exact_hit = self.semantic_cache.get_exact(query)
+            if isinstance(exact_hit, dict):
+                return _Triage(cached=exact_hit)
+
+        query_embedding = await asyncio.to_thread(self.embedding_service.embed_query, query)
+        cache_unverified = False
+        if use_cache:
+            try:
+                cached = await self.semantic_cache.get(query, query_embedding)
+            except CacheVerificationError:
+                # A near-duplicate could not be checked: recompute, and flag the answer
+                cached = None
+                cache_unverified = True
+            if cached is not None:
+                return _Triage(cached=cached, query_embedding=query_embedding)
+
+        decision = await self.router.route_query(query)
+        return _Triage(
+            query_embedding=query_embedding,
+            decision=decision,
+            cache_unverified=cache_unverified,
+        )
+
+    async def _generate(
+        self,
+        query: str,
+        chunks: list[dict[str, Any]],
+        graph_context: dict[str, Any] | None,
+        route: str,
+        outcome: StreamOutcome,
+        streaming: bool,
+    ) -> AsyncGenerator[str, None]:
+        """Yield answer tokens and fill ``outcome``; buffered mode yields the whole answer."""
+        if streaming:
+            async for tok in self.synthesizer.stream(
+                query=query,
+                context_chunks=chunks,
+                graph_context=graph_context,
+                route=route,
+                outcome=outcome,
+            ):
+                yield tok
+            return
+
+        synth = await self.synthesizer.synthesize(
+            query=query, context_chunks=chunks, graph_context=graph_context, route=route
+        )
+        outcome.provider = synth.provider
+        outcome.degraded = synth.degraded
+        yield synth.answer

@@ -1,14 +1,59 @@
 {
-  "version": "1.0.0",
-  "updated_at": "2026-10-06T00:00:00Z",
-  "total_queries": 20,
+  "version": "2.0.0",
+  "updated_at": "2026-10-25T00:36:36Z",
+  "total_queries": 30,
   "metrics": {
-    "faithfulness": 0.88,
-    "context_precision": 0.85,
-    "answer_relevance": 0.90
+    "faithfulness": 0.8233,
+    "context_precision": 0.8156,
+    "answer_relevance": 0.861,
+    "answer_correctness": 0.8913
   },
   "gate_thresholds": {
-    "max_regression_delta": 0.03,
-    "min_query_floor": 0.50
+    "max_regression_delta": 0.06,
+    "min_query_floor": 0.5,
+    "pass_thresholds": {
+      "faithfulness": 0.7,
+      "context_precision": 0.65,
+      "answer_relevance": 0.7,
+      "answer_correctness": 0.7
+    }
+  },
+  "measurement": {
+    "runs": [
+      {
+        "faithfulness": 0.8453,
+        "context_precision": 0.8135,
+        "answer_relevance": 0.8556,
+        "answer_correctness": 0.8822
+      },
+      {
+        "faithfulness": 0.8344,
+        "context_precision": 0.8184,
+        "answer_relevance": 0.8679,
+        "answer_correctness": 0.8902
+      },
+      {
+        "faithfulness": 0.7901,
+        "context_precision": 0.8148,
+        "answer_relevance": 0.8595,
+        "answer_correctness": 0.9014
+      }
+    ],
+    "means": {
+      "faithfulness": 0.8233,
+      "context_precision": 0.8156,
+      "answer_relevance": 0.861,
+      "answer_correctness": 0.8913
+    },
+    "stdev": {
+      "faithfulness": 0.0292,
+      "context_precision": 0.0025,
+      "answer_relevance": 0.0063,
+      "answer_correctness": 0.0096
+    },
+    "tolerance": 0.06,
+    "tolerance_rule": "max_regression_delta = 2 x the largest per-metric sample standard deviation of the run means, rounded up to 0.01 (minimum 0.01); metrics = mean of the run means",
+    "measured_at": "2026-10-25T00:36:36Z",
+    "notes": "Measured on the final integration code: fix/audit-spec-issue-2 at d7fc78e (all of spec #2 including ticket-19 and the review-fixes merge). Supersedes the earlier pre-#19 measurement (faece2c plus ticket-16; means 0.8286/0.8080/0.8648/0.8832, tolerance 0.05). Three sequential `lattice-rag eval --output` runs, Gold Set v2 (30 queries), ephemeral DB, macOS, local ONNX models, GUARDRAIL_SKIP_RERANK_SCORE unset. No pipeline or judge errors; Groq returned 429 on 0/2/3 queries per run and those answers came from the Gemini fallback, so that noise is inside the measurement. faithfulness sd 0.0292 is the widest: 2 x 0.0292 = 0.0584, rounded up to 0.06. Per-run passed queries 23/22/23. Noul contradiction vetoes (faithfulness 0.0): long_context eval_28 (run 1), eval_20 (run 2), eval_20 and eval_30 (run 3), i.e. 1/1/2 on long_context; run 3 also vetoed multihop eval_21."
   }
 }
