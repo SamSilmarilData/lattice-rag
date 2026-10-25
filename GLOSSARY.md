@@ -26,7 +26,7 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Hybrid Retrieval**: The 3-stage retrieval pipeline combining Stage 1 (HNSW vector + BM25 keyword recall fused via RRF into `top_k + 3` candidates), Stage 3 (cross-encoder reranking of every candidate on its chunk text), and Stage 2 (1-to-2 hop graph traversal from the entities of the final chunks, run after reranking and the guardrail, with a budget that ends the whole traversal).
 - **Hybrid Retriever**: The deep module (`RetrievalPipeline`) orchestrating the 3-stage retrieval process along with guardrail filtering and low-grounding signaling behind a clean, unified async interface.
 - **Low Grounding**: The state where retrieval found candidates but none passed the Noul relevance guardrail. The answer is generated without evidence, reported as `lowGrounding: true`, and never cached.
-- **Route**: A deterministic query classification produced by TypeSafe Jev (`vector_exact`, `graph_relational`, `hybrid`, `chitchat`, `massive_context`).
+- **Route**: The retrieval strategy TypeSafe Jev Choice selects for a query (`vector_exact`, `graph_relational`, `hybrid`, `chitchat`, `massive_context`). The choice is probabilistic; when Jev cannot decide, the Route falls back to `hybrid` and the answer is Unverified.
 - **Synthesis**: Grounded generation producing a verifiable natural language answer with inline citations from retrieved chunks and subgraphs.
 - **Resilient Synthesizer**: The single generation path for both buffered and token-streaming modes. It owns the one Groq circuit breaker and cascades GroqCloud → Gemini → Redis FAQ, marking any non-primary answer as **degraded**.
 - **Tiered Cache**: Tier 1 is the in-memory exact + semantic answer cache (only non-degraded, well-grounded answers are stored). Tier 2 is the Redis hash of pre-computed FAQ answers, served when every LLM provider fails.
@@ -45,5 +45,7 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Live Tier**: The evaluation tier that runs the full pipeline and has Jev judge faithfulness, context precision, answer relevance and answer correctness. It needs API keys and is advisory, not a PR gate.
 - **Eval Job**: One evaluation run started over the HTTP API, identified by a handle and polled for its status and report. Only one runs at a time per server; a start while one is running is rejected, not queued.
 - **Answer Correctness**: How well an answer agrees with the Gold Set query's reference answer. Unlike faithfulness, which compares an answer to the evidence it was given, it catches answers that are well-grounded but wrong.
+- **Expected Route**: The Route a Gold Set query should take, recorded as `expected_route`.
+- **Route Accuracy**: The share of Gold Set queries whose chosen Route equals their Expected Route, reported by the Live Tier overall and per Slice. Advisory, like the rest of the Live Tier.
 - **Unverified Answer**: An answer produced while a Jev check (routing, guardrail, or cache verification) was unavailable, so its grounding was not confirmed. It is flagged to the caller and never stored in Tier 1, like a degraded answer.
 - **Seeded Database**: The knowledge base baked into a deployment at build time. A deployed instance treats it as read-only; documents ingested at runtime are not expected to survive a restart.
