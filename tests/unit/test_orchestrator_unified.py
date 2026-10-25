@@ -29,7 +29,7 @@ def mock_orchestrator_components():
         return_value=MagicMock(
             final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
             graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
-            timings={"stage1_search": 1.0},
+            timings={"search": 1.0},
             low_grounding=False,
             unverified=False,
         )

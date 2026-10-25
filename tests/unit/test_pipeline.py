@@ -38,7 +38,7 @@ async def test_pipeline_empty_stage1_fast_exit():
     assert result.graph_context.nodes == []
     assert result.graph_context.edges == []
     assert result.low_grounding is True
-    assert "stage1_search" in result.timings
+    assert list(result.timings) == ["search"]
 
 
 @pytest.mark.asyncio
@@ -83,10 +83,9 @@ async def test_pipeline_full_execution_flow():
     assert result.graph_context == expected_subgraph
     assert result.low_grounding is False
 
-    # Check timings are present and non-negative
-    for key in ["stage1_search", "stage2_traverse", "stage3_rerank", "guardrail_filter"]:
-        assert key in result.timings
-        assert result.timings[key] >= 0.0
+    # Timings are keyed by step and recorded in execution order
+    assert list(result.timings) == ["search", "rerank", "guardrail_filter", "graph_traverse"]
+    assert all(duration >= 0.0 for duration in result.timings.values())
 
 
 @pytest.mark.asyncio
