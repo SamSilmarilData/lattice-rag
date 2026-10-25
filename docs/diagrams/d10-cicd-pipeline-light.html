@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lattice RAG — CI Quality Gates & Deploy Pipeline (Light)</title>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <title>Lattice RAG — CI Quality Gates &amp; Live Tier (Light)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -12,20 +12,12 @@
       --color-paper-2:      #ffffff;
       --color-ink:          #0f172a;
       --color-muted:        #475569;
-      --color-soft:         #64748b;
       --color-accent:       #0e7490;
-      --color-accent-tint:  rgba(14, 116, 144, 0.10);
-      --color-link:         #4338ca;
-      --color-rule:         rgba(14, 116, 144, 0.20);
       --color-rule-solid:   #e2e8f0;
-      --color-emerald:      #047857;
-      --color-emerald-tint: rgba(4, 120, 87, 0.10);
-      --color-coral:        #be123c;
       --font-sans:          'Inter', 'Geist', system-ui, sans-serif;
       --font-serif:         'Instrument Serif', 'Noto Serif', serif;
       --font-mono:          'Geist Mono', ui-monospace, monospace;
     }
-
     body {
       font-family: var(--font-sans);
       background: var(--color-paper);
@@ -34,14 +26,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 3rem 2rem;
+      padding: 3rem 1rem;
     }
-
-    .frame {
-      max-width: 1080px;
-      width: 100%;
-    }
-
+    .frame { max-width: 1080px; width: 100%; }
     .eyebrow {
       font-family: var(--font-mono);
       font-size: 0.68rem;
@@ -51,17 +38,14 @@
       color: var(--color-accent);
       margin-bottom: 0.5rem;
     }
-
     h1 {
       font-family: var(--font-serif);
       font-size: clamp(1.6rem, 2.4vw + 0.75rem, 2.2rem);
       font-weight: 400;
       letter-spacing: -0.02em;
       line-height: 1.15;
-      color: var(--color-ink);
       margin-bottom: 0.5rem;
     }
-
     .lead {
       color: var(--color-muted);
       font-size: 0.95rem;
@@ -69,25 +53,19 @@
       max-width: 820px;
       margin-bottom: 1.75rem;
     }
-
     .diagram-card {
       background: var(--color-paper-2);
       border: 1px solid var(--color-rule-solid);
-      border-radius: 12px;
+      border-radius: 8px;
       padding: 1.5rem;
-      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+      overflow-x: auto;
     }
-
-    svg {
-      display: block;
-      width: 100%;
-      height: auto;
-    }
-
+    svg { display: block; width: 100%; min-width: 1000px; height: auto; }
     .card-footer {
       display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       justify-content: space-between;
-      align-items: center;
       margin-top: 1rem;
       padding-top: 0.75rem;
       border-top: 1px solid var(--color-rule-solid);
@@ -95,187 +73,142 @@
       font-size: 0.72rem;
       color: var(--color-muted);
     }
-
-    .card-footer a {
-      color: var(--color-accent);
-      text-decoration: none;
-    }
+    .card-footer a { color: var(--color-accent); text-decoration: none; }
   </style>
 </head>
 <body>
   <main class="frame">
     <p class="eyebrow">Continuous Integration &amp; Quality Enforcement</p>
-    <h1>CI Quality Gates &amp; Deploy Pipeline</h1>
-    <p class="lead">Automated GitHub Actions verification matrix executing parallel linting, strict typing, the studio build and the hermetic test suite (including the security audit), then the golden dataset evaluation gate. Deployment to Cloud Run is a separate manual step.</p>
+    <h1>CI Quality Gates &amp; Live Tier</h1>
+    <p class="lead">Every pull request and push to main runs four blocking jobs in parallel. The Hermetic Tier is the retrieval gate: it needs no API keys, so fork PRs run it too. The Jev-judged Live Tier runs in its own workflow, nightly and on demand, and only advises. Deploying to Cloud Run is a manual step.</p>
 
     <div class="diagram-card">
-      <svg role="img" viewBox="0 0 1000 480" width="1000" height="480" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d10-light-title d10-light-desc">
-        <title id="d10-light-title">CI Quality Gates &amp; Deploy Pipeline Diagram</title>
-        <desc id="d10-light-desc">Pipeline diagram illustrating code commit triggers fanning out into parallel quality gates (Ruff, Mypy strict typing, studio type-check and build, and hermetic Pytest with the security audit), fanning in to a golden dataset evaluation gate, followed by a manual Cloud Run deploy.</desc>
-
+      <svg role="img" viewBox="0 0 1000 612" width="1000" height="612" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d10-cicd-pipeline-light-title d10-cicd-pipeline-light-desc">
+        <title id="d10-cicd-pipeline-light-title">CI Quality Gates &amp; Live Tier</title>
+        <desc id="d10-cicd-pipeline-light-desc">Pull requests and pushes to main run four parallel blocking jobs, lint, unit-tests, frontend and the key-free Hermetic Tier retrieval gate that also runs for forks, before a merge; the Jev-judged Live Tier runs separately, nightly or on demand, as an advisory report with a measured 0.05 tolerance, and Cloud Run deploys are manual.</desc>
         <defs>
-          <marker id="d10-light-arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <marker id="d10-cicd-pipeline-light-arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
             <path d="M 1 1 L 7 4 L 1 7 Z" fill="#475569"/>
           </marker>
-          <marker id="d10-light-arr-accent" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <marker id="d10-cicd-pipeline-light-arr-accent" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
             <path d="M 1 1 L 7 4 L 1 7 Z" fill="#0e7490"/>
           </marker>
-          <marker id="d10-light-arr-emerald" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-            <path d="M 1 1 L 7 4 L 1 7 Z" fill="#047857"/>
-          </marker>
-          <marker id="d10-light-arr-indigo" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <marker id="d10-cicd-pipeline-light-arr-link" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
             <path d="M 1 1 L 7 4 L 1 7 Z" fill="#4338ca"/>
           </marker>
-
-          <filter id="d10-light-shadow" x="-5%" y="-5%" width="110%" height="115%">
-            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
-          </filter>
         </defs>
 
-        <!-- ========================================== -->
-        <!-- CONNECTORS (DRAWN BEFORE NODES FOR DEPTH) -->
-        <!-- ========================================== -->
-        <g id="d10-light-connectors">
-          <!-- FAN-OUT CONNECTORS (TRIGGER -> 4 GATES) -->
-          <!-- 1. Trigger -> Gate 1 Ruff -->
-          <path d="M 175 240 L 197 240 A 8 8 0 0 0 205 232 L 205 98 A 8 8 0 0 1 213 90 L 232 90" fill="none" stroke="#4338ca" stroke-width="1.5" marker-end="url(#d10-light-arr-indigo)"/>
-
-          <!-- 2. Trigger -> Gate 2 Mypy -->
-          <path d="M 175 240 L 197 240 A 8 8 0 0 0 205 232 L 205 198 A 8 8 0 0 1 213 190 L 232 190" fill="none" stroke="#4338ca" stroke-width="1.5" marker-end="url(#d10-light-arr-indigo)"/>
-
-          <!-- 3. Trigger -> Gate 3 Security -->
-          <path d="M 175 240 L 197 240 A 8 8 0 0 1 205 248 L 205 282 A 8 8 0 0 0 213 290 L 232 290" fill="none" stroke="#4338ca" stroke-width="1.5" marker-end="url(#d10-light-arr-indigo)"/>
-
-          <!-- 4. Trigger -> Gate 4 Pytest -->
-          <path d="M 175 240 L 197 240 A 8 8 0 0 1 205 248 L 205 382 A 8 8 0 0 0 213 390 L 232 390" fill="none" stroke="#4338ca" stroke-width="1.5" marker-end="url(#d10-light-arr-indigo)"/>
-
-          <!-- FAN-OUT LABEL -->
-          <rect x="175" y="165" width="55" height="18" rx="3" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
-          <text x="202" y="178" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="600" text-anchor="middle">PARALLEL</text>
-
-          <!-- FAN-IN CONNECTORS (4 GATES -> EVALUATION GATE) -->
-          <!-- 5. Gate 1 Ruff -> Eval -->
-          <path d="M 460 90 L 492 90 A 8 8 0 0 1 500 98 L 500 232 A 8 8 0 0 0 508 240 L 532 240" fill="none" stroke="#047857" stroke-width="1.5" marker-end="url(#d10-light-arr-emerald)"/>
-
-          <!-- 6. Gate 2 Mypy -> Eval -->
-          <path d="M 460 190 L 492 190 A 8 8 0 0 1 500 198 L 500 232 A 8 8 0 0 0 508 240 L 532 240" fill="none" stroke="#047857" stroke-width="1.5"/>
-
-          <!-- 7. Gate 3 Security -> Eval -->
-          <path d="M 460 290 L 492 290 A 8 8 0 0 0 500 282 L 500 248 A 8 8 0 0 1 508 240 L 532 240" fill="none" stroke="#047857" stroke-width="1.5"/>
-
-          <!-- 8. Gate 4 Pytest -> Eval -->
-          <path d="M 460 390 L 492 390 A 8 8 0 0 0 500 382 L 500 248 A 8 8 0 0 1 508 240 L 532 240" fill="none" stroke="#047857" stroke-width="1.5"/>
-
-          <!-- FAN-IN LABEL -->
-          <rect x="475" y="165" width="55" height="18" rx="3" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
-          <text x="502" y="178" fill="#047857" font-family="'Geist Mono', monospace" font-size="8" font-weight="600" text-anchor="middle">4 / 4 PASS</text>
-
-          <!-- 9. EVAL -> DOCKER RELEASE -->
-          <line x1="760" y1="240" x2="822" y2="240" stroke="#0e7490" stroke-width="2" marker-end="url(#d10-light-arr-accent)"/>
-          <rect x="768" y="230" width="48" height="20" rx="3" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
-          <text x="792" y="244" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="600" text-anchor="middle">GATE OK</text>
+        <g id="d10-cicd-pipeline-light-zones">
+          <rect x="16" y="16" width="968" height="368" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="32" y="42" fill="#64748b" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" letter-spacing="0.12em">PR GATES &#183; eval-gate.yml &#183; BLOCKING &#183; 4 JOBS IN PARALLEL</text>
+          <rect x="16" y="400" width="968" height="160" rx="8" fill="none" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="5,4"/>
+          <text x="32" y="426" fill="#64748b" font-family="'Geist Mono', monospace" font-size="9" font-weight="600" letter-spacing="0.12em">LIVE TIER &#183; live-tier.yml &#183; ADVISORY</text>
         </g>
 
-        <!-- ========================================== -->
-        <!-- 7 PIPELINE NODES                           -->
-        <!-- ========================================== -->
-
-        <!-- NODE 1: TRIGGER (GITHUB INGRESS) -->
-        <g id="d10-light-node-1" filter="url(#d10-light-shadow)">
-          <rect x="35" y="160" width="140" height="160" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-          <rect x="47" y="172" width="70" height="18" rx="3" fill="#f1f5f9"/>
-          <text x="82" y="185" fill="#475569" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">TRIGGER</text>
-
-          <text x="47" y="210" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">Git Commit</text>
-          <text x="47" y="226" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="10">main &bull; PR Hook</text>
-
-          <line x1="47" y1="238" x2="163" y2="238" stroke="#e2e8f0" stroke-width="1"/>
-
-          <text x="47" y="258" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">&bull; Push to main</text>
-          <text x="47" y="276" fill="#475569" font-family="'Inter', sans-serif" font-size="10">&bull; Pull Request</text>
-          <text x="47" y="294" fill="#475569" font-family="'Inter', sans-serif" font-size="10">&bull; Concurrency Cancel</text>
+        <g id="d10-cicd-pipeline-light-connectors">
+          <path d="M 176 188 L 184 188 A 8 8 0 0 0 192 180 L 192 100 A 8 8 0 0 1 200 92 L 246 92" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 176 220 L 196 220 A 8 8 0 0 0 204 212 L 204 172 A 8 8 0 0 1 212 164 L 246 164" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 176 252 L 208 252 A 8 8 0 0 0 216 244 A 8 8 0 0 1 224 236 L 246 236" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 176 284 L 196 284 A 8 8 0 0 1 204 292 L 204 316 A 8 8 0 0 0 212 324 L 246 324" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 476 92 L 516 92 A 8 8 0 0 1 524 100 L 524 164 A 8 8 0 0 0 532 172 L 554 172" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 476 164 L 500 164 A 8 8 0 0 1 508 172 L 508 196 A 8 8 0 0 0 516 204 L 554 204" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 476 236 L 554 236" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <path d="M 476 324 L 500 324 A 8 8 0 0 0 508 316 L 508 276 A 8 8 0 0 1 516 268 L 554 268" fill="none" stroke="#0e7490" stroke-width="1.5" marker-end="url(#d10-cicd-pipeline-light-arr-accent)"/>
+          <path d="M 736 220 L 794 220" fill="none" stroke="#475569" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#d10-cicd-pipeline-light-arr)"/>
+          <rect x="741" y="196" width="48" height="14" rx="2" fill="#ffffff"/>
+          <text x="765" y="206" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8" font-weight="600" text-anchor="middle">MANUAL</text>
+          <path d="M 176 494 L 246 494" fill="none" stroke="#4338ca" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#d10-cicd-pipeline-light-arr-link)"/>
+          <path d="M 536 494 L 594 494" fill="none" stroke="#4338ca" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#d10-cicd-pipeline-light-arr-link)"/>
         </g>
 
-        <!-- NODE 2: GATE 1 (RUFF LINTER & FORMATTER) -->
-        <g id="d10-light-node-2" filter="url(#d10-light-shadow)">
-          <rect x="240" y="50" width="220" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-          <rect x="252" y="60" width="85" height="16" rx="3" fill="#f1f5f9"/>
-          <text x="294" y="72" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" text-anchor="middle">GATE 01 &bull; LINT</text>
-
-          <text x="252" y="94" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12.5" font-weight="600">Ruff Linter &amp; Formatter</text>
-          <text x="252" y="110" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5">ruff check · format --check</text>
-          <text x="445" y="72" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">&lt;1s</text>
+        <g id="d10-cicd-pipeline-light-nodes">
+          <rect x="36" y="156" width="140" height="160" rx="6" fill="#ffffff"/>
+          <rect x="36" y="156" width="140" height="160" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="48" y="166" width="54" height="16" rx="2" fill="#f1f5f9"/>
+          <text x="75" y="177" fill="#475569" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">TRIGGER</text>
+          <text x="48" y="202" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Pull request</text>
+          <text x="48" y="218" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">or push to main</text>
+          <line x1="48" y1="228" x2="164" y2="228" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="48" y="244" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; fork PRs included</text>
+          <text x="48" y="259" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; no secrets read</text>
+          <text x="48" y="274" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; stale runs cancelled</text>
+          <rect x="248" y="64" width="228" height="56" rx="6" fill="#ffffff"/>
+          <rect x="248" y="64" width="228" height="56" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <text x="464" y="84" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">lint</text>
+          <text x="260" y="88" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Lint &amp; strict types</text>
+          <text x="260" y="104" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">ruff check &#183; format &#183; mypy</text>
+          <rect x="248" y="136" width="228" height="56" rx="6" fill="#ffffff"/>
+          <rect x="248" y="136" width="228" height="56" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <text x="464" y="156" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">unit-tests</text>
+          <text x="260" y="160" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Unit suite</text>
+          <text x="260" y="176" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">pytest tests/unit/ &#183; mock keys</text>
+          <rect x="248" y="208" width="228" height="56" rx="6" fill="#ffffff"/>
+          <rect x="248" y="208" width="228" height="56" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <text x="464" y="228" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">frontend</text>
+          <text x="260" y="232" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Studio build</text>
+          <text x="260" y="248" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">npm ci &amp;&amp; npm run build (tsc -b)</text>
+          <rect x="248" y="280" width="228" height="88" rx="6" fill="#ffffff"/>
+          <rect x="248" y="280" width="228" height="88" rx="6" fill="#ffffff" stroke="#0e7490" stroke-width="2"/>
+          <rect x="260" y="290" width="90" height="16" rx="2" fill="rgba(14, 116, 144, 0.10)"/>
+          <text x="305" y="301" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">HERMETIC TIER</text>
+          <text x="464" y="301" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">key-free</text>
+          <text x="260" y="326" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Retrieval Gate</text>
+          <text x="260" y="342" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9">lattice-rag hermetic</text>
+          <rect x="556" y="140" width="180" height="160" rx="6" fill="#ffffff"/>
+          <rect x="556" y="140" width="180" height="160" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="568" y="150" width="54" height="16" rx="2" fill="#f1f5f9"/>
+          <text x="595" y="161" fill="#475569" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">PR GATE</text>
+          <text x="568" y="186" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Merge allowed</text>
+          <text x="568" y="202" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">4 / 4 jobs green</text>
+          <line x1="568" y1="212" x2="724" y2="212" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="568" y="228" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; blocks the merge</text>
+          <text x="568" y="243" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; same checks on forks</text>
+          <text x="568" y="258" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; ADR-0002</text>
+          <rect x="796" y="172" width="172" height="96" rx="6" fill="#ffffff"/>
+          <rect x="796" y="172" width="172" height="96" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="808" y="182" width="48" height="16" rx="2" fill="#f1f5f9"/>
+          <text x="832" y="193" fill="#475569" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">DEPLOY</text>
+          <text x="956" y="193" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">not in CI</text>
+          <text x="808" y="218" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Cloud Run</text>
+          <text x="808" y="234" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">deploy_cloud_run.sh</text>
+          <rect x="36" y="450" width="140" height="88" rx="6" fill="#ffffff"/>
+          <rect x="36" y="450" width="140" height="88" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="48" y="460" width="60" height="16" rx="2" fill="#f1f5f9"/>
+          <text x="78" y="471" fill="#475569" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">SCHEDULE</text>
+          <text x="48" y="496" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Nightly 03:17 UTC</text>
+          <text x="48" y="512" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">or workflow_dispatch</text>
+          <rect x="248" y="436" width="288" height="116" rx="6" fill="#ffffff"/>
+          <rect x="248" y="436" width="288" height="116" rx="6" fill="#ffffff" stroke="#4338ca" stroke-width="1.5" stroke-dasharray="5,4"/>
+          <rect x="260" y="446" width="162" height="16" rx="2" fill="rgba(67, 56, 202, 0.08)"/>
+          <text x="341" y="457" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">LIVE TIER &#183; ADVISORY</text>
+          <text x="260" y="482" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Jev-judged answer quality</text>
+          <text x="260" y="498" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9">lattice-rag eval --baseline</text>
+          <line x1="260" y1="508" x2="524" y2="508" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="260" y="524" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; tolerance 0.05, measured (2&#963; over 3 runs)</text>
+          <text x="260" y="539" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; floor 0.50 &#183; Noul contradiction veto</text>
+          <rect x="596" y="450" width="196" height="88" rx="6" fill="#ffffff"/>
+          <rect x="596" y="450" width="196" height="88" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+          <rect x="608" y="460" width="48" height="16" rx="2" fill="#f1f5f9"/>
+          <text x="632" y="471" fill="#475569" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" letter-spacing="0.06em" text-anchor="middle">OUTPUT</text>
+          <text x="780" y="471" fill="#64748b" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">never blocks</text>
+          <text x="608" y="496" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Advisory report</text>
+          <text x="608" y="512" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">live_tier_report.json</text>
+          <text x="260" y="356" fill="#0f172a" font-family="'Inter', 'Geist', sans-serif" font-size="10">recall + MRR per Slice vs Gold Passages</text>
+          <text x="48" y="530" fill="#475569" font-family="'Inter', 'Geist', sans-serif" font-size="10">never on pull requests</text>
         </g>
 
-        <!-- NODE 3: GATE 2 (MYPY STRICT TYPE CHECKING) -->
-        <g id="d10-light-node-3" filter="url(#d10-light-shadow)">
-          <rect x="240" y="150" width="220" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-          <rect x="252" y="160" width="85" height="16" rx="3" fill="#f1f5f9"/>
-          <text x="294" y="172" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" text-anchor="middle">GATE 02 &bull; TYPES</text>
-
-          <text x="252" y="194" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12.5" font-weight="600">Mypy Strict Typing</text>
-          <text x="252" y="210" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5">mypy src (strict, 0 errors)</text>
-          <text x="445" y="172" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">strict</text>
-        </g>
-
-        <!-- NODE 4: GATE 3 (SECURITY AUDIT & SECRET SCAN) -->
-        <g id="d10-light-node-4" filter="url(#d10-light-shadow)">
-          <rect x="240" y="250" width="220" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-          <rect x="252" y="260" width="95" height="16" rx="3" fill="#f1f5f9"/>
-          <text x="299" y="272" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" text-anchor="middle">GATE 03 &bull; STUDIO</text>
-
-          <text x="252" y="294" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12.5" font-weight="600">Frontend Type-Check &amp; Build</text>
-          <text x="252" y="310" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5">npm ci &amp;&amp; npm run build</text>
-          <text x="445" y="272" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">tsc -b</text>
-        </g>
-
-        <!-- NODE 5: GATE 4 (HERMETIC PYTEST SUITE) -->
-        <g id="d10-light-node-5" filter="url(#d10-light-shadow)">
-          <rect x="240" y="350" width="220" height="80" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-          <rect x="252" y="360" width="85" height="16" rx="3" fill="#f1f5f9"/>
-          <text x="294" y="372" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="8" font-weight="700" text-anchor="middle">GATE 04 &bull; TESTS</text>
-
-          <text x="252" y="394" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12.5" font-weight="600">Hermetic Pytest Matrix</text>
-          <text x="252" y="410" fill="#475569" font-family="'Geist Mono', monospace" font-size="9.5">pytest tests/unit/ + security</text>
-          <text x="445" y="372" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" text-anchor="end">100%</text>
-        </g>
-
-        <!-- NODE 6: EVALUATION GATE (GOLDEN DATASET - FOCAL ACCENT 1) -->
-        <g id="d10-light-node-6" filter="url(#d10-light-shadow)">
-          <rect x="540" y="165" width="220" height="150" rx="8" fill="#ffffff" stroke="#0e7490" stroke-width="2"/>
-          <rect x="552" y="177" width="105" height="18" rx="3" fill="rgba(14, 116, 144, 0.12)"/>
-          <text x="604" y="190" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">EVAL GATE [FOCAL]</text>
-
-          <text x="552" y="216" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13.5" font-weight="600">Golden Dataset Gate</text>
-          <text x="552" y="234" fill="#0e7490" font-family="'Geist Mono', monospace" font-size="9.5">lattice-rag eval --baseline</text>
-
-          <line x1="552" y1="246" x2="748" y2="246" stroke="#e2e8f0" stroke-width="1"/>
-
-          <text x="552" y="266" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">&bull; Mean drop &lt;= 0.03</text>
-          <text x="552" y="284" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10.5">&bull; Floor 0.50 &bull; Noul veto</text>
-          <text x="552" y="302" fill="#047857" font-family="'Geist Mono', monospace" font-size="9.5">ephemeral DB, 20 queries</text>
-        </g>
-
-        <!-- NODE 7: CONTAINER RELEASE (DOCKER ARTIFACT - FOCAL ACCENT 2) -->
-        <g id="d10-light-node-7" filter="url(#d10-light-shadow)">
-          <rect x="830" y="165" width="135" height="150" rx="8" fill="#ffffff" stroke="#047857" stroke-width="2"/>
-          <rect x="842" y="177" width="60" height="18" rx="3" fill="rgba(4, 120, 87, 0.12)"/>
-          <text x="872" y="190" fill="#047857" font-family="'Geist Mono', monospace" font-size="8.5" font-weight="700" text-anchor="middle">DEPLOY</text>
-
-          <text x="842" y="216" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">Cloud Run</text>
-          <text x="842" y="234" fill="#047857" font-family="'Geist Mono', monospace" font-size="9">manual, from source</text>
-
-          <line x1="842" y1="246" x2="953" y2="246" stroke="#e2e8f0" stroke-width="1"/>
-
-          <text x="842" y="266" fill="#0f172a" font-family="'Inter', sans-serif" font-size="10">&bull; deploy script</text>
-          <text x="842" y="284" fill="#475569" font-family="'Inter', sans-serif" font-size="10">&bull; Secret Manager</text>
-          <text x="842" y="302" fill="#047857" font-family="'Geist Mono', monospace" font-size="9">not in CI</text>
+        <g id="d10-cicd-pipeline-light-legend">
+          <line x1="16" y1="568" x2="984" y2="568" stroke="#e2e8f0" stroke-width="1"/>
+          <line x1="32" y1="588" x2="56" y2="588" stroke="#475569" stroke-width="1.5"/><text x="64" y="591" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">runs on every PR and push</text>
+          <line x1="252" y1="588" x2="276" y2="588" stroke="#0e7490" stroke-width="1.5"/><text x="284" y="591" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">required retrieval gate (focal)</text>
+          <line x1="492" y1="588" x2="516" y2="588" stroke="#4338ca" stroke-width="1.5" stroke-dasharray="5,4"/><text x="524" y="591" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">nightly / on demand, advisory</text>
+          <line x1="732" y1="588" x2="756" y2="588" stroke="#475569" stroke-width="1.5" stroke-dasharray="5,4"/><text x="764" y="591" fill="#475569" font-family="'Geist Mono', monospace" font-size="9">manual step outside CI</text>
         </g>
       </svg>
     </div>
 
     <footer class="card-footer">
-      <span>Specimen D10 &bull; Lattice RAG Architecture Series</span>
+      <span>Specimen D10 &#8226; Lattice RAG Architecture Series</span>
       <span>Dark Specimen: <a href="d10-cicd-pipeline-dark.html">d10-cicd-pipeline-dark.html</a></span>
     </footer>
   </main>
