@@ -85,7 +85,7 @@
     <div class="diagram-card">
       <svg role="img" viewBox="0 0 1000 612" width="1000" height="612" xmlns="http://www.w3.org/2000/svg" aria-labelledby="d10-cicd-pipeline-dark-title d10-cicd-pipeline-dark-desc">
         <title id="d10-cicd-pipeline-dark-title">CI Quality Gates &amp; Live Tier</title>
-        <desc id="d10-cicd-pipeline-dark-desc">Pull requests and pushes to main run four parallel blocking jobs, lint, unit-tests, frontend and the key-free Hermetic Tier retrieval gate that also runs for forks, before a merge; the Jev-judged Live Tier runs separately, nightly or on demand, as an advisory report with a measured 0.05 tolerance, and Cloud Run deploys are manual.</desc>
+        <desc id="d10-cicd-pipeline-dark-desc">Pull requests and pushes to main run four parallel blocking jobs, lint, unit-tests, frontend and the key-free Hermetic Tier retrieval gate that also runs for forks, before a merge; the Jev-judged Live Tier runs separately, nightly or on demand, as an advisory report with a measured 0.06 tolerance, and Cloud Run deploys are manual.</desc>
         <defs>
           <marker id="d10-cicd-pipeline-dark-arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
             <path d="M 1 1 L 7 4 L 1 7 Z" fill="#94a3b8"/>
@@ -184,7 +184,7 @@
           <text x="260" y="482" fill="#f1f5f9" font-family="'Inter', 'Geist', sans-serif" font-size="12.5" font-weight="600">Jev-judged answer quality</text>
           <text x="260" y="498" fill="#818cf8" font-family="'Geist Mono', monospace" font-size="9">lattice-rag eval --baseline</text>
           <line x1="260" y1="508" x2="524" y2="508" stroke="#1f2937" stroke-width="1"/>
-          <text x="260" y="524" fill="#f1f5f9" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; tolerance 0.05, measured (2&#963; over 3 runs)</text>
+          <text x="260" y="524" fill="#f1f5f9" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; tolerance 0.06, measured (2&#963; over 3 runs)</text>
           <text x="260" y="539" fill="#94a3b8" font-family="'Inter', 'Geist', sans-serif" font-size="10">&#8226; floor 0.50 &#183; Noul contradiction veto</text>
           <rect x="596" y="450" width="196" height="88" rx="6" fill="#111827"/>
           <rect x="596" y="450" width="196" height="88" rx="6" fill="#111827" stroke="#334155" stroke-width="1.5"/>

@@ -224,9 +224,9 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 1. **Pick a candidate from the Hermetic Tier.** `lattice-rag hermetic --output h.json` lists each query's top rerank score. The candidate must sit well above every `unanswerable` query's top score (at the time of writing the highest is -0.26, eval_22) so unanswerable queries still go to Noul; 3.0 is a reasonable first trial.
 2. **Measure with the gate on.** Run the Live Tier three times with the candidate: `GUARDRAIL_SKIP_RERANK_SCORE=<value> lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output on-rN.json`, or dispatch `live-tier.yml` with the `guardrail_skip_rerank_score` input (the nightly schedule always runs with the gate off). `eval` reuses the served guardrail, so the setting applies to the ephemeral pipeline too.
 3. **Compare against the measured baseline** (`measurement` in `eval_baseline.json`, three gate-off runs) and enable only if all of these hold:
-   - every metric mean, above all `faithfulness` and `context_precision` (the two the guardrail protects), is within `max_regression_delta` (0.05) of the baseline mean;
+   - every metric mean, above all `faithfulness` and `context_precision` (the two the guardrail protects), is within `max_regression_delta` (0.06) of the baseline mean;
    - no query that passes in the baseline runs fails in all three gate-on runs;
-   - the Noul contradiction vetoes on `long_context` (baseline: 2, 0 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
+   - the Noul contradiction vetoes on `long_context` (baseline: 1, 1 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
 4. **Record and enable.** Put the three run means and the veto counts in the PR that sets the variable in the deployment environment (for example the Cloud Run service's env vars), and keep the reports. Re-run this procedure when the reranker model, `top_k`, the Gold Set or the threshold changes.
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.
