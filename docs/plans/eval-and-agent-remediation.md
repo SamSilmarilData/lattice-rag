@@ -1,5 +1,7 @@
 # Plan: Gold Set, eval suite and agent remediation
 
+> **Status (2026-10-26):** executed through spec #22. The GitHub tickets (#30-#49, grouped by phase trackers #24-#28) are the live source of truth; task numbers below (1.1, 5.3, ...) are historical. Decisions from the design review are recorded on the tickets.
+
 Source: the 2026-10-25 audit (Hermetic Tier run, one Live Tier run, diagnostic run of the weakest queries) and the design interview that followed. Vocabulary follows `GLOSSARY.md`. The Live Tier stays advisory (ADR-0002).
 
 ## Why
