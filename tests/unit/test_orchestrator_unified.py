@@ -610,3 +610,70 @@ async def test_failed_cache_verification_answer_is_unverified_and_not_cached(
     assert repeat == {"unverified": True, "cached": False}
     assert len(cache) == 1
     assert c["pipeline"].execute.await_count == 3
+
+
+def _massive_context(c, *, gemini_fails: bool, groq_fails: bool = False):
+    c["router"].route_query = AsyncMock(
+        return_value=RouteDecision(route="massive_context", confidence=0.9)
+    )
+
+    async def _gemini_stream(q, ch, g):
+        if gemini_fails:
+            raise RuntimeError("gemini down")
+        yield "Summary."
+
+    async def _groq_stream(q, ch, g):
+        if groq_fails:
+            raise RuntimeError("groq down")
+        yield "Groq summary."
+
+    c["gemini"].stream = _gemini_stream
+    c["gemini"].synthesize = AsyncMock(
+        side_effect=RuntimeError("gemini down") if gemini_fails else None,
+        return_value="Summary.",
+    )
+    c["groq"].stream = _groq_stream
+    c["groq"].synthesize = AsyncMock(
+        side_effect=RuntimeError("groq down") if groq_fails else None,
+        return_value="Groq summary.",
+    )
+
+
+async def _answer(orchestrator: RAGOrchestrator, entry_point: str) -> tuple[str, bool]:
+    if entry_point == "run":
+        state = await orchestrator.run("Summarize everything")
+        return state.answer, state.degraded
+    events = [e async for e in orchestrator.stream_query("Summarize everything")]
+    done = events[-1]
+    assert done["event"] == "done"
+    return done["data"]["answer"], done["data"]["degraded"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_massive_context_gemini_failure_falls_back_to_degraded_groq_uncached(
+    mock_orchestrator_components, entry_point
+):
+    c = mock_orchestrator_components
+    _massive_context(c, gemini_fails=True)
+
+    answer, degraded = await _answer(_orchestrator(c), entry_point)
+
+    assert answer == "Groq summary."
+    assert degraded is True
+    c["semantic_cache"].put.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_massive_context_both_providers_failing_falls_to_faq(
+    mock_orchestrator_components, entry_point
+):
+    c = mock_orchestrator_components
+    _massive_context(c, gemini_fails=True, groq_fails=True)
+
+    answer, degraded = await _answer(_orchestrator(c), entry_point)
+
+    assert answer == "Cached FAQ"
+    assert degraded is True
+    c["semantic_cache"].put.assert_not_called()

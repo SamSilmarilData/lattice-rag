@@ -44,6 +44,8 @@ class StreamOutcome:
 class ResilientSynthesizer:
     """Single generation path: Groq under a circuit breaker -> Gemini -> Redis FAQ.
 
+    ``massive_context`` reverses the first two: Gemini -> Groq (breaker) -> Redis FAQ.
+
     Both the buffered and streaming paths record Groq outcomes on the same breaker, so
     repeated Groq failures in either path open it and later requests skip Groq.
     """
@@ -72,6 +74,16 @@ class ResilientSynthesizer:
         """Current state of the synthesis circuit breaker."""
         return str(self.breaker.current_state)
 
+    @staticmethod
+    def _primary(route: str) -> str:
+        return "gemini" if route == "massive_context" else "groq"
+
+    def _providers(self, route: str) -> list[tuple[str, Any, bool]]:
+        """Cascade order for a route; only Groq runs under the circuit breaker."""
+        groq = ("groq", self.groq, True)
+        gemini = ("gemini", self.gemini, False)
+        return [gemini, groq] if route == "massive_context" else [groq, gemini]
+
     async def synthesize(
         self,
         query: str,
@@ -80,36 +92,21 @@ class ResilientSynthesizer:
         route: str = "hybrid",
     ) -> SynthesisResult:
         """Synthesize answer with automatic cascading failover: Groq -> Gemini -> Redis FAQ."""
-        # Massive context queries route directly to large-context Gemini
-        if route == "massive_context" and self.gemini is not None:
+        for name, client, use_breaker in self._providers(route):
+            if client is None:
+                continue
             try:
-                answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=False, provider="gemini")
+                guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
+                with guard:
+                    answer = str(await client.synthesize(query, context_chunks, graph_context))
+                return SynthesisResult(
+                    answer=answer,
+                    degraded=name != self._primary(route),
+                    provider=name,
+                )
             except Exception as e:
                 logger.warning(
-                    "Gemini massive context synthesis failed: %s", sanitize_error_detail(str(e))
-                )
-                return await self._offline_result(query)
-
-        if self.groq is not None:
-            try:
-                with self.breaker.calling():
-                    answer = str(await self.groq.synthesize(query, context_chunks, graph_context))
-                return SynthesisResult(answer=answer, degraded=False, provider="groq")
-            except Exception as e:
-                logger.warning(
-                    "Primary Groq synthesis failed, cascading to Gemini: %s",
-                    sanitize_error_detail(str(e)),
-                )
-
-        if self.gemini is not None:
-            try:
-                answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=True, provider="gemini")
-            except Exception as e2:
-                logger.warning(
-                    "Gemini fallback synthesis failed, cascading to Redis FAQ: %s",
-                    sanitize_error_detail(str(e2)),
+                    "%s synthesis failed, cascading: %s", name, sanitize_error_detail(str(e))
                 )
 
         return await self._offline_result(query)
@@ -129,14 +126,9 @@ class ResilientSynthesizer:
         """
         outcome = outcome if outcome is not None else StreamOutcome()
 
-        if route == "massive_context":
-            providers = [("gemini", self.gemini, False)]
-            primary = "gemini"
-        else:
-            providers = [("groq", self.groq, True), ("gemini", self.gemini, False)]
-            primary = "groq"
+        primary = self._primary(route)
 
-        for name, client, use_breaker in providers:
+        for name, client, use_breaker in self._providers(route):
             if client is None:
                 continue
             emitted = False
