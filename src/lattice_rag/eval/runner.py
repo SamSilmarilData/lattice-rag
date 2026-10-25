@@ -7,7 +7,7 @@ from pathlib import Path
 
 import structlog
 
-from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
 from lattice_rag.eval.gate import (
     METRICS,
     Baseline,
@@ -28,8 +28,8 @@ from lattice_rag.storage.extract import EntityExtractor
 logger = structlog.get_logger(__name__)
 
 # Fixed failure codes on EvalQueryResult.error; exception text stays in the logs
-PIPELINE_ERROR = "pipeline_error"
-JUDGE_ERROR = "judge_error"
+PIPELINE_ERROR = EvalQueryError.PIPELINE_ERROR
+JUDGE_ERROR = EvalQueryError.JUDGE_ERROR
 
 
 class EvalRunner:

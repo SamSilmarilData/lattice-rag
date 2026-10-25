@@ -14,7 +14,7 @@ from litestar.di import Provide
 from litestar.testing import AsyncTestClient
 
 from lattice_rag.api.controllers.eval import EvalController
-from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.config import AppConfig
 from lattice_rag.eval.jobs import EvalJobManager
@@ -41,7 +41,7 @@ REPORT = EvalRunResponse(
             answer_correctness=0.84,
             passed=True,
         ),
-        EvalQueryResult(query="Broken query", passed=False, error="pipeline_error"),
+        EvalQueryResult(query="Broken query", passed=False, error=EvalQueryError.PIPELINE_ERROR),
     ],
 )
 
@@ -194,3 +194,19 @@ async def test_start_rejects_paths_outside_project_root(client, runner, dataset)
     resp = await client.post(JOBS, params={"dataset": dataset}, headers=ADMIN_HEADERS)
     assert resp.status_code == 400
     assert runner.calls == []
+
+
+def test_eval_query_error_is_a_closed_set_of_wire_codes():
+    """``error`` round-trips the two codes types.ts knows and rejects anything else."""
+    import msgspec
+
+    for code in ("pipeline_error", "judge_error"):
+        wire = msgspec.json.encode(EvalQueryResult(query="q", passed=False, error=code))
+        assert msgspec.json.decode(wire)["error"] == code
+        assert msgspec.json.decode(wire, type=EvalQueryResult).error == code
+
+    with pytest.raises(msgspec.ValidationError):
+        msgspec.json.decode(
+            b'{"query": "q", "passed": false, "error": "Groq 503: key gsk_x"}',
+            type=EvalQueryResult,
+        )
