@@ -215,12 +215,18 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
     tier2_cached_queries: int
 
 
+class EvalQueryError(StrEnum):
+    """Why a Gold Set query failed; a fixed code, never exception text."""
+
+    PIPELINE_ERROR = "pipeline_error"
+    JUDGE_ERROR = "judge_error"
+
+
 class EvalQueryResult(msgspec.Struct, rename="camel"):
     """Result of one Gold Set query in the Live Tier.
 
     A metric is ``None`` when it was not judged: either it does not apply to the
     query's Slice, or the query failed (``error`` is set) and was never judged.
-    ``error`` is a fixed code (``pipeline_error`` / ``judge_error``), never exception text.
     """
 
     query: str
@@ -229,7 +235,7 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     context_precision: float | None = None
     answer_relevance: float | None = None
     answer_correctness: float | None = None
-    error: str | None = None
+    error: EvalQueryError | None = None
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):

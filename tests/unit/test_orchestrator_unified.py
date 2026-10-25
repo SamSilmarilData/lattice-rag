@@ -29,7 +29,7 @@ def mock_orchestrator_components():
         return_value=MagicMock(
             final_chunks=[{"node_id": 1, "text": "LatticeDB is fast", "score": 0.9}],
             graph_context=SubgraphResult(nodes=[{"id": 1, "name": "LatticeDB"}], edges=[]),
-            timings={"stage1_search": 1.0},
+            timings={"search": 1.0},
             low_grounding=False,
             unverified=False,
         )
@@ -584,3 +584,29 @@ async def test_failed_embedding_leaves_no_routing_task_behind(
 
     assert leftover == []
     assert unhandled == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_failed_cache_verification_answer_is_unverified_and_not_cached(
+    mock_orchestrator_components, entry_point
+):
+    """A near-duplicate whose Noul check could not run is recomputed, flagged and not stored."""
+    from lattice_rag.caching.semantic_cache import SemanticCache
+
+    c = mock_orchestrator_components
+    noul = MagicMock()
+    noul.system_one = AsyncMock(side_effect=RuntimeError("Jev 503"))
+    cache = SemanticCache(ts_client=noul)
+    orchestrator = _orchestrator(c, semantic_cache=cache)
+
+    # A verified answer is stored; the paraphrase shares its embedding, so it needs Noul
+    stored = await _ask(orchestrator, entry_point, "Explain LatticeDB")
+    paraphrase = await _ask(orchestrator, entry_point, "Please explain LatticeDB")
+    repeat = await _ask(orchestrator, entry_point, "Please explain LatticeDB")
+
+    assert stored == {"unverified": False, "cached": False}
+    assert paraphrase == {"unverified": True, "cached": False}
+    assert repeat == {"unverified": True, "cached": False}
+    assert len(cache) == 1
+    assert c["pipeline"].execute.await_count == 3

@@ -185,12 +185,12 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 
 ## 6. Continuous Integration & Quality Gates Pipeline
 
-`lattice-rag` runs key-free quality gates on every push and pull request (`.github/workflows/eval-gate.yml`) and an advisory, Jev-judged Live Tier nightly and on demand (`.github/workflows/live-tier.yml`). The diagram below predates the split and still shows the live evaluation as a PR step.
+`lattice-rag` runs key-free quality gates on every push and pull request (`.github/workflows/eval-gate.yml`) and an advisory, Jev-judged Live Tier nightly and on demand (`.github/workflows/live-tier.yml`).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="diagrams/d10-cicd-pipeline-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="diagrams/d10-cicd-pipeline-light.svg">
-  <img alt="CI Quality Gates & Deploy Pipeline" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
+  <img alt="CI Quality Gates & Live Tier" src="diagrams/d10-cicd-pipeline-dark.svg" width="100%">
 </picture>
 
 <sub>Interactive &amp; High-Resolution Inspection: <a href="diagrams/d10-cicd-pipeline-dark.html">Dark Specimen</a> | <a href="diagrams/d10-cicd-pipeline-light.html">Light Specimen</a></sub>

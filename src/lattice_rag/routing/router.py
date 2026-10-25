@@ -40,16 +40,28 @@ _FALLBACK = RouteDecision(route="hybrid", confidence=0.5, verified=False)
 class QueryRouter:
     """Routes user queries to the appropriate RAG strategy using TypeSafe AI Jev Choice."""
 
-    def __init__(self, ts_client: AsyncTypeSafeClient | None = None) -> None:
+    def __init__(
+        self, ts_client: AsyncTypeSafeClient | None = None, *, offline: bool = False
+    ) -> None:
         """Initializes the QueryRouter and its TypeSafe AI client.
 
         Args:
             ts_client: Optional injected AsyncTypeSafeClient (useful for testing).
+            offline: Mock-key mode: no Jev client at all. Pure small talk still takes the
+                deterministic chitchat path; every other query falls back to ``hybrid`` as
+                an unverified route without any network call.
 
         Raises:
-            RuntimeError: If TYPESAFE_API_KEY environment variable is not set and ts_client is None.
+            ValueError: If ``offline`` is combined with a ``ts_client``.
+            RuntimeError: If not offline, TYPESAFE_API_KEY is not set and ts_client is None.
         """
         self._client: AsyncTypeSafeClient | None
+        if offline:
+            if ts_client is not None:
+                raise ValueError("An offline QueryRouter takes no ts_client.")
+            self._client = None
+            logger.debug("QueryRouter initialized offline")
+            return
         if ts_client is not None:
             self._client = ts_client
         else:
@@ -63,15 +75,8 @@ class QueryRouter:
 
     @classmethod
     def offline(cls) -> QueryRouter:
-        """A router with no Jev client (mock-key mode).
-
-        Pure small talk still takes the deterministic chitchat path; every other query falls
-        back to ``hybrid`` as an unverified route without any network call.
-        """
-        router = cls.__new__(cls)
-        router._client = None
-        logger.debug("QueryRouter initialized offline")
-        return router
+        """A router with no Jev client (mock-key mode); see ``offline`` in ``__init__``."""
+        return cls(offline=True)
 
     async def route_query(self, query: str) -> RouteDecision:
         """Routes a query into one of the supported strategies.

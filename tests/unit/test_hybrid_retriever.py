@@ -98,7 +98,7 @@ async def test_hybrid_retriever_empty_query_fast_exit():
     assert result.final_chunks == []
     assert result.graph_context.nodes == []
     assert result.low_grounding is True
-    assert "stage1_search" in result.timings
+    assert list(result.timings) == ["search"]
 
 
 @pytest.mark.asyncio
@@ -117,9 +117,7 @@ async def test_hybrid_retriever_full_execution_flow():
     assert result.low_grounding is False
     assert len(result.graph_context.nodes) == 2
     assert len(result.graph_context.edges) == 1
-    assert "stage1_search" in result.timings
-    assert "stage2_traverse" in result.timings
-    assert "stage3_rerank" in result.timings
+    assert list(result.timings) == ["search", "rerank", "graph_traverse"]
     assert result.final_chunks[0]["rerank_score"] >= result.final_chunks[1]["rerank_score"]
 
 
@@ -172,3 +170,23 @@ async def test_hybrid_retriever_guardrail_all_rejected_activates_low_grounding()
     )
     assert result.final_chunks == []
     assert result.low_grounding is True
+
+
+@pytest.mark.asyncio
+async def test_guardrail_failure_log_redacts_secrets(caplog):
+    """A guardrail exception that echoes a key is logged with the key redacted."""
+    import logging
+
+    leaked = "gsk_live1234567890abcdefSECRET"
+    mock_guardrail = MagicMock()
+    mock_guardrail.filter_chunks = AsyncMock(side_effect=RuntimeError(f"401 for key {leaked}"))
+    retriever = HybridRetriever(
+        store=FakeStore(), embedding_service=FakeEmbeddingService(), router_guardrail=mock_guardrail
+    )
+
+    with caplog.at_level(logging.WARNING, logger="lattice_rag.retrieval.pipeline"):
+        result = await retriever.retrieve(query="LatticeDB details", route="hybrid")
+
+    assert result.unverified is True
+    assert "guardrail_filter_unexpected_error_fallback" in caplog.text
+    assert leaked not in caplog.text
