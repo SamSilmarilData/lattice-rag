@@ -172,3 +172,16 @@ async def test_offline_router_makes_no_jev_calls(monkeypatch: pytest.MonkeyPatch
     assert (decision.route, decision.verified) == ("hybrid", False)
     assert (greeting.route, greeting.verified) == ("chitchat", True)
     calls.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_offline_mode_needs_no_key_and_rejects_a_client(monkeypatch: pytest.MonkeyPatch):
+    """Offline mode is an explicit constructor mode: no key needed, and no client accepted."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+
+    router = QueryRouter(offline=True)
+    decision = await router.route_query("Explain vector indexing")
+
+    assert (decision.route, decision.verified) == ("hybrid", False)
+    with pytest.raises(ValueError, match="offline"):
+        QueryRouter(ts_client=AsyncMock(), offline=True)
