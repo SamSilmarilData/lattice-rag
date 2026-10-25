@@ -185,3 +185,38 @@ async def test_offline_mode_needs_no_key_and_rejects_a_client(monkeypatch: pytes
     assert (decision.route, decision.verified) == ("hybrid", False)
     with pytest.raises(ValueError, match="offline"):
         QueryRouter(ts_client=AsyncMock(), offline=True)
+
+
+async def _criteria_sent_to_jev() -> dict[str, str]:
+    mock_client = AsyncMock()
+    mock_client.system_one.return_value = SimpleNamespace(
+        choices={"route": SimpleNamespace(choice="hybrid", confidence=0.9)}
+    )
+    await QueryRouter(ts_client=mock_client).route_query("How does retrieval work?")
+    choice = mock_client.system_one.await_args.kwargs["questions"]["route"]
+    return dict(choice.criteria)
+
+
+@pytest.mark.asyncio
+async def test_every_route_description_carries_worked_examples():
+    criteria = await _criteria_sent_to_jev()
+    assert set(criteria) == {
+        "vector_exact",
+        "graph_relational",
+        "hybrid",
+        "chitchat",
+        "massive_context",
+    }
+    for route, description in criteria.items():
+        assert description.count("'") >= 4, f"{route} needs at least two quoted examples"
+
+
+@pytest.mark.asyncio
+async def test_massive_context_covers_multipart_walkthroughs_not_single_facts():
+    criteria = await _criteria_sent_to_jev()
+    massive = criteria["massive_context"].lower()
+    for cue in ("end-to-end", "walk through", "every", "whole"):
+        assert cue in massive
+    # a single-fact question must stay with vector_exact, and say so
+    assert "single" in criteria["vector_exact"].lower()
+    assert "not" in criteria["vector_exact"].lower()
