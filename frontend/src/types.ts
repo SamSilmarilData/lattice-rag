@@ -104,7 +104,16 @@ export interface EvalQueryResult {
   error: EvalQueryError | null;
 }
 
-// Means are over the queries where the metric was judged (null if none were)
+// A query whose chosen Route differs from its Expected Route
+export interface Misroute {
+  queryId: string;
+  slice: string;
+  chosenRoute: string;
+  expectedRoute: string;
+}
+
+// Means are over the queries where the metric was judged (null if none were).
+// routeAccuracy is over queries the pipeline ran; its floor is advisory and never fails the gate.
 export interface EvalRunResponse {
   totalQueries: number;
   passedGate: boolean;
@@ -115,6 +124,10 @@ export interface EvalRunResponse {
   meanAnswerCorrectness: number | null;
   failedQueries: number;
   results: EvalQueryResult[];
+  routeAccuracy: number | null;
+  routeAccuracyBySlice: Record<string, number>;
+  routeAccuracyFloor: number | null;
+  misroutes: Misroute[];
 }
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';

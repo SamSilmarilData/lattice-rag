@@ -7,7 +7,7 @@ from pathlib import Path
 
 import structlog
 
-from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse, Misroute
 from lattice_rag.eval.gate import (
     METRICS,
     Baseline,
@@ -122,6 +122,8 @@ class EvalRunner:
             effective_concurrency = 1 if len(queries_data) > 5 else max_concurrency
             semaphore = asyncio.Semaphore(effective_concurrency)
 
+            chosen_routes: dict[str, str] = {}
+
             async def _eval_single(item: GoldQuery, idx: int) -> EvalQueryResult:
                 async with semaphore:
                     if idx > 0 and len(queries_data) > 5:
@@ -141,6 +143,8 @@ class EvalRunner:
                             error=sanitize_error_detail(str(e)),
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
+
+                    chosen_routes[item.id] = pipeline_state.route
 
                     try:
                         return await self.evaluator.evaluate_query(
@@ -173,7 +177,9 @@ class EvalRunner:
                 with contextlib.suppress(Exception):
                     temp_dir_obj.cleanup()
 
-        return _apply_gate(list(results), baseline)
+        report = _apply_gate(list(results), baseline)
+        _add_route_accuracy(report, queries_data, chosen_routes, baseline)
+        return report
 
     @staticmethod
     def format_markdown_report(report: EvalRunResponse) -> str:
@@ -188,6 +194,7 @@ class EvalRunner:
             f"- **Mean Context Precision**: {_fmt(report.mean_context_precision)}",
             f"- **Mean Answer Relevance**: {_fmt(report.mean_answer_relevance)}",
             f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
+            *_route_accuracy_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
@@ -269,3 +276,54 @@ def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunRe
         failed_queries=failed,
         results=results,
     )
+
+
+def _add_route_accuracy(
+    report: EvalRunResponse,
+    queries: list[GoldQuery],
+    chosen_routes: dict[str, str],
+    baseline: Baseline,
+) -> None:
+    """Fill the Route Accuracy fields; queries whose pipeline failed have no chosen Route."""
+    scored = [q for q in queries if q.id in chosen_routes]
+    by_slice: dict[str, list[bool]] = {}
+    for q in scored:
+        by_slice.setdefault(q.slice, []).append(chosen_routes[q.id] == q.expected_route)
+    report.route_accuracy = _share(sum(ok for oks in by_slice.values() for ok in oks), len(scored))
+    report.route_accuracy_by_slice = {
+        s: _share(sum(oks), len(oks)) or 0.0 for s, oks in by_slice.items()
+    }
+    report.route_accuracy_floor = baseline.gate_thresholds.route_accuracy_floor
+    report.misroutes = [
+        Misroute(
+            query_id=q.id,
+            slice=q.slice,
+            chosen_route=chosen_routes[q.id],
+            expected_route=q.expected_route,
+        )
+        for q in scored
+        if chosen_routes[q.id] != q.expected_route
+    ]
+
+
+def _share(hits: int, total: int) -> float | None:
+    return round(hits / total, 4) if total else None
+
+
+def _route_accuracy_lines(report: EvalRunResponse) -> list[str]:
+    if report.route_accuracy is None:
+        return []
+    floor = report.route_accuracy_floor
+    advisory = ""
+    if floor is not None:
+        status = "met" if report.route_accuracy >= floor else "MISSED"
+        advisory = f" (advisory floor {floor:.2f}: {status})"
+    lines = [f"- **Route Accuracy**: {_fmt(report.route_accuracy)}{advisory}"]
+    lines += [
+        f"  - {name}: {_fmt(acc)}" for name, acc in sorted(report.route_accuracy_by_slice.items())
+    ]
+    lines += [
+        f"  - misroute {m.query_id} ({m.slice}): chose {m.chosen_route}, expected {m.expected_route}"
+        for m in report.misroutes
+    ]
+    return lines

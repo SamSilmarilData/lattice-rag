@@ -11,6 +11,7 @@
   "gate_thresholds": {
     "max_regression_delta": 0.06,
     "min_query_floor": 0.5,
+    "route_accuracy_floor": 0.8,
     "pass_thresholds": {
       "faithfulness": 0.7,
       "context_precision": 0.65,

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert, Zap, Timer, Activity } from 'lucide-react';
-import { EvalQueryResult, EvalRunResponse, EvalJobResponse, BenchmarkRunResponse } from '../types';
+import { EvalQueryResult, EvalRunResponse, Misroute, EvalJobResponse, BenchmarkRunResponse } from '../types';
 import { adminFetch } from '../adminKey';
 
 const EVAL_POLL_INTERVAL_MS = 2000;
@@ -239,6 +239,10 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
   const [running, setRunning] = useState(false);
   const [evalLimit, setEvalLimit] = useState<number>(5);
   const [evalStatus, setEvalStatus] = useState<string | null>(null);
+  const [routeReport, setRouteReport] = useState<Pick<
+    EvalRunResponse,
+    'routeAccuracy' | 'routeAccuracyBySlice' | 'routeAccuracyFloor' | 'misroutes'
+  > | null>(null);
   const [evalError, setEvalError] = useState<string | null>(null);
   const [benchmarkRunning, setBenchmarkRunning] = useState(false);
   const [benchmarkData, setBenchmarkData] = useState<BenchmarkRunResponse | null>(null);
@@ -263,6 +267,12 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
       const data = await runEvalJob(evalLimit);
       if (data.results && data.results.length > 0) {
         setEvalData(data.results);
+        setRouteReport({
+          routeAccuracy: data.routeAccuracy,
+          routeAccuracyBySlice: data.routeAccuracyBySlice,
+          routeAccuracyFloor: data.routeAccuracyFloor,
+          misroutes: data.misroutes,
+        });
         setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${pct(data.meanFaithfulness, 1)}, Precision: ${pct(data.meanContextPrecision, 1)}, Relevance: ${pct(data.meanAnswerRelevance, 1)}, Correctness: ${pct(data.meanAnswerCorrectness, 1)}, Failed: ${data.failedQueries})`);
       } else {
         setEvalStatus('Evaluation completed with empty results.');
@@ -389,6 +399,39 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Route Accuracy (advisory floor; never fails the gate) */}
+      {routeReport && routeReport.routeAccuracy !== null && (
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-3.5 text-xs text-gray-300 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold">
+              Route Accuracy: {pct(routeReport.routeAccuracy, 1)}
+              {routeReport.routeAccuracyFloor !== null && (
+                <span
+                  className={`ml-2 font-normal ${routeReport.routeAccuracy >= routeReport.routeAccuracyFloor ? 'text-emerald-400' : 'text-amber-400'}`}
+                >
+                  advisory floor {pct(routeReport.routeAccuracyFloor)}{' '}
+                  {routeReport.routeAccuracy >= routeReport.routeAccuracyFloor ? 'met' : 'missed'}
+                </span>
+              )}
+            </span>
+            <span className="text-gray-400">
+              {Object.entries(routeReport.routeAccuracyBySlice)
+                .map(([name, acc]) => `${name} ${pct(acc)}`)
+                .join(' · ')}
+            </span>
+          </div>
+          {routeReport.misroutes.length > 0 && (
+            <ul className="font-mono text-[11px] text-gray-400 space-y-0.5">
+              {routeReport.misroutes.map((m: Misroute) => (
+                <li key={m.queryId}>
+                  {m.queryId} ({m.slice}): chose {m.chosenRoute}, expected {m.expectedRoute}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

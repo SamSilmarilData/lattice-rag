@@ -238,10 +238,21 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     error: EvalQueryError | None = None
 
 
+class Misroute(msgspec.Struct, rename="camel"):
+    """A Gold Set query whose chosen Route differs from its Expected Route."""
+
+    query_id: str
+    slice: str
+    chosen_route: str
+    expected_route: str
+
+
 class EvalRunResponse(msgspec.Struct, rename="camel"):
     """Response DTO for an evaluation run.
 
     Means are over the queries where the metric was judged (``None`` if none were).
+    Route Accuracy is the share of queries whose chosen Route equals the Expected Route,
+    over queries the pipeline ran (``None`` if none did). Its floor is advisory only.
     """
 
     total_queries: int
@@ -253,6 +264,10 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     mean_answer_correctness: float | None = None
     failed_queries: int = 0
     results: list[EvalQueryResult] = []
+    route_accuracy: float | None = None
+    route_accuracy_by_slice: dict[str, float] = {}
+    route_accuracy_floor: float | None = None
+    misroutes: list[Misroute] = []
 
 
 class EvalJobStatus(StrEnum):
