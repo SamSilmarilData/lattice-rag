@@ -395,6 +395,7 @@ async def test_a_query_breaking_its_slice_behavior_fails_the_gate(
     assert any(f.startswith(f"{query.id}:") and expected_problem in f for f in report.failures)
 
 
+@pytest.mark.usefixtures("small_gold_sets")
 async def test_a_slice_without_a_threshold_fails_the_gate() -> None:
     gate = HermeticThresholds(
         version="1",
@@ -406,6 +407,48 @@ async def test_a_slice_without_a_threshold_fails_the_gate() -> None:
 
     assert not report.passed
     assert any("'multihop' has no threshold" in f for f in report.failures)
+
+
+async def test_a_slice_below_ten_queries_is_reported_but_not_gated() -> None:
+    # gold_set() has 3 factoid and 1 multihop queries: neither meets the 10-query minimum
+    gate = HermeticThresholds(
+        version="1",
+        overall=MetricFloor(recall=0.0, mrr=0.0),
+        slices={"factoid": MetricFloor(recall=1.01, mrr=1.01)},
+    )
+
+    report = await run_hermetic_tier(gold_set(), gate, fake_embedding_service())
+
+    assert report.passed, report.failures
+    by_slice = {s.slice: s for s in report.slices}
+    assert by_slice["factoid"].queries == 3
+    assert by_slice["factoid"].recall == 1.0
+    assert not by_slice["factoid"].gated
+    assert by_slice["factoid"].floor is None
+    assert not by_slice["multihop"].gated
+
+
+async def test_a_slice_of_ten_queries_is_gated_on_its_floor() -> None:
+    factoids = [
+        _q(
+            f"q_pulsar_{i}",
+            "What are pulsars and their rotating neutron stars?",
+            [("doc_astro", PULSAR)],
+        )
+        for i in range(10)
+    ]
+    gate = HermeticThresholds(
+        version="1",
+        overall=MetricFloor(recall=0.0, mrr=0.0),
+        slices={"factoid": MetricFloor(recall=1.01, mrr=0.0)},
+    )
+
+    report = await run_hermetic_tier(_with_queries(*factoids), gate, fake_embedding_service())
+
+    assert not report.passed
+    (factoid,) = report.slices
+    assert factoid.gated
+    assert any(f.startswith("factoid:") and "below floor" in f for f in report.failures)
 
 
 class ExplodingRetriever:

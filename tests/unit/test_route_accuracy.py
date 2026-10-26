@@ -11,6 +11,8 @@ import pytest
 from lattice_rag.api.dtos import EvalQueryResult
 from lattice_rag.eval.runner import EvalRunner
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 ROWS = [
     ("r1", "factoid", "vector_exact"),
     ("r2", "factoid", "vector_exact"),

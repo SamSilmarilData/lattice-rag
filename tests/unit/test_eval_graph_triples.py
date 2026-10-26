@@ -12,6 +12,8 @@ from lattice_rag.api.dtos import EvalQueryResult
 from lattice_rag.eval.runner import EvalRunner
 from lattice_rag.eval.triage_gate import JevEvaluator
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 METRICS = ("faithfulness", "context_precision", "answer_relevance", "answer_correctness")
 
 GRAPH = {

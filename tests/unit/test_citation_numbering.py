@@ -16,6 +16,8 @@ from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 METRIC_NAMES = ("faithfulness", "context_precision", "answer_relevance", "answer_correctness")
 
 

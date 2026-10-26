@@ -21,12 +21,14 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
 ``load_gold_set`` rejects a file that is structurally wrong (missing field, unknown
 Slice, Case or Route) or whose content is inconsistent (a Gold Passage that is not verbatim
 in its Document, a passage for an unknown Document, duplicate ids, or a Slice whose
-passage count makes no sense) or an expected entity the corpus never mentions.
+passage count makes no sense), an expected entity the corpus never mentions, or a
+non-chitchat Slice with fewer than ``MIN_SLICE_QUERIES`` queries.
 """
 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Final
 
@@ -38,6 +40,17 @@ GOLD_SET_VERSION: Final = "3.0.0"
 
 # Slices whose queries the corpus cannot (unanswerable) or should not (chitchat) answer.
 PASSAGE_FREE_SLICES: Final[frozenset[str]] = frozenset({"unanswerable", "chitchat"})
+
+# Fewest queries a Slice needs before a mean over it means anything. Every Slice but
+# chitchat (deterministic, never scored for recall) must reach it, and per-Slice gates
+# apply only to Slices that do.
+MIN_SLICE_QUERIES = 10
+UNSIZED_SLICES: Final[frozenset[str]] = frozenset({"chitchat"})
+
+
+def meets_slice_minimum(query_count: int) -> bool:
+    """Whether a Slice of ``query_count`` queries is large enough to be gated on its own."""
+    return query_count >= MIN_SLICE_QUERIES
 
 
 class GoldSetError(ValueError):
@@ -144,6 +157,13 @@ def find_problems(gold_set: GoldSet) -> list[str]:
                     f"{q.id}: gold_passages[{i}] is not verbatim in {passage.document_id!r}: "
                     f"{passage.text[:60]!r}"
                 )
+
+    sizes = Counter(q.slice for q in gold_set.queries if q.slice not in UNSIZED_SLICES)
+    problems.extend(
+        f"slice {name!r} has {count} queries, needs at least {MIN_SLICE_QUERIES}"
+        for name, count in sorted(sizes.items())
+        if not meets_slice_minimum(count)
+    )
     return problems
 
 

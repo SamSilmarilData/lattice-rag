@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from lattice_rag import cli
 
 
+@pytest.mark.usefixtures("small_gold_sets")
 def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
     """`seed` only touches storage, so it must not require TYPESAFE_API_KEY (Docker build)."""
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)

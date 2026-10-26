@@ -12,6 +12,8 @@ from lattice_rag.api.dtos import EvalQueryResult
 from lattice_rag.eval.runner import EvalRunner
 from lattice_rag.orchestration.state import PipelineState
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 CORPUS_TEXT = "LatticeDB stores an HNSW index. GLiNER extracts entities. Groq answers."
 
 

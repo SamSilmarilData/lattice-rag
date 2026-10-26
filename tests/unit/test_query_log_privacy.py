@@ -35,6 +35,8 @@ from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 SECRET_QUERY = "Explain the zebra-quantum-7731 indexing scheme in detail"
 ADMIN_HEADERS = {ADMIN_KEY_HEADER: "admin-secret"}
 

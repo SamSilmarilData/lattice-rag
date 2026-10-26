@@ -12,6 +12,8 @@ import pytest
 from lattice_rag.api.dtos import EvalQueryResult
 from lattice_rag.eval.runner import EvalRunner
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 PASS = {
     "faithfulness": 0.7,
     "context_precision": 0.65,

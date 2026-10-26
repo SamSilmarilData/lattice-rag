@@ -130,6 +130,7 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
     return ds, base
 
 
+@pytest.mark.usefixtures("small_gold_sets")
 async def test_live_tier_fails_a_persistent_groq_rate_limit_as_provider_degraded(files):
     evaluator = AsyncMock()
     evaluator.evaluate_query.return_value = EvalQueryResult(query="Q one", passed=True)

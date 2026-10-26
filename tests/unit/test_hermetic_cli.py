@@ -14,6 +14,8 @@ from lattice_rag.eval.gold_set import PASSAGE_FREE_SLICES, load_gold_set
 from lattice_rag.eval.hermetic import load_thresholds
 from tests.unit.test_hermetic_tier import fake_embedding_service, gold_set
 
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

@@ -28,7 +28,30 @@ def test_shipped_gold_set_is_valid() -> None:
     gold = load_gold_set(SHIPPED)
 
     assert gold.version == "3.0.0"
-    assert len(gold.queries) == 52
+    assert len(gold.queries) == 83
+
+
+def test_shipped_near_miss_queries_are_unanswerable_with_a_refusal() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    near_misses = [q for q in gold.queries if q.case == "unanswerable_near_miss"]
+    assert len(near_misses) >= 10
+    for q in near_misses:
+        assert q.slice == "unanswerable", q.id
+        assert not q.gold_passages, q.id
+        assert q.reference_answer.startswith(
+            "The knowledge base does not contain this information."
+        ), q.id
+
+
+def test_shipped_ambiguity_and_conflicting_source_queries_carry_evidence() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    hard = [q for q in gold.queries if q.case in ("ambiguity", "conflicting_sources")]
+    assert sum(q.case == "ambiguity" for q in hard) >= 8
+    assert sum(q.case == "conflicting_sources" for q in hard) >= 8
+    for q in hard:
+        assert len(q.gold_passages) >= 2, q.id
 
 
 def test_shipped_corpus_is_the_five_documents_plus_the_long_form_docs() -> None:
@@ -203,6 +226,32 @@ def test_missing_case_is_rejected_with_its_name(tmp_path: Path) -> None:
     message = str(exc.value)
     assert "case" in message
     assert "queries[2]" in message
+
+
+def test_a_non_chitchat_slice_with_fewer_than_ten_queries_is_rejected(tmp_path: Path) -> None:
+    data = _raw()
+    factoid = [q for q in data["queries"] if q["slice"] == "factoid"]
+    data["queries"] = [q for q in data["queries"] if q["slice"] != "factoid"] + factoid[:9]
+
+    with pytest.raises(GoldSetError, match="slice 'factoid' has 9 queries, needs at least 10"):
+        load_gold_set(_write(tmp_path, data))
+
+
+def test_chitchat_needs_no_minimum_number_of_queries(tmp_path: Path) -> None:
+    data = _raw()
+    chitchat = [q for q in data["queries"] if q["slice"] == "chitchat"]
+    data["queries"] = [q for q in data["queries"] if q["slice"] != "chitchat"] + chitchat[:1]
+
+    load_gold_set(_write(tmp_path, data))
+
+
+def test_shipped_gold_set_has_ten_queries_in_every_non_chitchat_slice() -> None:
+    from collections import Counter
+
+    gold = load_gold_set(SHIPPED)
+
+    counts = Counter(q.slice for q in gold.queries if q.slice != "chitchat")
+    assert min(counts.values()) >= 10, counts
 
 
 def test_expected_entity_absent_from_the_corpus_is_rejected(tmp_path: Path) -> None:

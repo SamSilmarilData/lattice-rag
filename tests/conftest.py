@@ -20,3 +20,16 @@ def reset_config_cache():
     get_config.cache_clear()
     yield
     get_config.cache_clear()
+
+
+@pytest.fixture
+def small_gold_sets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let a test load a hand-built Gold Set of a few queries per Slice.
+
+    ``load_gold_set`` requires every non-chitchat Slice to hold at least
+    ``MIN_SLICE_QUERIES`` queries, and the Hermetic Tier gates only Slices that do. Tests
+    that exercise the runner, CLI or gate on tiny fixtures lower the minimum to one.
+    """
+    from lattice_rag.eval import gold_set
+
+    monkeypatch.setattr(gold_set, "MIN_SLICE_QUERIES", 1)

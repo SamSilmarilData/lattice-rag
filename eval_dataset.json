@@ -1236,6 +1236,628 @@
           "text": "If no recognizable key was found, `apikeys.md` is left untouched so nothing is lost."
         }
       ]
+    },
+    {
+      "id": "eval_53",
+      "query": "Does Stage 2 graph traversal pivot from the Stage 1 candidates' entities or from the entities of the final chunks?",
+      "slice": "multihop",
+      "case": "conflicting_sources",
+      "expected_route": "graph_relational",
+      "reference_answer": "The documents disagree, and the code follows the architecture doc: Stage 2 takes its entity anchors only from the final chunks, the ones that survived reranking and the guardrail, so relations reachable only from rejected candidates never reach the LLM. The storage-and-schema doc's statement that traversal pivots from Stage 1 entity anchors is out of date.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+          "text": "Multi-hop graph traversal pivots from Stage 1 entity anchors through `RELATION` edges:"
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates"
+        }
+      ],
+      "expected_entities": [
+        "RELATION"
+      ]
+    },
+    {
+      "id": "eval_54",
+      "query": "The benchmark breakdown says Stage 2 walks CONTAINS edges from the Stage 1 chunks. Is that where traversal starts when a user's question is answered?",
+      "slice": "multihop",
+      "case": "conflicting_sources",
+      "expected_route": "hybrid",
+      "reference_answer": "No. The retrieval benchmark's Stage 2 row times a 2-hop traversal anchored on Stage 1 search hits, but in the query pipeline Stage 2 runs after Stage 3 reranking and the context guardrail and anchors only on the final chunks that survived both.",
+      "gold_passages": [
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "Runs after Stage 3 and the context guardrail."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates"
+        }
+      ],
+      "expected_entities": [
+        "CONTAINS"
+      ]
+    },
+    {
+      "id": "eval_55",
+      "query": "How much memory does a lattice-rag container need: about 1 GB, or at least 2 GB?",
+      "slice": "factoid",
+      "case": "conflicting_sources",
+      "expected_route": "vector_exact",
+      "reference_answer": "At least 2 GB. The performance doc's 1 GB container target conflicts with the deployment guide, which measured a peak working set of about 1.51 GB, dominated by the bge-reranker-v2-m3 cross-encoder, and requires at least 2 GB of RAM; the Cloud Run deploy script provisions 2 GiB per instance.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_0_zero_cost_production_deploym",
+          "text": "Required allocation: **$\\ge$ 2 GB RAM**"
+        },
+        {
+          "document_id": "doc_performance_benchmark_5_3_resource_memory_footprint",
+          "text": "| **Container Memory Target** | $1,024$ MB (1 GB) |"
+        }
+      ]
+    },
+    {
+      "id": "eval_56",
+      "query": "Is deleting a document with DELETE /api/v1/documents/{documentId} an admin-only operation?",
+      "slice": "factoid",
+      "case": "conflicting_sources",
+      "expected_route": "vector_exact",
+      "reference_answer": "Yes. The authentication section's list of admin-only endpoints omits it, but the endpoint table and the security doc both mark document delete as admin, and the documents controller is guarded by the admin key: it needs a matching X-Admin-Key header.",
+      "gold_passages": [
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "- **Admin-only endpoints**: `POST /api/v1/ingest`, `GET /api/v1/graph/subgraph`, `GET /api/v1/cache/stats`, `POST /api/v1/eval/jobs`, `GET /api/v1/eval/jobs/{jobId}` and `POST /api/v1/benchmark/run`."
+        },
+        {
+          "document_id": "doc_security_4_3_3_rfc_9457_error_shielding",
+          "text": "`POST /api/v1/ingest`, `DELETE /api/v1/documents/{documentId}`, `GET /api/v1/graph/subgraph`"
+        }
+      ]
+    },
+    {
+      "id": "eval_57",
+      "query": "How many iterations and warmup rounds does the retrieval benchmark run by default?",
+      "slice": "factoid",
+      "case": "conflicting_sources",
+      "expected_route": "vector_exact",
+      "reference_answer": "6 iterations after 2 warmup rounds. The REST endpoint runs a fixed suite of 6 iterations and 2 warmup, and the CLI defaults to --iterations 6 --warmup 2; the published matrix and CLI examples pass --iterations 5 --warmup 1 explicitly, which are not the defaults.",
+      "gold_passages": [
+        {
+          "document_id": "doc_performance_benchmark_8_5_3_automated_rest_api",
+          "text": "runs a fixed retrieval-only suite (6 iterations, 2 warmup)"
+        },
+        {
+          "document_id": "doc_performance_benchmark_2_2_empirical_benchmark_matrix",
+          "text": "captured with `lattice-rag benchmark --iterations 5 --warmup 1`"
+        }
+      ]
+    },
+    {
+      "id": "eval_58",
+      "query": "Does the graph traversal budget of 25 limit only the number of nodes visited?",
+      "slice": "factoid",
+      "case": "conflicting_sources",
+      "expected_route": "vector_exact",
+      "reference_answer": "No. Although the benchmark breakdown describes it as a budget of 25 nodes, the budget caps nodes and edges separately: reaching either 25 nodes or 25 edges ends the whole traversal, and an edge is kept only with both endpoints.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints."
+        },
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API."
+        }
+      ]
+    },
+    {
+      "id": "eval_59",
+      "query": "How many hops does Stage 2 traverse for a hybrid query?",
+      "slice": "factoid",
+      "case": "conflicting_sources",
+      "expected_route": "hybrid",
+      "reference_answer": "One hop. Only graph_relational queries are walked 2 hops; every other route, hybrid included, gets 1. The storage doc's '1 hop for factual queries, 2 for relational' and the benchmark's 2-hop row describe graph_relational, not hybrid.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`)"
+        },
+        {
+          "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+          "text": "max_hops=2,      # 1 hop for factual queries, 2 for relational"
+        }
+      ]
+    },
+    {
+      "id": "eval_60",
+      "query": "Pull together everything the documentation says about lattice-rag's memory footprint and which hosting tiers can run it.",
+      "slice": "long_context",
+      "case": "conflicting_sources",
+      "expected_route": "massive_context",
+      "reference_answer": "The deployment guide measured a peak working set of about 1.51 GB, with the bge-reranker-v2-m3 cross-encoder alone at about 1.17 GB, and requires at least 2 GB: 512 MB tiers such as Render Free, Koyeb Free or basic Hugging Face CPU Spaces crash with an out-of-memory kill during reranking. The performance doc's figures (about 420 MB warm, a 1 GB container target) conflict with that measurement. Cloud Run's free tier allows 2 or 4 GiB instances and the deploy script provisions 2 GiB; Oracle Cloud's free VM has 24 GB of RAM.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_0_zero_cost_production_deploym",
+          "text": "| **Total Peak Working Set** | **~1.51 GB** |"
+        },
+        {
+          "document_id": "doc_deployment_0_zero_cost_production_deploym",
+          "text": "Platforms offering only 512MB RAM (such as Render Free, Koyeb Free, or basic Hugging Face CPU Spaces) **will crash with an Out-Of-Memory (OOM) kill** when executing cross-encoder reranking."
+        },
+        {
+          "document_id": "doc_performance_benchmark_5_3_resource_memory_footprint",
+          "text": "| **RAM Footprint (Warm ML)** | $\\sim 420$ MB |"
+        },
+        {
+          "document_id": "doc_performance_benchmark_5_3_resource_memory_footprint",
+          "text": "| **Container Memory Target** | $1,024$ MB (1 GB) |"
+        },
+        {
+          "document_id": "doc_deployment_1_2_option_a_google_cloud_run_",
+          "text": "Configurable instance memory up to **2 GiB or 4 GiB**"
+        },
+        {
+          "document_id": "doc_deployment_4_4_option_c_oracle_cloud_infr",
+          "text": "- **24 GB RAM**"
+        }
+      ],
+      "expected_entities": [
+        "Cloud Run",
+        "Oracle Cloud"
+      ]
+    },
+    {
+      "id": "eval_61",
+      "query": "Explain everything the docs say about Stage 2 graph traversal: when it runs, where it starts, how far it walks and what bounds it.",
+      "slice": "long_context",
+      "case": "conflicting_sources",
+      "expected_route": "massive_context",
+      "reference_answer": "Stage 2 runs after Stage 3 reranking and the context guardrail. It starts from the entities of the final chunks only; the storage doc's Stage 1 anchors and the benchmark's Stage 1 chunks describe older or benchmark-only behaviour. It walks CONTAINS edges from those chunks to their entities, then RELATION edges for 1 hop, or 2 for graph_relational. The budget of 25 caps nodes and edges separately and reaching either ends the traversal. It is an in-process pointer walk through the LatticeDB transaction API, not a Cypher query.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "Runs after Stage 3 and the context guardrail."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates"
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "This is a pointer walk through the LatticeDB transaction API, not a Cypher query."
+        },
+        {
+          "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+          "text": "Multi-hop graph traversal pivots from Stage 1 entity anchors through `RELATION` edges:"
+        },
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API."
+        }
+      ],
+      "expected_entities": [
+        "RELATION",
+        "CONTAINS",
+        "LatticeDB"
+      ]
+    },
+    {
+      "id": "eval_62",
+      "query": "Which model does lattice-rag load by default?",
+      "slice": "multihop",
+      "case": "ambiguity",
+      "expected_route": "hybrid",
+      "reference_answer": "It depends on the job, since three local models are loaded: the dense embedder BAAI/bge-small-en-v1.5 (384 dimensions), the BAAI/bge-reranker-v2-m3 cross-encoder in INT8 ONNX for reranking, and fastino/GLiNER2.5-Decide for entity extraction, falling back to urchade/gliner_small-v2.1.",
+      "gold_passages": [
+        {
+          "document_id": "doc_fastembed_reranking",
+          "text": "The default dense model is BAAI/bge-small-en-v1.5"
+        },
+        {
+          "document_id": "doc_fastembed_reranking",
+          "text": "the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format"
+        },
+        {
+          "document_id": "doc_gliner_extraction",
+          "text": "By default, the system loads fastino/GLiNER2.5-Decide as an efficient in-process extractor and falls back to urchade/gliner_small-v2.1 when that model is unavailable."
+        }
+      ],
+      "expected_entities": [
+        "BAAI/bge-small-en-v1.5",
+        "BAAI/bge-reranker-v2-m3",
+        "fastino/GLiNER2.5-Decide"
+      ]
+    },
+    {
+      "id": "eval_63",
+      "query": "What happens when the key is missing?",
+      "slice": "multihop",
+      "case": "ambiguity",
+      "expected_route": "hybrid",
+      "reference_answer": "It depends on which key. A request to an admin endpoint without an X-Admin-Key header gets 401; if ADMIN_API_KEY is not set on the server, the admin endpoints are disabled and reject every request. Without TYPESAFE_API_KEY the server runs in mock-key mode, where the Jev router and guardrail are not called. The Cloud Run deploy script refuses to run until all four keys are in Secret Manager.",
+      "gold_passages": [
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled."
+        },
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "In mock-key mode the router and guardrail are not called at all."
+        },
+        {
+          "document_id": "doc_deployment_2_deployment_steps",
+          "text": "The deploy script refuses to run until all four exist"
+        }
+      ]
+    },
+    {
+      "id": "eval_64",
+      "query": "What threshold decides whether something is kept?",
+      "slice": "multihop",
+      "case": "ambiguity",
+      "expected_route": "hybrid",
+      "reference_answer": "There are two thresholds. The Jev Noul guardrail keeps a retrieved chunk only if its relevance probability is at least 0.50. The Tier 1 semantic cache considers a cached answer only at cosine similarity of 0.90 or more, and Noul must then confirm semantic equivalence before it is served.",
+      "gold_passages": [
+        {
+          "document_id": "doc_typesafe_system_one",
+          "text": "pruning tangential passages with relevance probability below 0.50"
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "If cosine similarity $\\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence before the cached answer is returned."
+        }
+      ],
+      "expected_entities": [
+        "Noul"
+      ]
+    },
+    {
+      "id": "eval_65",
+      "query": "What is Tier 2?",
+      "slice": "multihop",
+      "case": "ambiguity",
+      "expected_route": "hybrid",
+      "reference_answer": "The term is used two ways. In the generation cascade, Tier 2 is the Groq circuit breaker with the Gemini fallback (fail_max 3, reset after 30 s); CacheStatsResponse's tier2CircuitStatus reports that breaker. Its tier2CachedQueries, however, counts the seeded Redis FAQ entries, which the architecture calls Tier 3.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "The breaker records every Groq outcome from both the buffered and streaming paths (`fail_max=3`, `reset_timeout=30s`)."
+        },
+        {
+          "document_id": "doc_api_reference_6_3_5_cachestatsresponse_healt",
+          "text": "tier2CircuitStatus: \"closed\" | \"open\" | \"half-open\";  // Groq circuit breaker"
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "If both LLM providers fail, the system returns the closest pre-computed answer from the Redis hash (`cache:fallback:queries`, seeded from `fallback_queries.json`)."
+        }
+      ],
+      "expected_entities": [
+        "Groq",
+        "Gemini",
+        "Redis"
+      ]
+    },
+    {
+      "id": "eval_66",
+      "query": "What does a 429 response mean?",
+      "slice": "factoid",
+      "case": "ambiguity",
+      "expected_route": "vector_exact",
+      "reference_answer": "Either of two limits was hit. On the query endpoints it means the client exceeded the per-client rate limit (QUERY_RATE_LIMIT_PER_MINUTE, default 60). On the admin endpoints it means the client sent 5 wrong admin keys within 5 minutes and is locked out for the rest of that window.",
+      "gold_passages": [
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "**Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded."
+        },
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "After 5 wrong keys within 5 minutes a client gets `429` for the rest of that window."
+        }
+      ]
+    },
+    {
+      "id": "eval_67",
+      "query": "What value of k does retrieval use?",
+      "slice": "factoid",
+      "case": "ambiguity",
+      "expected_route": "vector_exact",
+      "reference_answer": "Two different k's apply. Reciprocal Rank Fusion uses the constant k = 60. The number of chunks kept after reranking, top_k, is 5, or 12 for massive_context, with 3 extra Stage 1 candidates of headroom.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_4_2_4_reciprocal_rank_fusion_r",
+          "text": "Vector similarity and BM25 search results are fused using standard RRF ($k=60$):"
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "keeps the top `top_k` (5, or 12 for `massive_context`)"
+        }
+      ]
+    },
+    {
+      "id": "eval_68",
+      "query": "How long does a blocked client have to wait before trying again?",
+      "slice": "factoid",
+      "case": "ambiguity",
+      "expected_route": "vector_exact",
+      "reference_answer": "It depends on the block. A client locked out of the admin endpoints after 5 wrong keys waits out the rest of the 5-minute window, during which even the right key is refused. A client over the query rate limit is throttled per minute (QUERY_RATE_LIMIT_PER_MINUTE, default 60).",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_5_client_identity_behind_rever",
+          "text": "A client that sends a wrong `X-Admin-Key` 5 times within 5 minutes gets `429` from the admin endpoints for the rest of that window, even with the right key."
+        },
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "**Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded."
+        }
+      ]
+    },
+    {
+      "id": "eval_69",
+      "query": "How fast is reranking?",
+      "slice": "long_context",
+      "case": "ambiguity",
+      "expected_route": "massive_context",
+      "reference_answer": "It depends on what is measured. A single cross-encoder inference runs in under 100 ms on CPU, and the cost grows roughly linearly at about 100 ms per candidate. The Stage 3 benchmark row has a p95 of 293.7 ms, and the retrieval-only end-to-end p95, dominated by reranking 8 candidates for top_k=5, is 812.6 ms.",
+      "gold_passages": [
+        {
+          "document_id": "doc_fastembed_reranking",
+          "text": "executes inference in under 100 milliseconds on CPU via dynamic token batch padding"
+        },
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Cost grows roughly linearly at about 100 ms per candidate on this CPU"
+        },
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Stage 3: Cross-Encoder Reranking ($p95 = 293.7$ms for 3 chunks)"
+        },
+        {
+          "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+          "text": "Stage 1 + Stage 2 + Stage 3 for `top_k=5` (8 reranked candidates), without routing, guardrail or generation."
+        }
+      ],
+      "expected_entities": [
+        "bge-reranker-v2-m3"
+      ]
+    },
+    {
+      "id": "eval_70",
+      "query": "Give me an overview of every limit the system enforces.",
+      "slice": "long_context",
+      "case": "ambiguity",
+      "expected_route": "massive_context",
+      "reference_answer": "Input bounds: queries 1-2,000 characters, documents up to 200,000 characters, documentId matching [A-Za-z0-9_.-]{1,128}, request bodies 1 MB and the graph limit 1-500 (default 50). Rate limits: query endpoints default to 60 requests per minute per client, and 5 wrong admin keys within 5 minutes lock a client out with 429. Retrieval: graph traversal stops at a budget of 25 nodes or edges. Eval jobs: one runs at a time and only the 20 most recent are kept.",
+      "gold_passages": [
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "`query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB."
+        },
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "**Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded."
+        },
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "After 5 wrong keys within 5 minutes a client gets `429` for the rest of that window."
+        },
+        {
+          "document_id": "doc_api_reference_0_api_dto_contract_reference",
+          "text": "query `limit` (1–500, default 50)"
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "The budget (25) caps nodes and edges separately"
+        },
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "The 20 most recent jobs are kept in memory and are lost on restart."
+        }
+      ]
+    },
+    {
+      "id": "eval_71",
+      "query": "What are all the fallbacks?",
+      "slice": "long_context",
+      "case": "ambiguity",
+      "expected_route": "massive_context",
+      "reference_answer": "Routing falls back to hybrid when Jev cannot route, and the answer is Unverified. If the Noul guardrail cannot run, candidates pass through unchecked, also Unverified. Generation cascades from Groq to Gemini once the circuit breaker opens after 3 consecutive failures, and to the closest seeded answer in the Redis FAQ when both providers fail; massive_context tries Gemini first. Entity extraction falls back from fastino/GLiNER2.5-Decide to urchade/gliner_small-v2.1.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "the same applies when routing falls back to `hybrid`"
+        },
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "If Noul itself cannot run, the candidates pass through unchecked"
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "After 3 consecutive failures the circuit opens and Groq is skipped in favour of **Gemini** (`GEMINI_MODEL`) until the reset timeout lets a probe through."
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "If both LLM providers fail, the system returns the closest pre-computed answer from the Redis hash"
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "`massive_context` reverses the provider order: Gemini first"
+        },
+        {
+          "document_id": "doc_gliner_extraction",
+          "text": "falls back to urchade/gliner_small-v2.1 when that model is unavailable"
+        }
+      ],
+      "expected_entities": [
+        "Groq",
+        "Gemini",
+        "Noul"
+      ]
+    },
+    {
+      "id": "eval_72",
+      "query": "How fast is lattice-rag?",
+      "slice": "long_context",
+      "case": "ambiguity",
+      "expected_route": "massive_context",
+      "reference_answer": "It depends on the path. An exact Tier 1 cache hit has a p95 of 0.03 ms. Retrieval alone (Stage 1, 2 and 3, no routing, guardrail or LLM) has a p95 of 812.6 ms against a 1,000 ms SLA, dominated by reranking. Jev Choice routing takes 70 to 500 ms and the guardrail and LLM add network-bound latency on top; a full hybrid query on Cloud Run takes about 800 ms.",
+      "gold_passages": [
+        {
+          "document_id": "doc_performance_benchmark_1_dual_sla_production_enforcem",
+          "text": "| **Tier 1 Cache Latency SLA** | Exact-hit $p95 < 25$ms | **0.03ms** |"
+        },
+        {
+          "document_id": "doc_performance_benchmark_1_dual_sla_production_enforcem",
+          "text": "| **Sub-Second Retrieval SLA** | Retrieval-only E2E $p95 < 1,000$ms | **812.6ms** |"
+        },
+        {
+          "document_id": "doc_typesafe_system_one",
+          "text": "classifying incoming prompts in 70 to 500 milliseconds"
+        },
+        {
+          "document_id": "doc_deployment_1_2_option_a_google_cloud_run_",
+          "text": "An active GraphRAG query with hybrid retrieval, graph traversal, cross-encoder reranking, and Jev guardrail finishes in ~800ms"
+        }
+      ]
+    },
+    {
+      "id": "eval_73",
+      "query": "Where is the database kept?",
+      "slice": "factoid",
+      "case": "ambiguity",
+      "expected_route": "vector_exact",
+      "reference_answer": "Locally it is the single LatticeDB file data/lattice_rag.db. On the deployed Cloud Run instance that file lives on the instance's ephemeral disk, pre-seeded into the image, so documents ingested at runtime are lost on restart or redeploy.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_0_system_architecture_technica",
+          "text": "reside inside a **single local file** (`data/lattice_rag.db`) managed by **LatticeDB**"
+        },
+        {
+          "document_id": "doc_deployment_2_deployment_steps",
+          "text": "the LatticeDB file lives on the instance's ephemeral disk: documents ingested at runtime are lost on restart or redeploy"
+        }
+      ]
+    },
+    {
+      "id": "eval_74",
+      "query": "What M and ef_construction parameters does LatticeDB's HNSW vector index use?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It describes HNSW search over 384-dimensional chunk vectors but gives no index construction parameters.",
+      "gold_passages": [],
+      "expected_entities": [
+        "LatticeDB",
+        "HNSW"
+      ]
+    },
+    {
+      "id": "eval_75",
+      "query": "How many parameters does the BAAI/bge-small-en-v1.5 embedding model have?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It gives a parameter count only for the bge-reranker-v2-m3 cross-encoder (568 million), not for the embedder.",
+      "gold_passages": [],
+      "expected_entities": [
+        "BAAI/bge-small-en-v1.5"
+      ]
+    },
+    {
+      "id": "eval_76",
+      "query": "Which Groq model does the primary provider call by default?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It names only the GROQ_MODEL setting, not its default value.",
+      "gold_passages": [],
+      "expected_entities": [
+        "GroqCloud"
+      ]
+    },
+    {
+      "id": "eval_77",
+      "query": "How much does Cloud Run charge per GiB-second once the Always Free tier is used up?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It lists only the free-tier allowances, not paid pricing.",
+      "gold_passages": [],
+      "expected_entities": [
+        "Cloud Run"
+      ]
+    },
+    {
+      "id": "eval_78",
+      "query": "After how many minutes does an Eval Job handle expire?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It says only that the 20 most recent jobs are kept in memory and lost on restart, with no time-based expiry.",
+      "gold_passages": []
+    },
+    {
+      "id": "eval_79",
+      "query": "What minimum confidence score must a GLiNER prediction reach to be kept as an entity?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It lists the entity labels GLiNER extracts but no confidence threshold.",
+      "gold_passages": [],
+      "expected_entities": [
+        "GLiNER"
+      ]
+    },
+    {
+      "id": "eval_80",
+      "query": "How many characters long is each Chunk, and how much do neighbouring Chunks overlap?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It describes Chunk properties and positions but not the chunk size or overlap.",
+      "gold_passages": []
+    },
+    {
+      "id": "eval_81",
+      "query": "How similar must a question be to a seeded FAQ question before the Redis fallback returns its answer?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It says only that the closest seeded answer is returned and marked degraded.",
+      "gold_passages": [],
+      "expected_entities": [
+        "Redis"
+      ]
+    },
+    {
+      "id": "eval_82",
+      "query": "What is the p95 latency of GLiNER entity extraction during ingestion?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. Its benchmarks cover the cache and retrieval stages only.",
+      "gold_passages": [],
+      "expected_entities": [
+        "GLiNER"
+      ]
+    },
+    {
+      "id": "eval_83",
+      "query": "How many answers can the Tier 1 semantic cache hold before it evicts old ones?",
+      "slice": "unanswerable",
+      "case": "unanswerable_near_miss",
+      "expected_route": "vector_exact",
+      "reference_answer": "The knowledge base does not contain this information. It describes the cosine 0.90 lookup and what is cached, but no capacity.",
+      "gold_passages": []
     }
   ]
 }
