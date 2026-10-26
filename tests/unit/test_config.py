@@ -79,3 +79,22 @@ def test_guardrail_skip_rerank_score_empty_means_off(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("GUARDRAIL_SKIP_RERANK_SCORE", "")
 
     assert load_config().guardrail_skip_rerank_score is None
+
+
+def test_eval_degraded_retry_delay_defaults_to_five_seconds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("EVAL_DEGRADED_RETRY_DELAY", raising=False)
+
+    assert load_config().eval_degraded_retry_delay == 5.0
+
+
+def test_eval_degraded_retry_delay_reads_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("EVAL_DEGRADED_RETRY_DELAY", "12.5")
+
+    assert load_config().eval_degraded_retry_delay == 12.5
+
+
+def test_eval_degraded_retry_delay_rejects_negative(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("EVAL_DEGRADED_RETRY_DELAY", "-1")
+
+    with pytest.raises(ValueError, match="EVAL_DEGRADED_RETRY_DELAY"):
+        load_config()

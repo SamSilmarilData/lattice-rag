@@ -156,3 +156,19 @@ def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
     assert result.exit_code != 0
     assert "at least two" in result.output
     assert json.loads(baseline.read_text()) == _BASELINE
+
+
+def test_eval_passes_configured_degraded_retry_delay(monkeypatch, mocked_live_eval):
+    captured: dict = {}
+
+    def _runner(**kwargs):
+        captured.update(kwargs)
+        return mocked_live_eval
+
+    monkeypatch.setattr("lattice_rag.eval.EvalRunner", _runner)
+    cli._build_harness.return_value["config"].eval_degraded_retry_delay = 9.0
+
+    result = CliRunner().invoke(cli.main, ["eval"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["degraded_retry_delay"] == 9.0

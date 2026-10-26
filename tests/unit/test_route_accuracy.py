@@ -89,6 +89,8 @@ class FakeOrchestrator:
             filtered_chunks=[{"text": "c"}],
             route="hybrid" if route == "fallback" else route,
             route_verified=verified,
+            degraded=False,
+            provider="groq",
         )
 
 

@@ -50,9 +50,21 @@ interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
 }
 
+// Seed rows were answered by the primary provider on a verified route (unknown here)
+// unless they say otherwise
+type SeedDefaults = 'provider' | 'chosenRoute' | 'routeVerified';
+type SeedRow = Omit<EvalQueryResult, SeedDefaults> & Partial<Pick<EvalQueryResult, SeedDefaults>>;
+
+const seedRow = (row: SeedRow): EvalQueryResult => ({
+  provider: 'groq',
+  chosenRoute: null,
+  routeVerified: true,
+  ...row,
+});
+
 // Initial golden evaluation dataset populated from eval_dataset.json & baseline
 const INITIAL_EVAL_DATA: EvalQueryResult[] = [
-  {
+  seedRow({
     query: 'How does LatticeDB combine HNSW vector similarity with BM25 text search in a single binary?',
     faithfulness: 0.96,
     contextPrecision: 0.94,
@@ -60,10 +72,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'What is the role of FastEmbed and what dense embedding model does it use by default?',
     faithfulness: 0.98,
     contextPrecision: 0.95,
@@ -71,10 +81,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does GLiNER extract entities and what default entity types are recognized?',
     faithfulness: 0.92,
     contextPrecision: 0.89,
@@ -82,10 +90,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'Explain the three TypeSafe AI Jev primitives used in the architecture and their specific jobs.',
     faithfulness: 0.97,
     contextPrecision: 0.96,
@@ -93,10 +99,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'Why is Litestar paired with the Granian Rust ASGI server, and what JSON library is used?',
     faithfulness: 0.95,
     contextPrecision: 0.93,
@@ -104,10 +108,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How are relation triples extracted from text and mapped into LatticeDB property-graph edges?',
     faithfulness: 0.91,
     contextPrecision: 0.88,
@@ -115,10 +117,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does the cross-encoder reranker incorporate graph structure during scoring?',
     faithfulness: 0.94,
     contextPrecision: 0.91,
@@ -126,10 +126,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does the front-door decision router triage queries and what routes does it choose between?',
     faithfulness: 0.96,
     contextPrecision: 0.95,
@@ -137,10 +135,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'What role does the Jev Noul boolean primitive play in context guardrailing before synthesis?',
     faithfulness: 0.93,
     contextPrecision: 0.90,
@@ -148,10 +144,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'Compare the caching tiers in the architecture: Tier 1 vs Tier 2 fallback.',
     faithfulness: 0.96,
     contextPrecision: 0.94,
@@ -159,10 +153,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'Explain the end-to-end flow of a multi-hop graph_relational query through the pipeline.',
     faithfulness: 0.93,
     contextPrecision: 0.92,
@@ -170,10 +162,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does the circuit breaker protect external LLM APIs and when does it trip?',
     faithfulness: 0.89,
     contextPrecision: 0.86,
@@ -181,10 +171,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'What fallback synthesis provider is used if GroqCloud encounters rate limits or errors?',
     faithfulness: 0.97,
     contextPrecision: 0.94,
@@ -192,10 +180,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does SSE streaming work in POST /api/v1/query/stream and what events are emitted?',
     faithfulness: 0.95,
     contextPrecision: 0.92,
@@ -203,10 +189,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'What security precautions are implemented to prevent API keys from leaking in logs or error traces?',
     faithfulness: 0.98,
     contextPrecision: 0.97,
@@ -214,10 +198,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'Hello! Can you help me understand what you are capable of?',
     faithfulness: 1.00,
     contextPrecision: 0.90,
@@ -225,10 +207,9 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+    provider: null, // chitchat is answered without an LLM
+  }),
+  seedRow({
     query: 'Thanks for your assistance, that was very helpful!',
     faithfulness: 1.00,
     contextPrecision: 0.90,
@@ -236,10 +217,9 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+    provider: null, // chitchat is answered without an LLM
+  }),
+  seedRow({
     query: 'Synthesize all findings across LatticeDB, FastEmbed, and GLiNER for in-process RAG.',
     faithfulness: 0.92,
     contextPrecision: 0.90,
@@ -247,10 +227,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'How does Reciprocal Rank Fusion (RRF) combine dense vector and BM25 sparse rankings?',
     faithfulness: 0.95,
     contextPrecision: 0.93,
@@ -258,10 +236,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
-  {
+  }),
+  seedRow({
     query: 'What happens when context guardrail rejects all retrieved candidate chunks?',
     faithfulness: 0.90,
     contextPrecision: 0.87,
@@ -269,9 +245,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
-    chosenRoute: null,
-    routeVerified: true,
-  },
+  }),
 ];
 
 // Advisory: a missed floor is shown, never treated as a gate failure

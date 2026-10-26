@@ -123,6 +123,7 @@ class RAGOrchestrator:
             route_verified=done["route_verified"],
             answer=done["answer"],
             degraded=done["degraded"],
+            provider=done["provider"],
             timings=done["timings"],
             total_latency_ms=done["latency_ms"],
         )
@@ -169,6 +170,7 @@ class RAGOrchestrator:
                 sources=cached.get("sources", []),
                 graph_path=cached.get("graph_path"),
                 degraded=False,
+                provider=None,
                 low_grounding=False,
                 unverified=False,
                 route_verified=True,  # only verified answers are stored in Tier 1
@@ -195,6 +197,7 @@ class RAGOrchestrator:
                 sources=[],
                 graph_path=None,
                 degraded=False,
+                provider=None,
                 low_grounding=False,
                 unverified=False,
                 route_verified=decision.verified,
@@ -253,6 +256,7 @@ class RAGOrchestrator:
             sources=chunks,
             graph_path=graph_dict,
             degraded=outcome.degraded,
+            provider=outcome.provider,
             low_grounding=retrieved.low_grounding,
             unverified=unverified,
             route_verified=decision.verified,

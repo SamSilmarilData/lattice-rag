@@ -169,6 +169,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         evaluator=evaluator,
         embedding_service=embedding_service,
         extractor=extractor,
+        degraded_retry_delay=config.eval_degraded_retry_delay,
     )
     # HTTP eval runs go through the job manager: one at a time, polled by handle
     eval_jobs = EvalJobManager(eval_runner)

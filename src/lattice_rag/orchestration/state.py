@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from lattice_rag.api.dtos import GenerationProvider
+
 
 @dataclass
 class PipelineState:
@@ -34,6 +36,8 @@ class PipelineState:
     # --- Generation ---
     answer: str = ""
     degraded: bool = False
+    # Provider that generated the answer; None when nothing was generated (chitchat, cache hit)
+    provider: GenerationProvider | None = None
 
     # --- Telemetry ---
     timings: list[dict[str, Any]] = field(default_factory=list)

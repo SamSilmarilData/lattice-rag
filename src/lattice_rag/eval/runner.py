@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -44,12 +45,16 @@ class EvalRunner:
         evaluator: JevEvaluator,
         embedding_service: EmbeddingService | None = None,
         extractor: EntityExtractor | None = None,
+        degraded_retry_delay: float = 5.0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Initialize EvalRunner with orchestrator, Jev evaluator, and optional support services."""
         self.orchestrator = orchestrator
         self.evaluator = evaluator
         self.embedding_service = embedding_service
         self.extractor = extractor
+        self.degraded_retry_delay = degraded_retry_delay
+        self._sleep = sleep
 
     async def run_evaluation(
         self,
@@ -136,6 +141,13 @@ class EvalRunner:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
+                        if pipeline_state.degraded:
+                            # One retry after a pause; a still non-primary answer fails the query.
+                            # The pause keeps the semaphore slot on purpose: releasing it would
+                            # let the next query call Groq inside the same rate-limit window
+                            # the pause is waiting out.
+                            await self._sleep(self.degraded_retry_delay)
+                            pipeline_state = await active_orchestrator.run(query, use_cache=False)
                     except Exception as e:
                         # A pipeline error fails the query; it is never judged as an answer
                         logger.error(
@@ -145,10 +157,23 @@ class EvalRunner:
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
-                    routing = {
-                        "chosen_route": cast("Route", pipeline_state.route),
-                        "route_verified": pipeline_state.route_verified,
-                    }
+                    chosen_route = cast("Route", pipeline_state.route)
+                    route_verified = pipeline_state.route_verified
+                    provider = pipeline_state.provider
+                    if pipeline_state.degraded:
+                        logger.error(
+                            "eval_query_provider_degraded",
+                            **query_fingerprint(query),
+                            provider=provider,
+                        )
+                        return EvalQueryResult(
+                            query=query,
+                            passed=False,
+                            error=EvalQueryError.PROVIDER_DEGRADED,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
+                        )
 
                     try:
                         judged = await self.evaluator.evaluate_query(
@@ -158,6 +183,13 @@ class EvalRunner:
                             ground_truth=item.reference_answer,
                             metrics=metrics_for_slice(item.slice),
                             thresholds=pass_thresholds,
+                            graph_context=pipeline_state.graph_context,
+                        )
+                        return msgspec.structs.replace(
+                            judged,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
                         )
                     except Exception as e:
                         # Fail the query rather than aborting the run
@@ -166,8 +198,14 @@ class EvalRunner:
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        judged = EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
-                    return msgspec.structs.replace(judged, **routing)
+                        return EvalQueryResult(
+                            query=query,
+                            passed=False,
+                            error=JUDGE_ERROR,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
+                        )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
@@ -203,14 +241,15 @@ class EvalRunner:
             "",
             "## Query Breakdown",
             "",
-            "| Query | Faithfulness | Precision | Relevance | Correctness | Passed |",
-            "| :--- | :---: | :---: | :---: | :---: | :---: |",
+            "| Query | Provider | Faithfulness | Precision | Relevance | Correctness | Passed |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for res in report.results:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
             status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
+                f"| {q_short} | {res.provider or '-'} "
+                f"| {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
                 f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
         return "\n".join(lines)

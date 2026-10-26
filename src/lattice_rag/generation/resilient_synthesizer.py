@@ -11,6 +11,7 @@ from typing import Any, NamedTuple
 
 import pybreaker
 
+from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.security import sanitize_error_detail
 
@@ -32,7 +33,7 @@ class SynthesisResult:
 
     answer: str
     degraded: bool
-    provider: str
+    provider: GenerationProvider
     truncated: bool = False
 
 
@@ -50,7 +51,7 @@ class StreamOutcome:
     Passed in by the caller so concurrent streams never share state.
     """
 
-    provider: str = ""
+    provider: GenerationProvider | None = None
     degraded: bool = False
     error: str | None = None
     truncated: bool = False
@@ -165,7 +166,7 @@ class ResilientSynthesizer:
                 return SynthesisResult(
                     answer=answer,
                     degraded=name != policy.primary,
-                    provider=name,
+                    provider=GenerationProvider(name),
                     truncated=attempt.truncated,
                 )
             except Exception as e:
@@ -211,7 +212,7 @@ class ResilientSynthesizer:
                         yield tok
                 if attempt.truncated:
                     self._log_truncated(name, route)
-                outcome.provider = name
+                outcome.provider = GenerationProvider(name)
                 outcome.degraded = name != policy.primary
                 outcome.truncated = attempt.truncated
                 return
@@ -219,7 +220,7 @@ class ResilientSynthesizer:
                 detail = sanitize_error_detail(str(e))
                 if emitted:
                     logger.warning("%s stream failed mid-answer: %s", name, detail)
-                    outcome.provider = name
+                    outcome.provider = GenerationProvider(name)
                     outcome.degraded = True
                     outcome.error = "Generation was interrupted before the answer completed."
                     return
@@ -235,7 +236,9 @@ class ResilientSynthesizer:
         return SynthesisResult(
             answer=answer,
             degraded=True,
-            provider="redis_faq" if self.fallback_cache else "offline",
+            provider=(
+                GenerationProvider.REDIS_FAQ if self.fallback_cache else GenerationProvider.OFFLINE
+            ),
         )
 
     async def _get_offline_fallback(self, query: str) -> str:

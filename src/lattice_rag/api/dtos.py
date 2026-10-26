@@ -220,11 +220,21 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
     tier2_cached_queries: int
 
 
+class GenerationProvider(StrEnum):
+    """Who generated an answer: Groq, Gemini, the Tier 2 FAQ, or the offline message."""
+
+    GROQ = "groq"
+    GEMINI = "gemini"
+    REDIS_FAQ = "redis_faq"
+    OFFLINE = "offline"
+
+
 class EvalQueryError(StrEnum):
     """Why a Gold Set query failed; a fixed code, never exception text."""
 
     PIPELINE_ERROR = "pipeline_error"
     JUDGE_ERROR = "judge_error"
+    PROVIDER_DEGRADED = "provider_degraded"
 
 
 class EvalQueryResult(msgspec.Struct, rename="camel"):
@@ -245,6 +255,10 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     chosen_route: Route | None = None
     # False when chosen_route is the System 1 fallback because Jev could not route
     route_verified: bool = True
+
+    # Provider that generated the answer; None when nothing was generated
+    # (pipeline error, chitchat, cache hit)
+    provider: GenerationProvider | None = None
 
 
 class Misroute(msgspec.Struct, rename="camel"):

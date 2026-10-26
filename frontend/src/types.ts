@@ -92,7 +92,9 @@ export interface HealthResponse {
 
 // A metric is null when it was not judged: it does not apply to the query's
 // Slice, or the query failed (error is set) and was never sent to the judge.
-export type EvalQueryError = 'pipeline_error' | 'judge_error';
+export type EvalQueryError = 'pipeline_error' | 'judge_error' | 'provider_degraded';
+
+export type GenerationProvider = 'groq' | 'gemini' | 'redis_faq' | 'offline';
 
 // Mirror the Route and Slice Literals in src/lattice_rag/vocabulary.py
 export type Route = 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context';
@@ -109,6 +111,9 @@ export interface EvalQueryResult {
   // null when the pipeline failed; routeVerified is false for the System 1 fallback route
   chosenRoute: Route | null;
   routeVerified: boolean;
+  // Provider that generated the answer; null when nothing was generated
+  // (pipeline error, chitchat, cache hit)
+  provider: GenerationProvider | null;
 }
 
 // A query whose chosen Route differs from its Expected Route

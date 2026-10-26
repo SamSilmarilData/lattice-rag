@@ -42,10 +42,11 @@ METRICS: Final = ("faithfulness", "context_precision", "answer_relevance", "answ
 # there is no evidence to retrieve. Chitchat never retrieves, so it is judged on the
 # reply alone; an unanswerable query has no Gold Passages, so context precision has
 # no target, but the answer must still be faithful (no invented facts) and correct
-# (a refusal that matches the reference answer).
+# (a refusal that matches the reference answer). A correct refusal does not address the
+# question asked, so answer relevance would fail it; it is reported as not judged (n/a).
 _SLICE_METRICS: Final[dict[str, tuple[str, ...]]] = {
     "chitchat": ("answer_relevance", "answer_correctness"),
-    "unanswerable": ("faithfulness", "answer_relevance", "answer_correctness"),
+    "unanswerable": ("faithfulness", "answer_correctness"),
 }
 
 

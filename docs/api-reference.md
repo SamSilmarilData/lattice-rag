@@ -152,7 +152,7 @@ interface EvalJobResponse {
 
 // Each metric is a Jev Score normalized to [0.0, 1.0], or null when it was not judged:
 // it does not apply to the query's Slice (chitchat: relevance + correctness only;
-// unanswerable: no context precision), or the query failed and was never judged.
+// unanswerable: faithfulness + correctness only), or the query failed and was never judged.
 interface EvalQueryResult {
   query: string;                     // Evaluated benchmark query
   passed: boolean;                   // Judged, and every judged metric >= its pass threshold
@@ -160,7 +160,12 @@ interface EvalQueryResult {
   contextPrecision: number | null;   // Retrieved context vs what the reference answer needs
   answerRelevance: number | null;    // Answer vs the query
   answerCorrectness: number | null;  // Answer vs the Gold Set reference answer
-  error: "pipeline_error" | "judge_error" | null;  // Set when the query failed; it is then not judged
+  // Set when the query failed; it is then not judged. provider_degraded: the answer still came
+  // from a non-primary provider after one retry
+  error: "pipeline_error" | "judge_error" | "provider_degraded" | null;
+  // Provider that generated the answer; null when nothing was generated
+  // (pipeline error, chitchat, cache hit)
+  provider: "groq" | "gemini" | "redis_faq" | "offline" | null;
   chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error
   routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)
 }

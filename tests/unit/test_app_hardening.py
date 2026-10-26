@@ -236,3 +236,10 @@ async def test_rerank_score_noul_skip_follows_the_setting(
 
     assert resp.status_code == 201
     assert jev_calls.await_count == expected_jev_calls
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_uses_configured_degraded_retry_delay(tmp_path):
+    app = create_app(_config(tmp_path, eval_degraded_retry_delay=9.0))
+    async with AsyncTestClient(app):
+        assert app.state.eval_runner.degraded_retry_delay == 9.0
