@@ -259,6 +259,9 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     # Provider that generated the answer; None when nothing was generated
     # (pipeline error, chitchat, cache hit)
     provider: GenerationProvider | None = None
+    # Graph Recall: share of the query's expected entities among the graph context's
+    # Entities. None when the query lists none or the pipeline failed. Never judged.
+    graph_recall: float | None = None
 
 
 class Misroute(msgspec.Struct, rename="camel"):
@@ -278,6 +281,9 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     Route (``None`` if none were scored). Scored means: outside the chitchat Slice (routed
     deterministically), the pipeline ran, and Jev chose the Route. Unverified fallback
     routes and pipeline errors are counted, not scored. Its floor is advisory only.
+    Graph Recall is the mean per-query Graph Recall over the ``graph_recall_scored``
+    queries that list expected entities and whose pipeline ran (``None`` if none). It is
+    unjudged and advisory: it never fails the gate.
     """
 
     total_queries: int
@@ -296,6 +302,9 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     route_accuracy_unverified: int = 0
     route_accuracy_errored: int = 0
     misroutes: list[Misroute] = []
+    graph_recall: float | None = None
+    graph_recall_by_slice: dict[str, float] = {}
+    graph_recall_scored: int = 0
 
 
 class EvalJobStatus(StrEnum):

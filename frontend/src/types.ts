@@ -114,6 +114,9 @@ export interface EvalQueryResult {
   // Provider that generated the answer; null when nothing was generated
   // (pipeline error, chitchat, cache hit)
   provider: GenerationProvider | null;
+  // Graph Recall: share of the query's expected entities among the graph context's Entities;
+  // null when the query lists none or the pipeline failed. Unjudged and advisory.
+  graphRecall: number | null;
 }
 
 // A query whose chosen Route differs from its Expected Route
@@ -128,6 +131,8 @@ export interface Misroute {
 // routeAccuracy is over routeAccuracyScored queries: outside the chitchat Slice, pipeline ran,
 // and Jev chose the Route. Unverified fallbacks and pipeline errors are counted, not scored.
 // Its floor is advisory and never fails the gate.
+// graphRecall is the mean per-query Graph Recall over graphRecallScored queries (those with
+// expected entities whose pipeline ran). Unjudged and advisory: it never fails the gate.
 export interface EvalRunResponse {
   totalQueries: number;
   passedGate: boolean;
@@ -145,6 +150,9 @@ export interface EvalRunResponse {
   routeAccuracyUnverified: number;
   routeAccuracyErrored: number;
   misroutes: Misroute[];
+  graphRecall: number | null;
+  graphRecallBySlice: Record<string, number>;
+  graphRecallScored: number;
 }
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';

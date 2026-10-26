@@ -50,15 +50,16 @@ interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
 }
 
-// Seed rows were answered by the primary provider on a verified route (unknown here)
-// unless they say otherwise
-type SeedDefaults = 'provider' | 'chosenRoute' | 'routeVerified';
+// Seed rows were answered by the primary provider on a verified route (unknown here),
+// with no Graph Recall measured, unless they say otherwise
+type SeedDefaults = 'provider' | 'chosenRoute' | 'routeVerified' | 'graphRecall';
 type SeedRow = Omit<EvalQueryResult, SeedDefaults> & Partial<Pick<EvalQueryResult, SeedDefaults>>;
 
 const seedRow = (row: SeedRow): EvalQueryResult => ({
   provider: 'groq',
   chosenRoute: null,
   routeVerified: true,
+  graphRecall: null,
   ...row,
 });
 
@@ -285,6 +286,19 @@ const RouteAccuracyPanel: React.FC<{ report: EvalRunResponse }> = ({ report }) =
           ))}
         </ul>
       )}
+      <div className="flex items-center justify-between">
+        <span className="font-semibold">
+          Graph Recall: {report.graphRecall === null ? 'n/a' : pct(report.graphRecall, 1)}
+          <span className="ml-1 font-normal text-gray-400">
+            over {report.graphRecallScored} with expected entities (advisory, unjudged)
+          </span>
+        </span>
+        <span className="text-gray-400">
+          {Object.entries(report.graphRecallBySlice)
+            .map(([name, rec]) => `${name} ${pct(rec)}`)
+            .join(' · ')}
+        </span>
+      </div>
     </div>
   );
 };

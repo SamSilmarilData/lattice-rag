@@ -153,3 +153,21 @@ def test_v1_dataset_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(GoldSetError, match="expected '3.0.0'"):
         load_gold_set(_write(tmp_path, data))
+
+
+def test_expected_entity_absent_from_the_corpus_is_rejected(tmp_path: Path) -> None:
+    data = _raw()
+    data["queries"][0]["expected_entities"] = ["Zyxquorp Engine"]
+
+    with pytest.raises(
+        GoldSetError, match="expected entity 'Zyxquorp Engine' is not in the corpus"
+    ):
+        load_gold_set(_write(tmp_path, data))
+
+
+def test_expected_entity_matches_the_corpus_ignoring_case(tmp_path: Path) -> None:
+    data = _raw()
+    word = data["corpus"][0]["text"].split()[0]
+    data["queries"][0]["expected_entities"] = [word.upper()]
+
+    load_gold_set(_write(tmp_path, data))
