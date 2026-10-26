@@ -111,6 +111,19 @@ async def test_massive_context_answer_budget_exceeds_default(entry_point):
 
 
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
+async def test_massive_context_groq_fallback_keeps_the_larger_budget(entry_point):
+    groq = _groq_client()
+    broken = MagicMock()
+    broken.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("down"))
+    broken.aio.models.generate_content_stream = MagicMock(side_effect=RuntimeError("down"))
+    orch = _orchestrator(
+        "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=broken)
+    )
+    await _ask(orch, entry_point)
+    assert _groq_budget(groq) == 1536
+
+
+@pytest.mark.parametrize("entry_point", ["run", "stream"])
 async def test_default_answer_budget_is_768(entry_point):
     groq = _groq_client()
     orch = _orchestrator(
