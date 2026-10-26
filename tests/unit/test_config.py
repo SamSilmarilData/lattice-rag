@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lattice_rag.config import AppConfig, load_config
+from lattice_rag.config import DEFAULT_RERANKER_ONNX_REVISION, AppConfig, load_config
 from lattice_rag.security import SecretStr
 
 
@@ -98,3 +98,13 @@ def test_eval_degraded_retry_delay_rejects_negative(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(ValueError, match="EVAL_DEGRADED_RETRY_DELAY"):
         load_config()
+
+
+def test_reranker_revision_is_pinned_unless_overridden(monkeypatch: pytest.MonkeyPatch):
+    """An unset or empty RERANKER_ONNX_REVISION uses the pinned commit, never 'latest'."""
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == (
+        DEFAULT_RERANKER_ONNX_REVISION
+    )
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "abc123")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == "abc123"

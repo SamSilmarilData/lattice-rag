@@ -121,6 +121,12 @@ jobs:
           # Model names and revisions live in config.py; fastembed's version is in pyproject.toml
           key: hermetic-models-${{ runner.os }}-${{ hashFiles('src/lattice_rag/config.py', 'pyproject.toml') }}
 
+      - name: Log reranker kernel class
+        # INT8 rerank scores differ by CPU kernel (AVX2 vs AVX-512 VNNI); see production-readiness.md
+        run: |
+          grep -m1 'model name' /proc/cpuinfo
+          if grep -qm1 avx512_vnni /proc/cpuinfo; then echo "kernel class: avx512_vnni"; else echo "kernel class: avx2"; fi
+
       - name: Run Hermetic Tier (Gold Set validation, recall & MRR per Slice)
         env:
           # Once the models are cached the run must not touch the network

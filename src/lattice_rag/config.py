@@ -12,6 +12,8 @@ load_dotenv()
 
 # Default answer budget (tokens) for Groq and Gemini; LLM_MAX_TOKENS overrides it.
 DEFAULT_LLM_MAX_TOKENS = 768
+# onnx-community/bge-reranker-v2-m3-ONNX at its 2025-09-01 commit
+DEFAULT_RERANKER_ONNX_REVISION = "6f5ff65298512715a1e669753bc754d2bc8f367b"
 
 
 @dataclass(frozen=True)
@@ -31,10 +33,10 @@ class AppConfig:
     port: int = 8000
     embed_model: str = "BAAI/bge-small-en-v1.5"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    # INT8 ONNX export used when reranker_model is bge-reranker-v2-m3. Set the revision to a
-    # commit hash to pin the downloaded weights.
+    # INT8 ONNX export used when reranker_model is bge-reranker-v2-m3, pinned to a commit so
+    # the downloaded weights cannot drift under the Hermetic Tier floors.
     reranker_onnx_repo: str = "onnx-community/bge-reranker-v2-m3-ONNX"
-    reranker_onnx_revision: str | None = None
+    reranker_onnx_revision: str | None = DEFAULT_RERANKER_ONNX_REVISION
     groq_model: str = "qwen/qwen3.8-27b"
     gemini_model: str = "gemini-3.8-flash"
     llm_max_tokens: int = DEFAULT_LLM_MAX_TOKENS
@@ -100,7 +102,9 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         reranker_onnx_repo=os.environ.get(
             "RERANKER_ONNX_REPO", "onnx-community/bge-reranker-v2-m3-ONNX"
         ),
-        reranker_onnx_revision=os.environ.get("RERANKER_ONNX_REVISION") or None,
+        reranker_onnx_revision=(
+            os.environ.get("RERANKER_ONNX_REVISION") or DEFAULT_RERANKER_ONNX_REVISION
+        ),
         groq_model=os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
         llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS))),

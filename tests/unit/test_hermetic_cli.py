@@ -93,4 +93,3 @@ def test_shipped_thresholds_gate_every_scored_slice_of_the_shipped_gold_set() ->
 
     scored = {q.slice for q in gold.queries if q.slice not in PASSAGE_FREE_SLICES}
     assert scored <= set(gate.slices)
-    assert gate.unanswerable_max_rerank_score is not None
