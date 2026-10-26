@@ -77,7 +77,7 @@ def _build_app(
     groq = MagicMock()
     groq.synthesize = AsyncMock(return_value="An answer.")
 
-    async def _stream(*_args: Any) -> Any:
+    async def _stream(*_args: Any, **_kw: Any) -> Any:
         yield "An answer."
 
     groq.stream = _stream

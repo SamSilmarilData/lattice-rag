@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from lattice_rag.caching.semantic_cache import CacheVerificationError
+from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
 
@@ -80,6 +81,7 @@ class RAGOrchestrator:
         gemini: GeminiFallback,
         chitchat: ChitchatHandler,
         embedding_service: Any,
+        answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
     ) -> None:
         self.router = router
         self.semantic_cache = semantic_cache
@@ -93,6 +95,7 @@ class RAGOrchestrator:
             groq=self.groq,
             gemini=self.gemini,
             fallback_cache=self.fallback_cache,
+            default_max_tokens=answer_max_tokens,
         )
 
     # ── Public Interfaces ────────────────────────────────────────────────

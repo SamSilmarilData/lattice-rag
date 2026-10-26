@@ -151,6 +151,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         gemini=gemini,
         chitchat=chitchat,
         embedding_service=embedding_service,
+        answer_max_tokens=config.llm_max_tokens,
     )
 
     # 8. Document Ingester (deep module)

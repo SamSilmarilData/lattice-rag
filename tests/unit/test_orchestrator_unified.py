@@ -38,7 +38,7 @@ def mock_orchestrator_components():
     mock_groq = MagicMock()
     mock_groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
 
-    async def _groq_stream(q, c, g):
+    async def _groq_stream(q, c, g, **_kw):
         for tok in ["Grounded", " ", "answer", " ", "from", " ", "Groq."]:
             yield tok
 
@@ -166,7 +166,7 @@ async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestr
     c = mock_orchestrator_components
     c["groq"].synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
 
-    async def _groq_stream_fail(q, ch, g):
+    async def _groq_stream_fail(q, ch, g, **_kw):
         raise RuntimeError("Groq 503")
         yield "never"  # pragma: no cover
 
@@ -394,14 +394,14 @@ def _scenario_components(scenario: str) -> dict:
     if scenario == "degraded":
         groq.synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
 
-        async def _groq_stream(q, ch, g):
+        async def _groq_stream(q, ch, g, **_kw):
             raise RuntimeError("Groq 503")
             yield "never"  # pragma: no cover
 
     else:
         groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
 
-        async def _groq_stream(q, ch, g):
+        async def _groq_stream(q, ch, g, **_kw):
             for tok in ["Grounded", " answer", " from", " Groq."]:
                 yield tok
 

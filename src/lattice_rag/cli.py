@@ -98,6 +98,7 @@ async def _build_harness() -> dict[str, Any]:
         gemini=gemini,
         chitchat=cc,
         embedding_service=embed_svc,
+        answer_max_tokens=config.llm_max_tokens,
     )
     return {
         "config": config,
