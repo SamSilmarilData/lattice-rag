@@ -6,7 +6,8 @@ runs through the retrieval pipeline exactly as the orchestrator would call it (s
 ``top_k`` per Route) but without the Jev guardrail, so no API key or network is needed.
 
 Scored Slices report recall of Gold Passages and MRR, overall and per Slice, against the
-floors in a versioned thresholds file (``hermetic_thresholds.json``). The passage-free
+floors in a versioned thresholds file (``hermetic_thresholds.json``). The same metrics are
+also reported per Case (direct, paraphrase, negation, ...), without floors. The passage-free
 Slices are not scored for recall; they are checked for their own behavior instead:
 
 - ``chitchat`` queries must take the deterministic chitchat path and get the
@@ -73,11 +74,21 @@ class SliceMetrics(msgspec.Struct, frozen=True):
     passed: bool
 
 
+class CaseMetrics(msgspec.Struct, frozen=True):
+    """Mean recall and MRR of the scored queries of one Case; reported, never gated."""
+
+    case: str
+    queries: int
+    recall: float
+    mrr: float
+
+
 class QueryOutcome(msgspec.Struct, frozen=True):
     """One Gold Set query's result. ``recall``/``reciprocal_rank`` are None when unscored."""
 
     id: str
     slice: str
+    case: str
     recall: float | None
     reciprocal_rank: float | None
     top_rerank_score: float | None
@@ -85,11 +96,16 @@ class QueryOutcome(msgspec.Struct, frozen=True):
 
 
 class HermeticReport(msgspec.Struct, frozen=True):
-    """Outcome of a Hermetic Tier run; ``failures`` lists every reason it did not pass."""
+    """Outcome of a Hermetic Tier run; ``failures`` lists every reason it did not pass.
+
+    ``cases`` breaks the scored queries down by Case (orthogonal to Slice) for diagnosis;
+    the gate's floors apply only to ``overall`` and ``slices``.
+    """
 
     passed: bool
     overall: SliceMetrics
     slices: list[SliceMetrics]
+    cases: list[CaseMetrics]
     queries: list[QueryOutcome]
     failures: list[str]
 
@@ -240,7 +256,7 @@ async def _evaluate_query(
             problems.append("not taken down the deterministic chitchat path")
         elif await chitchat.handle(q.query) != q.reference_answer:
             problems.append("chitchat reply differs from the reference answer")
-        return QueryOutcome(q.id, q.slice, None, None, None, problems)
+        return QueryOutcome(q.id, q.slice, q.case, None, None, None, problems)
 
     if chitchat_routed:
         problems.append(f"expected route {q.expected_route!r} but is short-circuited to chitchat")
@@ -261,7 +277,7 @@ async def _evaluate_query(
     top_score = max(scores) if scores else None
 
     if q.slice in PASSAGE_FREE_SLICES:
-        return QueryOutcome(q.id, q.slice, None, None, top_score, problems)
+        return QueryOutcome(q.id, q.slice, q.case, None, None, top_score, problems)
 
     spans = [corpus.chunk_spans.get(c.get("node_id", -1)) for c in chunks]
     passages = [corpus.passage_span(p.document_id, p.text) for p in q.gold_passages]
@@ -272,7 +288,7 @@ async def _evaluate_query(
         if span is not None and any(_overlaps(span, p) for p in passages):
             reciprocal_rank = 1.0 / rank
             break
-    return QueryOutcome(q.id, q.slice, recall, reciprocal_rank, top_score, problems)
+    return QueryOutcome(q.id, q.slice, q.case, recall, reciprocal_rank, top_score, problems)
 
 
 def _metrics(name: str, outcomes: list[QueryOutcome], floor: MetricFloor | None) -> SliceMetrics:
@@ -320,7 +336,12 @@ async def run_hermetic_tier(
                 f"{m.floor.recall:.4f} / {m.floor.mrr:.4f}"
             )
 
-    report = HermeticReport(not failures, overall, slices, outcomes, failures)
+    cases = []
+    for name in dict.fromkeys(o.case for o in scored):
+        m = _metrics(name, [o for o in scored if o.case == name], None)
+        cases.append(CaseMetrics(name, m.queries, m.recall, m.mrr))
+
+    report = HermeticReport(not failures, overall, slices, cases, outcomes, failures)
     logger.info(
         "hermetic_tier_completed",
         passed=report.passed,

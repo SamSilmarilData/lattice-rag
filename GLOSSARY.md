@@ -41,6 +41,7 @@ This document defines the ubiquitous language and domain concepts for the `latti
 - **Gold Set**: The curated evaluation dataset: a small corpus of Documents plus queries, each with a reference answer and the verbatim passages that justify it.
 - **Gold Passage**: A verbatim quote from a Gold Set Document that a correct retrieval must surface. It is resolved to the Chunk(s) containing it when the corpus is seeded.
 - **Slice**: A tag grouping Gold Set queries by kind (`factoid`, `multihop`, `unanswerable`, `chitchat`, `long_context`) so results can be broken down.
+- **Case**: A tag recording how a Gold Set query is posed, orthogonal to its Slice: `direct` (in the corpus's own words), `paraphrase` (avoiding its Gold Passages' wording), `negation`, `ambiguity`, `conflicting_sources` or `unanswerable_near_miss`. The Hermetic Tier reports recall and MRR per Case but gates only per Slice.
 - **Hermetic Tier**: The evaluation tier that needs no API keys and, once the local embedding models are cached, no network. It checks retrieval against Gold Passages and validates the Gold Set itself, and gates every PR.
 - **Live Tier**: The evaluation tier that runs the full pipeline and has Jev judge faithfulness, context precision, answer relevance and answer correctness. It needs API keys and is advisory, not a PR gate.
 - **Eval Job**: One evaluation run started over the HTTP API, identified by a handle and polled for its status and report. Only one runs at a time per server; a start while one is running is rejected, not queued.

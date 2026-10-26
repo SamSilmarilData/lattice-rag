@@ -106,11 +106,13 @@ def _q(
     slice_: Any = "factoid",
     route: Any = "vector_exact",
     reference: str = "reference",
+    case: Any = "direct",
 ) -> GoldQuery:
     return GoldQuery(
         id=qid,
         query=query,
         slice=slice_,
+        case=case,
         expected_route=route,
         reference_answer=reference,
         gold_passages=[GoldPassage(document_id=d, text=t) for d, t in passages],
@@ -169,6 +171,38 @@ async def test_healthy_retriever_passes_with_full_recall_and_mrr() -> None:
     by_slice = {s.slice: s for s in report.slices}
     assert by_slice["factoid"].queries == 3
     assert by_slice["multihop"].queries == 1
+
+
+async def test_results_are_broken_down_per_case_without_a_floor_of_their_own() -> None:
+    report = await run_hermetic_tier(
+        gold_set(
+            _q(
+                "q_reworded",
+                "Which spinning collapsed stellar remnants beam out radiation?",
+                [("doc_astro", PULSAR)],
+                case="paraphrase",
+            ),
+            _q(
+                "q_not_arborio",
+                "Which rice is not arborio and holds its shape under long stirring?",
+                [("doc_cook", "Carnaroli rice holds its shape better than arborio")],
+                case="negation",
+            ),
+            _q("q_licence", "Who owns licence royalties?", [], "unanswerable"),
+        ),
+        thresholds(0.0, 0.0),
+        fake_embedding_service(),
+    )
+
+    by_case = {c.case: c for c in report.cases}
+    assert set(by_case) == {"direct", "paraphrase", "negation"}
+    assert by_case["direct"].queries == 4  # the passage-free query is not scored
+    assert by_case["paraphrase"].queries == 1
+    assert by_case["negation"].queries == 1
+    assert by_case["direct"].recall == 1.0
+    assert by_case["negation"].recall == 1.0
+    assert {o.id: o.case for o in report.queries}["q_reworded"] == "paraphrase"
+    assert report.passed, report.failures
 
 
 class ReversedRetriever:

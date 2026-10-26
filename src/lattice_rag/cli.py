@@ -314,13 +314,16 @@ def hermetic(dataset: str, thresholds: str, output: str | None) -> None:
     def fmt(value: float | None) -> str:
         return "-" if value is None else f"{value:.3f}"
 
-    click.echo(f"{'Query ID':<12} {'Slice':<14} {'Recall':>7} {'RR':>7} {'Top score':>10}  Status")
-    click.echo("-" * 64)
+    click.echo(
+        f"{'Query ID':<12} {'Slice':<14} {'Case':<23} {'Recall':>7} {'RR':>7} "
+        f"{'Top score':>10}  Status"
+    )
+    click.echo("-" * 88)
     for q in report.queries:
         status = "FAIL" if q.problems else "ok"
         click.echo(
-            f"{q.id:<12} {q.slice:<14} {fmt(q.recall):>7} {fmt(q.reciprocal_rank):>7} "
-            f"{fmt(q.top_rerank_score):>10}  {status}"
+            f"{q.id:<12} {q.slice:<14} {q.case:<23} {fmt(q.recall):>7} "
+            f"{fmt(q.reciprocal_rank):>7} {fmt(q.top_rerank_score):>10}  {status}"
         )
     click.echo("")
     click.echo(f"{'Group':<14} {'Queries':>7} {'Recall':>7} {'MRR':>7} {'Floor R/MRR':>14}")
@@ -328,6 +331,11 @@ def hermetic(dataset: str, thresholds: str, output: str | None) -> None:
     for m in [report.overall, *report.slices]:
         floor = f"{m.floor.recall:.2f}/{m.floor.mrr:.2f}" if m.floor else "none"
         click.echo(f"{m.slice:<14} {m.queries:>7} {m.recall:>7.3f} {m.mrr:>7.3f} {floor:>14}")
+    click.echo("")
+    click.echo(f"{'Case':<23} {'Queries':>7} {'Recall':>7} {'MRR':>7}  (reported, not gated)")
+    click.echo("-" * 47)
+    for c in report.cases:
+        click.echo(f"{c.case:<23} {c.queries:>7} {c.recall:>7.3f} {c.mrr:>7.3f}")
 
     if output:
         Path(output).write_bytes(msgspec.json.encode(report))

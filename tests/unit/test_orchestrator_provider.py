@@ -99,6 +99,7 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
         "id": "q1",
         "query": "Q one",
         "slice": "unanswerable",
+        "case": "direct",
         "expected_route": "hybrid",
         "reference_answer": "R",
         "gold_passages": [],

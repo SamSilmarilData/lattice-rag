@@ -29,6 +29,7 @@ def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
                 "id": "q1",
                 "query": "What is first?",
                 "slice": "unanswerable",
+                "case": "direct",
                 "expected_route": "hybrid",
                 "reference_answer": "The first.",
                 "gold_passages": [],

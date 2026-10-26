@@ -28,7 +28,7 @@ def test_shipped_gold_set_is_valid() -> None:
     gold = load_gold_set(SHIPPED)
 
     assert gold.version == "3.0.0"
-    assert len(gold.queries) == 30
+    assert len(gold.queries) == 52
 
 
 def test_shipped_corpus_is_the_five_documents_plus_the_long_form_docs() -> None:
@@ -153,3 +153,53 @@ def test_v1_dataset_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(GoldSetError, match="expected '3.0.0'"):
         load_gold_set(_write(tmp_path, data))
+
+
+def test_unknown_case_is_rejected(tmp_path: Path) -> None:
+    data = _raw()
+    data["queries"][0]["case"] = "trick_question"
+
+    with pytest.raises(GoldSetError, match=r"queries\[0\]\.case"):
+        load_gold_set(_write(tmp_path, data))
+
+
+def test_shipped_gold_set_has_paraphrase_and_negation_queries_with_evidence() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    reworded = [q for q in gold.queries if q.case in ("paraphrase", "negation")]
+    assert sum(q.case == "paraphrase" for q in reworded) >= 8
+    assert sum(q.case == "negation" for q in reworded) >= 8
+    assert len(reworded) >= 20
+    for q in reworded:
+        assert q.gold_passages, q.id
+        assert q.slice not in ("unanswerable", "chitchat"), q.id
+
+
+def _content_words(text: str) -> set[str]:
+    import re
+
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 4}
+
+
+def test_paraphrase_queries_mostly_avoid_their_passages_wording() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    for q in gold.queries:
+        if q.case != "paraphrase":
+            continue
+        asked = _content_words(q.query)
+        shared = asked & _content_words(" ".join(p.text for p in q.gold_passages))
+        # A paraphrase may keep a product name or two, not the passage's phrasing
+        assert len(shared) <= 2, (q.id, sorted(shared))
+
+
+def test_missing_case_is_rejected_with_its_name(tmp_path: Path) -> None:
+    data = _raw()
+    del data["queries"][2]["case"]
+
+    with pytest.raises(GoldSetError) as exc:
+        load_gold_set(_write(tmp_path, data))
+
+    message = str(exc.value)
+    assert "case" in message
+    assert "queries[2]" in message

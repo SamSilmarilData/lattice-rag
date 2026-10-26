@@ -67,6 +67,22 @@ def test_hermetic_passes_without_api_keys_and_exports_the_report(
     assert report["overall"]["recall"] == 1.0
 
 
+def test_hermetic_prints_and_exports_the_per_case_breakdown(
+    keyless: None, tmp_path: Path
+) -> None:
+    dataset, thresholds = _write_inputs(tmp_path, floor=0.9)
+    out = tmp_path / "report.json"
+
+    result = _invoke(dataset, thresholds, "--output", str(out))
+
+    assert result.exit_code == 0, result.output
+    assert "Case" in result.output
+    case_rows = [line.split() for line in result.output.splitlines() if line.startswith("direct")]
+    assert case_rows == [["direct", "4", "1.000", "1.000"]]
+    report = json.loads(out.read_text())
+    assert report["cases"] == [{"case": "direct", "queries": 4, "recall": 1.0, "mrr": 1.0}]
+
+
 def test_hermetic_exits_nonzero_below_the_floors(keyless: None, tmp_path: Path) -> None:
     dataset, thresholds = _write_inputs(tmp_path, floor=1.01)
 

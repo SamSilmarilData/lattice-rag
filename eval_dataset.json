@@ -243,6 +243,7 @@
       "id": "eval_01",
       "query": "How does LatticeDB combine HNSW vector similarity with BM25 text search in a single binary?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "LatticeDB unites native HNSW vector similarity search (the <=> operator) and BM25 inverted index text search (the @@ operator), together with Cypher multi-hop graph queries, in a single local binary file.",
       "gold_passages": [
@@ -261,6 +262,7 @@
       "id": "eval_02",
       "query": "What edge relationships link Document, Chunk, and Entity nodes in LatticeDB?",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "graph_relational",
       "reference_answer": "Documents link to Chunks through [:HAS_CHUNK] edges, Chunks link to the Entities extracted from them through [:CONTAINS] edges, and Entities link to each other through [:RELATION {type: ...}] edges.",
       "gold_passages": [
@@ -282,6 +284,7 @@
       "id": "eval_03",
       "query": "What cross-encoder model is used in Stage 3 reranking and what is its context window size?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "Stage 3 reranking uses BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX, and it has an 8,192 token context window.",
       "gold_passages": [
@@ -300,6 +303,7 @@
       "id": "eval_04",
       "query": "How are traversed graph paths used when answering a question, and does the cross-encoder reranker see them?",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "The cross-encoder does not see them: it scores every candidate on its own chunk text only, because graph triples are identical for every candidate and could not change the ordering. The paths traversed in LatticeDB from the entities of the final chunks are linearized into triples and sent to the generation prompt instead.",
       "gold_passages": [
@@ -323,6 +327,7 @@
       "id": "eval_05",
       "query": "What GLiNER model is loaded for entity extraction and what heuristic creates relations between entities?",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "By default the system loads fastino/GLiNER2.5-Decide and falls back to urchade/gliner_small-v2.1 when that model is unavailable. The EntityExtractor creates a [:RELATION] edge between two entities whenever they co-occur within the same sentence (a sentence-level co-occurrence heuristic).",
       "gold_passages": [
@@ -346,6 +351,7 @@
       "id": "eval_06",
       "query": "What are the three TypeSafe AI Jev primitives used in the architecture and what are their respective roles?",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "The three Jev primitives are Choice, the front-door router that classifies prompts into routes; Noul, the boolean context guardrail that prunes chunks with relevance probability below 0.50; and Score, which evaluates content across ordered descriptive criteria and returns expected-value continuous scores and probability distributions.",
       "gold_passages": [
@@ -378,6 +384,7 @@
       "id": "eval_07",
       "query": "What threshold does the Jev Noul context guardrail use to prune irrelevant chunks?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The Noul guardrail prunes candidate chunks whose relevance probability is below 0.50.",
       "gold_passages": [
@@ -396,6 +403,7 @@
       "id": "eval_08",
       "query": "Why was Granian selected as the ASGI server over standard Uvicorn in this architecture?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "Granian is a high-performance HTTP server written in Rust that delivers 2 to 4 times the throughput of standard Python Uvicorn servers.",
       "gold_passages": [
@@ -415,6 +423,7 @@
       "id": "eval_09",
       "query": "What typed lifecycle events are emitted by the POST /api/v1/query/stream endpoint?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The streaming endpoint emits typed Server-Sent Events: stage, token and done lifecycle events. If a provider fails after its first token, it sends an error event before the final done event.",
       "gold_passages": [
@@ -437,6 +446,7 @@
       "id": "eval_10",
       "query": "How are API credentials, tokens, and authorization headers shielded from leaking in error responses?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "Error handling follows RFC 9457 Problem Details, and all logging and error responses pass through automated regex sanitizers that scrub API keys, tokens, and authorization headers before they reach the network.",
       "gold_passages": [
@@ -456,6 +466,7 @@
       "id": "eval_11",
       "query": "Explain the multi-hop connection between an ingested Document and the relational entities extracted from it.",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "graph_relational",
       "reference_answer": "A Document is linked to its Chunks by [:HAS_CHUNK] edges; each Chunk is linked to the Entities extracted from it by [:CONTAINS] edges; and those Entities are linked to other Entities by [:RELATION] edges, which is what multi-hop traversal follows.",
       "gold_passages": [
@@ -481,6 +492,7 @@
       "id": "eval_12",
       "query": "What serialization library replaces Pydantic in the web stack and what JSON wire naming format is enforced?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "Data transfer objects are msgspec.Struct instances with rename='camel', so JSON on the wire uses camelCase names.",
       "gold_passages": [
@@ -499,6 +511,7 @@
       "id": "eval_13",
       "query": "How does the Jev Score primitive compute continuous evaluation scores from discrete level criteria?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "The Score primitive evaluates content across ordered descriptive criteria and returns expected-value continuous scores along with probability distributions.",
       "gold_passages": [
@@ -518,6 +531,7 @@
       "id": "eval_14",
       "query": "What dimension and model are used for generating dense vector embeddings in FastEmbed?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "FastEmbed's default dense model is BAAI/bge-small-en-v1.5, which generates 384-dimensional normalized embeddings optimized for cosine similarity.",
       "gold_passages": [
@@ -536,6 +550,7 @@
       "id": "eval_15",
       "query": "What operator does LatticeDB use for native BM25 full-text searches across nodes?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "LatticeDB uses the @@ operator for BM25 inverted index text search.",
       "gold_passages": [
@@ -554,6 +569,7 @@
       "id": "eval_16",
       "query": "Which message broker does the system use to schedule ingestion retries?",
       "slice": "unanswerable",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "The knowledge base does not contain this information.",
       "gold_passages": [],
@@ -565,6 +581,7 @@
       "id": "eval_17",
       "query": "What five classification routes are supported by the TypeSafe AI Jev Choice router?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The Choice router classifies prompts into five routes: vector_exact, graph_relational, hybrid, chitchat, and massive_context.",
       "gold_passages": [
@@ -584,6 +601,7 @@
       "id": "eval_18",
       "query": "What role does the [:CONTAINS] edge play in the RAG retrieval and citation grounding pipeline?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "graph_relational",
       "reference_answer": "[:CONTAINS] edges tie extracted entities to the text chunk they came from, which provides provenance tracking and citation grounding.",
       "gold_passages": [
@@ -603,6 +621,7 @@
       "id": "eval_19",
       "query": "How does LatticeDB's in-process model differ from a remote database server?",
       "slice": "factoid",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "LatticeDB is an embedded, in-process database that works much like SQLite for graph and vector data; running inside the host application process removes the network boundary that a remote database has.",
       "gold_passages": [
@@ -621,6 +640,7 @@
       "id": "eval_20",
       "query": "Describe the full end-to-end flow from receiving a user query to generating an SSE-streamed response.",
       "slice": "long_context",
+      "case": "direct",
       "expected_route": "massive_context",
       "reference_answer": "Granian serves the Litestar API. A Jev Choice call routes the query. Retrieval reuses the triage query embedding, runs HNSW vector search and BM25 search in LatticeDB and fuses them by Reciprocal Rank Fusion into top_k + 3 candidates. The bge-reranker-v2-m3 cross-encoder scores every candidate on its own chunk text, the Jev Noul guardrail prunes passages below 0.50 relevance, and a graph traversal from the entities of the final chunks produces triples that go to the generation prompt, not to the reranker. Groq (with a fallback cascade) generates the answer, and the streaming endpoint emits typed Server-Sent Events: stage, token and done.",
       "gold_passages": [
@@ -670,6 +690,7 @@
       "id": "eval_21",
       "query": "Where do the relation edges that GLiNER's co-occurrence heuristic creates end up when a question is answered?",
       "slice": "multihop",
+      "case": "direct",
       "expected_route": "hybrid",
       "reference_answer": "The EntityExtractor stores them as [:RELATION] edges between entities that co-occur in a sentence. At query time a traversal starting from the entities of the final chunks walks those edges (1 hop, 2 for graph_relational), and the resulting paths are linearized into triples that go to the generation prompt. The cross-encoder reranker does not score them.",
       "gold_passages": [
@@ -697,6 +718,7 @@
       "id": "eval_22",
       "query": "What software license is LatticeDB distributed under?",
       "slice": "unanswerable",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The knowledge base does not contain this information.",
       "gold_passages": [],
@@ -708,6 +730,7 @@
       "id": "eval_23",
       "query": "How much does a single TypeSafe AI Jev API call cost?",
       "slice": "unanswerable",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The knowledge base does not contain this information.",
       "gold_passages": [],
@@ -720,6 +743,7 @@
       "id": "eval_24",
       "query": "What is the maximum number of concurrent connections a single Granian worker accepts?",
       "slice": "unanswerable",
+      "case": "direct",
       "expected_route": "vector_exact",
       "reference_answer": "The knowledge base does not contain this information.",
       "gold_passages": [],
@@ -731,6 +755,7 @@
       "id": "eval_25",
       "query": "hello there",
       "slice": "chitchat",
+      "case": "direct",
       "expected_route": "chitchat",
       "reference_answer": "Hello! I am lattice-rag, a Hybrid GraphRAG engine. How can I help you with your knowledge base today?",
       "gold_passages": [],
@@ -740,6 +765,7 @@
       "id": "eval_26",
       "query": "thanks so much!",
       "slice": "chitchat",
+      "case": "direct",
       "expected_route": "chitchat",
       "reference_answer": "You are welcome! Let me know if you need anything else.",
       "gold_passages": [],
@@ -749,6 +775,7 @@
       "id": "eval_27",
       "query": "what can you do?",
       "slice": "chitchat",
+      "case": "direct",
       "expected_route": "chitchat",
       "reference_answer": "I can help you search through documents, explore entity relationships, and answer complex multi-hop questions. Try asking me a specific question about your ingested documents!",
       "gold_passages": [],
@@ -758,6 +785,7 @@
       "id": "eval_28",
       "query": "Summarize the whole technology stack: storage, embeddings and reranking, entity extraction, decision models, and the web layer.",
       "slice": "long_context",
+      "case": "direct",
       "expected_route": "massive_context",
       "reference_answer": "Storage is LatticeDB, an embedded in-process property-graph database with HNSW and BM25 indices. Embeddings come from FastEmbed's BAAI/bge-small-en-v1.5 (384 dimensions) and reranking from BAAI/bge-reranker-v2-m3. Entities are extracted by GLiNER (urchade/gliner_small-v2.1). TypeSafe AI Jev provides the Choice, Noul and Score decision primitives. The web layer is Litestar served by Granian, with msgspec DTOs.",
       "gold_passages": [
@@ -803,6 +831,7 @@
       "id": "eval_29",
       "query": "Walk through everything that happens to a document's text from extraction to being stored as graph nodes and edges.",
       "slice": "long_context",
+      "case": "direct",
       "expected_route": "massive_context",
       "reference_answer": "Text is embedded by FastEmbed (BAAI/bge-small-en-v1.5, 384 dimensions). GLiNER extracts entities using labels such as person, organization, technology and database, and the EntityExtractor adds [:RELATION] edges between co-occurring entities. Entities are tied to their chunk by [:CONTAINS] edges, and Documents to Chunks by [:HAS_CHUNK] edges, in LatticeDB's Document/Chunk/Entity schema.",
       "gold_passages": [
@@ -840,6 +869,7 @@
       "id": "eval_30",
       "query": "Compare every mechanism the system uses to judge or filter the relevance of retrieved text.",
       "slice": "long_context",
+      "case": "direct",
       "expected_route": "massive_context",
       "reference_answer": "Hybrid HNSW and BM25 search in LatticeDB, fused by Reciprocal Rank Fusion, recalls the candidates. The bge-reranker-v2-m3 cross-encoder scores every candidate on its own chunk text and keeps the top_k. The Jev Noul guardrail then prunes passages with relevance probability below 0.50; an optional, off-by-default RerankScoreGate keeps chunks whose cross-encoder score clears a value without asking Noul. Separately, Jev Score evaluates content against ordered descriptive criteria.",
       "gold_passages": [
@@ -869,6 +899,342 @@
         "BAAI/bge-reranker-v2-m3",
         "Noul",
         "Score"
+      ]
+    },
+    {
+      "id": "eval_31",
+      "query": "How many numbers describe each stored piece of text for nearest-neighbour lookup, and which small English model produces them?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "Each chunk gets a 384-dimensional dense vector generated by FastEmbed with BAAI/bge-small-en-v1.5. Only chunks are embedded; entities get no vector.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_2_2_indices_search_operations",
+          "text": "Only chunks have 384-dimensional dense vectors, generated by FastEmbed (`BAAI/bge-small-en-v1.5`). Ingestion does not embed entities."
+        }
+      ]
+    },
+    {
+      "id": "eval_32",
+      "query": "If someone keeps guessing the wrong password for the privileged endpoints, what happens to them and for how long?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "After 5 wrong X-Admin-Key attempts within 5 minutes, that client gets HTTP 429 from the admin endpoints for the rest of the 5-minute window, even with the right key. Other clients are unaffected and a successful attempt clears the count.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_5_client_identity_behind_rever",
+          "text": "A client that sends a wrong `X-Admin-Key` 5 times within 5 minutes gets `429` from the admin endpoints for the rest of that window, even with the right key."
+        }
+      ]
+    },
+    {
+      "id": "eval_33",
+      "query": "What happens to graph-store modifications if code forgets to finalize them before leaving the transactional with-statement?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "They are lost: LatticeDB write transactions roll back by default when the context exits, so txn.commit() must be called explicitly before leaving the block.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_4_2_4_reciprocal_rank_fusion_r",
+          "text": "In LatticeDB, write transactions (`with db.write() as txn:`) **default to rollback on context exit**."
+        }
+      ]
+    },
+    {
+      "id": "eval_34",
+      "query": "How are the keyword hits and the embedding hits merged into one ranking, and what constant is added to each position?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "HNSW vector results and BM25 results are merged with Reciprocal Rank Fusion with k=60: each chunk scores the sum of 1/(60 + rank) over the two result lists.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_4_2_4_reciprocal_rank_fusion_r",
+          "text": "Vector similarity and BM25 search results are fused using standard RRF ($k=60$):"
+        }
+      ]
+    },
+    {
+      "id": "eval_35",
+      "query": "When the extractor finds the same name twice with different kinds, or with different capitalisation, does the graph merge them?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "An entity's identity is its name plus type, normalized by entity_key() (trimmed, whitespace collapsed, case-folded). The same name with a different type gives two nodes; names that differ only in case or spacing, with the same type, are one node.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_1_edge_relationships",
+          "text": "An Entity's identity is its **name plus type**, normalized by `entity_key()` (trimmed, internal whitespace collapsed, case-folded)"
+        }
+      ]
+    },
+    {
+      "id": "eval_36",
+      "query": "When a file is removed from the knowledge base, which extracted names survive and which go away?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "Deleting a document removes the document, its chunks, all their edges, and every entity that no remaining chunk contains. Entities still contained by chunks of other documents stay.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+          "text": "It removes the Document, its Chunks (with their vectors and BM25 entries), every edge on those nodes, and each Entity that no remaining Chunk `CONTAINS`; entities shared with other documents stay."
+        }
+      ]
+    },
+    {
+      "id": "eval_37",
+      "query": "How many back-to-back failures of the main LLM vendor trip the protective switch, and how long before it tries that vendor again?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "The Groq circuit breaker opens after 3 consecutive failures (fail_max=3); Groq is then skipped in favour of Gemini until the 30-second reset timeout lets a probe through.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "The breaker records every Groq outcome from both the buffered and streaming paths (`fail_max=3`, `reset_timeout=30s`)."
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "After 3 consecutive failures the circuit opens and Groq is skipped in favour of **Gemini** (`GEMINI_MODEL`) until the reset timeout lets a probe through."
+        }
+      ]
+    },
+    {
+      "id": "eval_38",
+      "query": "Sitting behind a single load balancer, which entry of the client-chain header identifies the caller, and what risk comes from overstating the number of intermediaries?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "With TRUSTED_PROXY_HOPS=1 the rightmost X-Forwarded-For entry is the client identity. Setting the hop count too high lets clients choose their own identity by sending their own X-Forwarded-For header.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_5_client_identity_behind_rever",
+          "text": "| `1` | Rightmost `X-Forwarded-For` entry | Cloud Run, a single nginx/Caddy, Cloudflare Tunnel |"
+        },
+        {
+          "document_id": "doc_deployment_5_client_identity_behind_rever",
+          "text": "Too high, and clients can choose their identity by sending their own `X-Forwarded-For`."
+        }
+      ]
+    },
+    {
+      "id": "eval_39",
+      "query": "How does the answer generator stop a malicious uploaded file from smuggling commands into the model?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "Both providers share one prompt: a system message says the evidence and question are untrusted data whose instructions must not be followed, each chunk is wrapped in <chunk> tags inside <evidence>, and '<' is escaped so nothing can close a block or inject a fake <question>. The admin key on ingest limits who can add evidence.",
+      "gold_passages": [
+        {
+          "document_id": "doc_security_5_3_5_prompt_injection_hardeni",
+          "text": "A system message states that evidence and the question are untrusted data whose instructions must not be followed. The user message wraps each chunk in `<chunk>` tags inside `<evidence>`, and escapes `<` in evidence and the question so neither can close a block or inject a fake `<question>`."
+        }
+      ]
+    },
+    {
+      "id": "eval_40",
+      "query": "Why is a brand-new instance able to answer right away, without fetching neural networks or populating its search structures at launch?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "The multi-stage Dockerfile pre-bakes the ONNX weights for bge-small-en-v1.5 and bge-reranker-v2-m3 into the image at build time, and runs lattice-rag seed at build time so the graph, HNSW and BM25 indexes are already built when the container starts.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_6_5_cold_start_optimization",
+          "text": "ONNX weights for `bge-small-en-v1.5` and `bge-reranker-v2-m3` are downloaded during image creation (`docker build`), eliminating 600MB+ network pulls on container cold start."
+        },
+        {
+          "document_id": "doc_deployment_6_5_cold_start_optimization",
+          "text": "`lattice-rag seed` ingests the golden corpus at build time (it needs no API keys and skips documents that already exist), so the graph, HNSW and BM25 indexes are ready when the container starts."
+        }
+      ]
+    },
+    {
+      "id": "eval_41",
+      "query": "Why can't the service live on hosting plans that give it half a gigabyte?",
+      "slice": "factoid",
+      "case": "paraphrase",
+      "expected_route": "vector_exact",
+      "reference_answer": "The bge-reranker-v2-m3 cross-encoder alone needs about 1.17 GB resident and the peak working set is about 1.51 GB, so 512 MB tiers OOM-kill the process during reranking; it needs at least 2 GB RAM.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_0_zero_cost_production_deploym",
+          "text": "Platforms offering only 512MB RAM (such as Render Free, Koyeb Free, or basic Hugging Face CPU Spaces) **will crash with an Out-Of-Memory (OOM) kill** when executing cross-encoder reranking."
+        }
+      ]
+    },
+    {
+      "id": "eval_42",
+      "query": "Which extracted nodes are not embedded at ingestion, and how does retrieval reach them without a vector?",
+      "slice": "multihop",
+      "case": "negation",
+      "expected_route": "hybrid",
+      "reference_answer": "Entity nodes are not embedded: only chunks get 384-dimensional vectors. Retrieval reaches entities through the CONTAINS edges from the chunks it retrieved.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_2_2_indices_search_operations",
+          "text": "Only chunks have 384-dimensional dense vectors, generated by FastEmbed (`BAAI/bge-small-en-v1.5`). Ingestion does not embed entities."
+        },
+        {
+          "document_id": "doc_storage_and_schema_0_storage_engine_graph_schema_",
+          "text": "Entities carry no vector; retrieval reaches them through `CONTAINS` edges from chunks."
+        }
+      ]
+    },
+    {
+      "id": "eval_43",
+      "query": "If ADMIN_API_KEY is not set on the server, can anyone still call the ingest or eval endpoints?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "No. Without ADMIN_API_KEY the admin endpoints fail closed: they reject every request.",
+      "gold_passages": [
+        {
+          "document_id": "doc_security_4_3_3_rfc_9457_error_shielding",
+          "text": "With no `ADMIN_API_KEY` configured these endpoints reject every request (fail closed)."
+        }
+      ]
+    },
+    {
+      "id": "eval_44",
+      "query": "Which endpoints do not require an admin key?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "The public endpoints need no key: /, /health, POST /api/v1/query and POST /api/v1/query/stream. The query endpoints are rate-limited per client instead.",
+      "gold_passages": [
+        {
+          "document_id": "doc_api_reference_1_2_1_authentication_limits",
+          "text": "**Public endpoints** (no key): `/`, `/health`, `POST /api/v1/query` and `POST /api/v1/query/stream`."
+        }
+      ]
+    },
+    {
+      "id": "eval_45",
+      "query": "Which Groq call outcomes are not counted as failures by the circuit breaker, or not counted right away?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "Client disconnects (asyncio.CancelledError) are never counted. A rate-limited (HTTP 429) call is not counted until the Groq SDK's and GroqSynthesizer's internal retries are exhausted.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "The Groq SDK and `GroqSynthesizer` retry HTTP 429 internally first, so a rate-limited call only counts once its retries are exhausted. Client disconnects (`asyncio.CancelledError`) are not counted."
+        }
+      ]
+    },
+    {
+      "id": "eval_46",
+      "query": "Which answers are never written to the Tier 1 semantic cache?",
+      "slice": "multihop",
+      "case": "negation",
+      "expected_route": "hybrid",
+      "reference_answer": "Only grounded, verified primary-provider answers are cached. Degraded answers (from a non-primary provider or the FAQ), low-grounding answers where no chunk passed the guardrail, and Unverified Answers (routing, the guardrail or cache verification could not run) are never cached.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "Only answers from the primary provider that were grounded in guardrail-approved evidence are cached."
+        },
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "when no chunk passes, the answer is generated without evidence, flagged `lowGrounding: true` in the response, and never cached."
+        },
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "If Noul itself cannot run, the candidates pass through unchecked and the answer is an Unverified Answer (`unverified: true`), also never cached"
+        }
+      ]
+    },
+    {
+      "id": "eval_47",
+      "query": "Does LatticeDB's delete_node not remove a node's edges, and how does the store cope when deleting a document?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "Right, delete_node leaves the node's edges in place, so LatticeStore deletes every incoming and outgoing edge explicitly before deleting each node, all in one write transaction.",
+      "gold_passages": [
+        {
+          "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+          "text": "LatticeDB's `delete_node` does not remove a node's edges, so the store deletes them explicitly first."
+        }
+      ]
+    },
+    {
+      "id": "eval_48",
+      "query": "Which X-Forwarded-For entries are ignored and not trusted when working out a client's identity?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "With the default TRUSTED_PROXY_HOPS=0 the header is ignored entirely and the socket peer is used. Otherwise only the Nth entry from the right is used: entries to the left of the trusted ones were written by the client and are ignored, and a header with fewer than N entries is not trusted at all, so the socket peer is used.",
+      "gold_passages": [
+        {
+          "document_id": "doc_deployment_5_client_identity_behind_rever",
+          "text": "Every proxy appends the address it received the request from, so entries to the left of the trusted ones were written by the client and are ignored. A header with fewer than `N` entries is not trusted and the socket peer is used."
+        }
+      ]
+    },
+    {
+      "id": "eval_49",
+      "query": "Why doesn't a streaming answer switch to the backup provider once the first provider has started sending tokens?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "The cascade only moves to the next provider while nothing has been emitted. If a provider fails after its first token, the stream sends an error event and ends with done (degraded: true) rather than appending a second provider's answer to the partial one.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "The cascade only moves to the next provider while nothing has been emitted. If a provider fails after its first token, the stream sends an `error` event and ends with `done` (`degraded: true`) rather than appending a second provider's answer."
+        }
+      ]
+    },
+    {
+      "id": "eval_50",
+      "query": "Does Stage 2 graph traversal ever start from entities of candidates that reranking or the guardrail rejected, and is it a Cypher query?",
+      "slice": "multihop",
+      "case": "negation",
+      "expected_route": "graph_relational",
+      "reference_answer": "No to both. Stage 2 takes entity anchors only from the final chunks that survived reranking and the guardrail, so the LLM never sees relations reachable only from rejected candidates, and it is an in-process pointer walk through the LatticeDB transaction API, not a Cypher query.",
+      "gold_passages": [
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates"
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "This is a pointer walk through the LatticeDB transaction API, not a Cypher query."
+        }
+      ]
+    },
+    {
+      "id": "eval_51",
+      "query": "Why are secrets never passed to the process as command-line arguments?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "Secrets are loaded into memory from .env via python-dotenv at startup instead, because command-line arguments are visible in the system process table (ps aux) to other OS users.",
+      "gold_passages": [
+        {
+          "document_id": "doc_security_5_3_5_prompt_injection_hardeni",
+          "text": "They are **never** passed as CLI arguments, preventing exposure in system process tables (`ps aux`) to other OS users."
+        }
+      ]
+    },
+    {
+      "id": "eval_52",
+      "query": "If setup-keys finds no recognizable key in apikeys.md, does it still delete the file?",
+      "slice": "factoid",
+      "case": "negation",
+      "expected_route": "vector_exact",
+      "reference_answer": "No. apikeys.md is deleted only after recognized keys are migrated into .env; if no recognizable key was found, the file is left untouched so nothing is lost.",
+      "gold_passages": [
+        {
+          "document_id": "doc_security_1_2_2_automated_credential_mig",
+          "text": "If no recognizable key was found, `apikeys.md` is left untouched so nothing is lost."
+        }
       ]
     }
   ]

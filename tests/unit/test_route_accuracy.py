@@ -38,6 +38,7 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
                 "id": qid,
                 "query": f"query {qid}",
                 "slice": slice_name,
+                "case": "direct",
                 "expected_route": route,
                 "reference_answer": "ref",
                 "gold_passages": []

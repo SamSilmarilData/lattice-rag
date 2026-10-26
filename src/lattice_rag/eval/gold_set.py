@@ -9,6 +9,8 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
       "queries": [{
         "id": "...", "query": "...",
         "slice": "factoid|multihop|unanswerable|chitchat|long_context",
+        "case": "direct|paraphrase|negation|ambiguity|conflicting_sources|
+                 unanswerable_near_miss",
         "expected_route": "vector_exact|graph_relational|hybrid|chitchat|massive_context",
         "reference_answer": "...",
         "gold_passages": [{"document_id": "...", "text": "<verbatim quote>"}],
@@ -17,7 +19,7 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
     }
 
 ``load_gold_set`` rejects a file that is structurally wrong (missing field, unknown
-Slice or Route) or whose content is inconsistent (a Gold Passage that is not verbatim
+Slice, Case or Route) or whose content is inconsistent (a Gold Passage that is not verbatim
 in its Document, a passage for an unknown Document, duplicate ids, or a Slice whose
 passage count makes no sense).
 """
@@ -29,7 +31,7 @@ from typing import Final
 
 import msgspec
 
-from lattice_rag.vocabulary import Route, Slice
+from lattice_rag.vocabulary import Case, Route, Slice
 
 GOLD_SET_VERSION: Final = "3.0.0"
 
@@ -57,11 +59,12 @@ class GoldPassage(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class GoldQuery(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
-    """One evaluation query with its Slice, expected Route, reference answer and evidence."""
+    """One evaluation query with its Slice, Case, expected Route, reference answer and evidence."""
 
     id: str
     query: str
     slice: Slice
+    case: Case
     expected_route: Route
     reference_answer: str
     gold_passages: list[GoldPassage]

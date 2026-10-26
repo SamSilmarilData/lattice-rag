@@ -38,6 +38,7 @@ def _gold_set_with_one_document() -> dict[str, object]:
                 "id": "q1",
                 "query": "What is said?",
                 "slice": "factoid",
+                "case": "direct",
                 "expected_route": "vector_exact",
                 "reference_answer": "Hello world.",
                 "gold_passages": [{"document_id": "d1", "text": "Hello world."}],

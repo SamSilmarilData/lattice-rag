@@ -147,6 +147,7 @@ def _write_dataset(tmp_path: Path) -> None:
                         "id": "q1",
                         "query": SECRET_QUERY,
                         "slice": "unanswerable",
+                        "case": "direct",
                         "expected_route": "hybrid",
                         "reference_answer": "gt",
                         "gold_passages": [],
