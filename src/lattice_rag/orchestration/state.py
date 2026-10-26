@@ -16,6 +16,8 @@ class PipelineState:
 
     # --- Routing ---
     route: str = ""
+    # False when the route is the System 1 fallback because Jev could not choose one
+    route_verified: bool = True
 
     # --- Caching ---
     cache_hit: bool = False

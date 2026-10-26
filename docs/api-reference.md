@@ -139,7 +139,7 @@ interface HealthResponse {
 }
 ```
 
-### 3.6 `EvalJobResponse`, `EvalRunResponse` & `EvalQueryResult`
+### 3.6 `EvalJobResponse`, `EvalRunResponse`, `EvalQueryResult` & `Misroute`
 ```typescript
 interface EvalJobResponse {
   jobId: string;                           // Handle for GET /api/v1/eval/jobs/{jobId}
@@ -161,6 +161,19 @@ interface EvalQueryResult {
   answerRelevance: number | null;    // Answer vs the query
   answerCorrectness: number | null;  // Answer vs the Gold Set reference answer
   error: "pipeline_error" | "judge_error" | null;  // Set when the query failed; it is then not judged
+  chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error
+  routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)
+}
+
+type Route = "vector_exact" | "graph_relational" | "hybrid" | "chitchat" | "massive_context";
+type Slice = "factoid" | "multihop" | "unanswerable" | "chitchat" | "long_context";
+
+// A scored query whose chosen Route differs from its Expected Route
+interface Misroute {
+  queryId: string;                   // Gold Set query id
+  slice: Slice;
+  chosenRoute: Route;
+  expectedRoute: Route;
 }
 
 interface EvalRunResponse {
@@ -173,10 +186,25 @@ interface EvalRunResponse {
   meanAnswerCorrectness: number | null;
   failedQueries: number;               // Queries with an error (not judged, excluded from means)
   results: EvalQueryResult[];          // Granular query evaluation results
+  routeAccuracy: number | null;        // Share of scored queries on their Expected Route; null if none scored
+  routeAccuracyBySlice: Record<Slice, number>;  // Same, per Slice (only Slices with a scored query)
+  routeAccuracyFloor: number | null;   // Advisory floor from gate_thresholds; never fails the gate
+  routeAccuracyScored: number;         // The denominator of routeAccuracy
+  routeAccuracyUnverified: number;     // Not scored: Jev could not route, the fallback Route was used
+  routeAccuracyErrored: number;        // Not scored: the pipeline failed, no Route was chosen
+  misroutes: Misroute[];               // Scored queries off their Expected Route
 }
 ```
 
-The gate rules live in `eval_baseline.json` under `gate_thresholds` and all are required:
+**Route Accuracy** scores only router decisions. A query is scored when it is outside the
+`chitchat` Slice (chitchat is routed deterministically, never by Jev; this matches the 17/27
+baseline definition), its pipeline ran, and Jev chose the Route. Unverified fallback routes
+and pipeline errors are counted in `routeAccuracyUnverified` and `routeAccuracyErrored`
+instead, so a Jev outage or a broken pipeline shows as `null` or a small denominator, never
+as accurate routing.
+
+The gate rules live in `eval_baseline.json` under `gate_thresholds`. All are required except
+`route_accuracy_floor`, which is optional and advisory (reported, never gates):
 `passedGate` is false when any query failed, when any judged metric of any query is below
 `min_query_floor`, or when a mean drops more than `max_regression_delta` below its value in
 `metrics`. A metric absent from `metrics` is reported but not regression-checked. `metrics`

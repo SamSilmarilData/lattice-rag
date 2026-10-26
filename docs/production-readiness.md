@@ -208,13 +208,14 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 | :--- | :--- | :--- |
 | Workflow | `eval-gate.yml`, every push and PR | `live-tier.yml`, nightly (03:17 UTC) and `workflow_dispatch` |
 | Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the fallback) |
-| Measures | Gold Set validity, retrieval recall and MRR per Slice | Jev-judged faithfulness, context precision, answer relevance, answer correctness |
+| Measures | Gold Set validity, retrieval recall and MRR per Slice | Jev-judged faithfulness, context precision, answer relevance, answer correctness; Route Accuracy (advisory) |
 | Blocks merges | Yes | No: it never runs on PRs |
 | Missing secret | n/a | The run fails with an error annotation naming the secret; it is never skipped |
 
 **Live Tier** (`lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output live_tier_report.json`, on an ephemeral database; the report is uploaded as the `live-tier-report` artifact):
 - `lattice-rag eval` itself refuses to start without `TYPESAFE_API_KEY` or `GROQ_API_KEY` (without Groq every answer would come from the fallback, so the run would measure the wrong system).
 - Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. A red nightly is a signal to investigate, not a merge block. Latency SLAs are not part of either tier; check them with `lattice-rag benchmark --sla-check`.
+- **Route Accuracy** is reported overall and per Slice, with every Misrouted query listed, and is compared with the optional `route_accuracy_floor` in `gate_thresholds` (0.80). The floor is advisory: a miss is reported as `MISSED` but never fails the run. The denominator is the scored queries only: the `chitchat` Slice is excluded (routed deterministically), and queries whose pipeline errored or whose Route was the unverified System 1 fallback (Jev unavailable) are counted separately in the report, not scored. Many unverified or errored queries mean the number says little about the router; read those counts first.
 - **Tolerance from measured variance.** The judge's run-to-run noise sets `max_regression_delta`: run the Live Tier three times on unchanged code, then `lattice-rag measure-baseline r1.json r2.json r3.json`. It sets each baseline mean to the mean of the three run means and `max_regression_delta` to two sample standard deviations of the noisiest metric, rounded up to 0.01. The raw per-run means, the standard deviations and the rule are kept under `measurement` in `eval_baseline.json`. The floor and per-query `pass_thresholds` are policy and are edited by hand. Re-measure when a change intentionally moves the metrics (prompt, model, retrieval, Gold Set).
 
 ### Rerank-score Noul skip (off by default)

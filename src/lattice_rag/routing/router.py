@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Final
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Choice
 
 from lattice_rag.generation.chitchat import is_pure_chitchat
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -16,41 +18,78 @@ _ROUTER_INSTRUCTIONS = (
     "Classify the user query into the single most appropriate routing category "
     "for a Hybrid GraphRAG system."
 )
-_ROUTER_CRITERIA = {
-    "vector_exact": (
-        "A question answered by a single fact, name, number, setting or short explanation "
-        "stated in one place, even when it is phrased as 'how' or 'why'. Not a request "
-        "to relate several things or to cover a whole process. "
-        "Examples: 'What model is used for X?', 'What threshold does Y use?', "
-        "'Why was Z chosen over W?', 'What is the maximum number of Q?'."
+
+
+@dataclass(frozen=True)
+class RouteGuide:
+    """What Jev is told about one Route: a description and worked examples of it."""
+
+    description: str
+    examples: tuple[str, ...]
+
+    def criterion(self) -> str:
+        quoted = ", ".join(f"'{example}'" for example in self.examples)
+        return f"{self.description} Examples: {quoted}."
+
+
+ROUTE_GUIDES: Final[dict[Route, RouteGuide]] = {
+    "vector_exact": RouteGuide(
+        description=(
+            "A question answered by a single fact, name, number, setting or short explanation "
+            "stated in one place, even when it is phrased as 'how' or 'why'. Not a request "
+            "to relate several things or to cover a whole process."
+        ),
+        examples=(
+            "What model is used for X?",
+            "What threshold does Y use?",
+            "Why was Z chosen over W?",
+            "What is the maximum number of Q?",
+        ),
     ),
-    "graph_relational": (
-        "A question about how named entities, components or node types are connected: "
-        "which edges, links or relationships join them, or the path between them. "
-        "Examples: 'What edges link A, B and C?', 'How is X connected to Y?', "
-        "'What role does the relationship R play between A and B?'."
+    "graph_relational": RouteGuide(
+        description=(
+            "A question about how named entities, components or node types are connected: "
+            "which edges, links or relationships join them, or the path between them."
+        ),
+        examples=(
+            "What edges link A, B and C?",
+            "How is X connected to Y?",
+            "What role does the relationship R play between A and B?",
+        ),
     ),
-    "hybrid": (
-        "A focused question about one mechanism that needs specific facts plus how "
-        "two or three parts interact, but is not a full-system walkthrough. "
-        "Examples: 'How do traversed results feed into the reranking step?', "
-        "'What does component X do and how does it hand off to component Y?', "
-        "'How does design A compare with design B?'."
+    "hybrid": RouteGuide(
+        description=(
+            "A focused question about one mechanism that needs specific facts plus how "
+            "two or three parts interact, but is not a full-system walkthrough."
+        ),
+        examples=(
+            "How do traversed results feed into the reranking step?",
+            "What does component X do and how does it hand off to component Y?",
+            "How does design A compare with design B?",
+        ),
     ),
-    "chitchat": (
-        "Greetings, thanks, goodbyes and small talk with no technical content. "
-        "Examples: 'hello there', 'thanks so much!', 'what can you do?'."
+    "chitchat": RouteGuide(
+        description="Greetings, thanks, goodbyes and small talk with no technical content.",
+        examples=("hello there", "thanks so much!", "what can you do?"),
     ),
-    "massive_context": (
-        "A request to cover a whole process, stack or set of mechanisms across many "
-        "parts of the documents: an end-to-end flow, a step-by-step walk through "
-        "everything that happens, a summary of the whole system, or a comparison of "
-        "every mechanism of a kind. Multi-part questions that list several areas to "
-        "cover belong here. "
-        "Examples: 'Describe the full end-to-end flow of X', 'Walk through everything "
-        "that happens to Y from start to finish', 'Summarize the whole stack: A, B, C "
-        "and D', 'Compare every mechanism used to do Z'."
+    "massive_context": RouteGuide(
+        description=(
+            "A request to cover a whole process, stack or set of mechanisms across many "
+            "parts of the documents: an end-to-end flow, a step-by-step walk through "
+            "everything that happens, a summary of the whole system, or a comparison of "
+            "every mechanism of a kind. Multi-part questions that list several areas to "
+            "cover belong here."
+        ),
+        examples=(
+            "Describe the full end-to-end flow of X",
+            "Walk through everything that happens to Y from start to finish",
+            "Summarize the whole stack: A, B, C and D",
+            "Compare every mechanism used to do Z",
+        ),
     ),
+}
+_ROUTER_CRITERIA: Final[dict[str, str]] = {
+    route: guide.criterion() for route, guide in ROUTE_GUIDES.items()
 }
 
 

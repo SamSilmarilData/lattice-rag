@@ -610,3 +610,23 @@ async def test_failed_cache_verification_answer_is_unverified_and_not_cached(
     assert repeat == {"unverified": True, "cached": False}
     assert len(cache) == 1
     assert c["pipeline"].execute.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("decision", "expected"),
+    [
+        (RouteDecision(route="hybrid", confidence=0.5, verified=False), False),
+        (RouteDecision(route="hybrid", confidence=0.9, verified=True), True),
+    ],
+)
+async def test_run_reports_whether_jev_chose_the_route(
+    mock_orchestrator_components, decision, expected
+):
+    """Route Accuracy needs to tell a Jev decision from a System 1 fallback route."""
+    c = mock_orchestrator_components
+    c["router"].route_query = AsyncMock(return_value=decision)
+
+    state = await _orchestrator(c).run("Explain LatticeDB", use_cache=False)
+
+    assert (state.route, state.route_verified) == ("hybrid", expected)

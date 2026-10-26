@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from lattice_rag.routing.router import QueryRouter, RouteDecision
+from lattice_rag.routing.router import ROUTE_GUIDES, QueryRouter, RouteDecision
 
 
 @pytest.mark.asyncio
@@ -197,26 +197,40 @@ async def _criteria_sent_to_jev() -> dict[str, str]:
     return dict(choice.criteria)
 
 
-@pytest.mark.asyncio
-async def test_every_route_description_carries_worked_examples():
-    criteria = await _criteria_sent_to_jev()
-    assert set(criteria) == {
-        "vector_exact",
-        "graph_relational",
-        "hybrid",
-        "chitchat",
-        "massive_context",
-    }
-    for route, description in criteria.items():
-        assert description.count("'") >= 4, f"{route} needs at least two quoted examples"
+ALL_ROUTES = {"vector_exact", "graph_relational", "hybrid", "chitchat", "massive_context"}
+
+
+def test_every_route_has_at_least_two_worked_examples_and_none_is_shared():
+    assert set(ROUTE_GUIDES) == ALL_ROUTES
+    examples = [e for guide in ROUTE_GUIDES.values() for e in guide.examples]
+    assert all(len(guide.examples) >= 2 for guide in ROUTE_GUIDES.values())
+    assert len(examples) == len(set(examples)), "an example must teach exactly one Route"
 
 
 @pytest.mark.asyncio
-async def test_massive_context_covers_multipart_walkthroughs_not_single_facts():
+async def test_jev_criteria_carry_each_routes_description_and_quoted_examples():
     criteria = await _criteria_sent_to_jev()
-    massive = criteria["massive_context"].lower()
-    for cue in ("end-to-end", "walk through", "every", "whole"):
-        assert cue in massive
-    # a single-fact question must stay with vector_exact, and say so
-    assert "single" in criteria["vector_exact"].lower()
-    assert "not" in criteria["vector_exact"].lower()
+
+    assert set(criteria) == ALL_ROUTES
+    for route, guide in ROUTE_GUIDES.items():
+        assert criteria[route].startswith(guide.description)
+        for example in guide.examples:
+            assert f"'{example}'" in criteria[route]
+
+
+@pytest.mark.parametrize(
+    ("example", "route"),
+    [
+        # a 'why' question answered by one stated fact stays a factual lookup
+        ("Why was Z chosen over W?", "vector_exact"),
+        ("What threshold does Y use?", "vector_exact"),
+        ("How is X connected to Y?", "graph_relational"),
+        ("How do traversed results feed into the reranking step?", "hybrid"),
+        # multi-part walkthroughs of a whole process go to massive_context
+        ("Describe the full end-to-end flow of X", "massive_context"),
+        ("Walk through everything that happens to Y from start to finish", "massive_context"),
+        ("Summarize the whole stack: A, B, C and D", "massive_context"),
+    ],
+)
+def test_misroute_prone_phrasings_are_taught_under_their_expected_route(example, route):
+    assert example in ROUTE_GUIDES[route].examples

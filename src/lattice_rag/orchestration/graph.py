@@ -117,6 +117,7 @@ class RAGOrchestrator:
             filtered_chunks=done["sources"],
             low_grounding=done["low_grounding"],
             unverified=done["unverified"],
+            route_verified=done["route_verified"],
             answer=done["answer"],
             degraded=done["degraded"],
             timings=done["timings"],
@@ -167,6 +168,7 @@ class RAGOrchestrator:
                 degraded=False,
                 low_grounding=False,
                 unverified=False,
+                route_verified=True,  # only verified answers are stored in Tier 1
             )
             return
 
@@ -192,6 +194,7 @@ class RAGOrchestrator:
                 degraded=False,
                 low_grounding=False,
                 unverified=False,
+                route_verified=decision.verified,
             )
             return
 
@@ -249,6 +252,7 @@ class RAGOrchestrator:
             degraded=outcome.degraded,
             low_grounding=retrieved.low_grounding,
             unverified=unverified,
+            route_verified=decision.verified,
         )
 
     async def _triage(self, query: str, *, use_cache: bool) -> _Triage:
