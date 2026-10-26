@@ -23,7 +23,6 @@ from lattice_rag.eval.gold_set import GoldQuery, load_gold_set
 from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
-from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore, entity_key
 from lattice_rag.storage.extract import EntityExtractor
@@ -108,22 +107,10 @@ class EvalRunner:
                 for doc in corpus_data:
                     await ingester.ingest(doc_id=doc.document_id, title=doc.title, text=doc.text)
 
-                # Build ephemeral retrieval pipeline and orchestrator
-                ephemeral_retrieval = RetrievalPipeline(
-                    store=temp_store,
-                    embedding_service=embed_svc,
-                    router_guardrail=self.orchestrator.retrieval.guardrail,
-                )
-
-                active_orchestrator = RAGOrchestrator(
-                    router=self.orchestrator.router,
-                    semantic_cache=self.orchestrator.semantic_cache,
-                    fallback_cache=self.orchestrator.fallback_cache,
-                    retrieval_pipeline=ephemeral_retrieval,
-                    groq=self.orchestrator.groq,
-                    gemini=self.orchestrator.gemini,
-                    chitchat=self.orchestrator.chitchat,
-                    embedding_service=embed_svc,
+                # Same pipeline and orchestrator settings (guardrails, forced hops, graph
+                # context in the prompt, answer budget) over the ephemeral store
+                active_orchestrator = self.orchestrator.with_retrieval(
+                    self.orchestrator.retrieval.with_store(temp_store)
                 )
 
             # For suites with >5 queries, enforce concurrency 1 and inter-query pacing to avoid Groq 1000 OTPM rate limits
@@ -187,7 +174,8 @@ class EvalRunner:
                             ground_truth=item.reference_answer,
                             metrics=metrics_for_slice(item.slice),
                             thresholds=pass_thresholds,
-                            graph_context=pipeline_state.graph_context,
+                            # Judge the graph the generator received, not the whole traversal
+                            graph_context=pipeline_state.prompt_graph_context,
                         )
                         return msgspec.structs.replace(
                             judged,

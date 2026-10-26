@@ -172,3 +172,88 @@ def test_eval_passes_configured_degraded_retry_delay(monkeypatch, mocked_live_ev
 
     assert result.exit_code == 0, result.output
     assert captured["degraded_retry_delay"] == 9.0
+
+
+# --- Phase 5 experiment arms (#46 forced hops, #47 graph context) ----------------------
+
+
+def test_eval_runs_the_configured_system_by_default(mocked_live_eval):
+    result = CliRunner().invoke(cli.main, ["eval"])
+
+    assert result.exit_code == 0, result.output
+    cli._build_harness.assert_awaited_once_with(force_hops=None, graph_context=None)
+
+
+def test_eval_passes_the_experiment_arm_to_the_harness(mocked_live_eval):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    result = CliRunner().invoke(
+        cli.main, ["eval", "--force-hops", "2", "--graph-context", "relational"]
+    )
+
+    assert result.exit_code == 0, result.output
+    cli._build_harness.assert_awaited_once_with(
+        force_hops=2, graph_context=GraphContextMode.RELATIONAL
+    )
+
+
+@pytest.mark.parametrize("args", [["--force-hops", "3"], ["--graph-context", "sometimes"]])
+def test_eval_rejects_an_unknown_arm(mocked_live_eval, args):
+    result = CliRunner().invoke(cli.main, ["eval", *args])
+
+    assert result.exit_code == 2
+    mocked_live_eval.run_evaluation.assert_not_called()
+
+
+@pytest.fixture
+def offline_services(monkeypatch):
+    """Stub every service `_build_harness` constructs, so the real wiring runs offline."""
+    made_guardrails: list[float] = []
+
+    def guardrail(threshold: float = 0.5, **_kw):
+        made_guardrails.append(threshold)
+        return MagicMock()
+
+    for target in (
+        "lattice_rag.storage.db.LatticeStore",
+        "lattice_rag.retrieval.embeddings.EmbeddingService",
+        "lattice_rag.routing.router.QueryRouter",
+        "lattice_rag.caching.semantic_cache.SemanticCache",
+        "lattice_rag.generation.groq_synthesizer.GroqSynthesizer",
+        "lattice_rag.generation.gemini_fallback.GeminiFallback",
+    ):
+        monkeypatch.setattr(target, MagicMock())
+    fallback = MagicMock()
+    fallback.return_value.connect = AsyncMock()
+    monkeypatch.setattr("lattice_rag.caching.fallback_cache.FallbackCache", fallback)
+    monkeypatch.setattr("lattice_rag.routing.guardrail.ContextGuardrail", guardrail)
+    return made_guardrails
+
+
+async def test_harness_applies_the_arm_and_the_phase5_config(offline_services, monkeypatch):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "on")
+    monkeypatch.setenv("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "0.35")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "false")
+
+    h = await cli._build_harness(force_hops=1, graph_context=GraphContextMode.OFF)
+
+    assert h["pipeline"].forced_hops == 1
+    assert h["orchestrator"].graph_context_in_prompt is GraphContextMode.OFF
+    assert offline_services == [0.5, 0.35]
+    guardrails = h["pipeline"].guardrails
+    assert guardrails.for_route("massive_context") is not guardrails.for_route("hybrid")
+
+
+async def test_harness_without_an_arm_follows_the_environment(offline_services, monkeypatch):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "relational")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "true")
+
+    h = await cli._build_harness()
+
+    assert h["pipeline"].forced_hops is None
+    assert h["orchestrator"].graph_context_in_prompt is GraphContextMode.RELATIONAL
+    assert h["pipeline"].guardrails.for_route("massive_context") is None

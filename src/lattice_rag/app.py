@@ -49,7 +49,7 @@ from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
+from lattice_rag.routing.guardrail import ContextGuardrail, build_route_guardrails
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
@@ -105,10 +105,15 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     # 3. Decision routing & context guardrail. In mock-key mode neither is called, so no
     #    query pays for failing Jev calls; the resulting answers are flagged unverified.
     router = QueryRouter.offline() if config.using_mock_keys else QueryRouter(typesafe_client())
-    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set.
-    guardrail = with_rerank_skip(
-        None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client()),
-        config.guardrail_skip_rerank_score,
+    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set;
+    #    massive_context may get its own threshold or no Noul (phase 5, #48).
+    guardrail = build_route_guardrails(
+        None
+        if config.using_mock_keys
+        else lambda threshold: ContextGuardrail(threshold=threshold, ts_client=typesafe_client()),
+        skip_rerank_score=config.guardrail_skip_rerank_score,
+        massive_context_threshold=config.guardrail_massive_context_threshold,
+        skip_massive_context=config.guardrail_skip_massive_context,
     )
 
     # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
@@ -152,6 +157,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         chitchat=chitchat,
         embedding_service=embedding_service,
         answer_max_tokens=config.llm_max_tokens,
+        graph_context_in_prompt=config.graph_context_in_prompt,
     )
 
     # 8. Document Ingester (deep module)
@@ -196,8 +202,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
-        if guardrail is not None:
-            await guardrail.close()
+        await guardrail.close()
         store.close()
 
 

@@ -236,4 +236,45 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
    - the Noul contradiction vetoes on `long_context` (baseline: 1, 1 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
 4. **Record and enable.** Put the three run means and the veto counts in the PR that sets the variable in the deployment environment (for example the Cloud Run service's env vars), and keep the reports. Re-run this procedure when the reranker model, `top_k`, the Gold Set or the threshold changes.
 
+### Phase 5 experiment arms (spec #22)
+
+Three switches let the phase 5 experiments run as Live Tier arms without code edits. Every default keeps the measured behaviour, so the baseline still describes the unconfigured system. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003, and outcomes are recorded there, not here. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
+
+Common arguments: `ARGS="--dataset eval_dataset.json --baseline eval_baseline.json --no-fail-on-regression"`.
+
+**#46 Route ablation (ADR-0003): forced hop count.** `--force-hops 1|2` makes every non-`chitchat` query walk that many graph hops, whatever Route the router chose. It is an eval-only CLI option: the app, the API and `.env` have no equivalent. The router still runs, so Route Accuracy reports the router's real pick. There are two arms, because `vector_exact` and `hybrid` already run identically:
+
+```bash
+lattice-rag eval $ARGS --force-hops 1 --output ablation-1hop.json
+lattice-rag eval $ARGS --force-hops 2 --output ablation-2hop.json
+```
+
+**#47 Graph context in the prompt: `GRAPH_CONTEXT_IN_PROMPT=on|off|relational`** (default `on`, the current behaviour). The setting decides which part of the traversed subgraph reaches the generation prompt:
+- `on`: the whole subgraph, on every retrieval Route.
+- `off`: none.
+- `relational`: only on `graph_relational` and `hybrid`, capped at the first 10 edges and the Entities they connect.
+
+Traversal runs in every mode, so Graph Recall and the UI's graph path do not change. The Live Tier judge receives exactly the triples the generator received, so `off` is never judged against evidence the answer lacked. `eval --graph-context` overrides the variable for a single run:
+
+```bash
+lattice-rag eval $ARGS --graph-context on  --output graph-on.json
+lattice-rag eval $ARGS --graph-context off --output graph-off.json
+# only if the outcome rule calls for the restricted configuration:
+lattice-rag eval $ARGS --graph-context relational --output graph-relational.json
+```
+
+**#48 Noul on `massive_context`.**
+- `GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD` sets the Noul threshold used by `massive_context` retrieval only. It defaults to the global 0.50, and the other Routes always keep 0.50.
+- `GUARDRAIL_SKIP_MASSIVE_CONTEXT=true` sends no `massive_context` chunk to Noul. Those answers are Unverified (`unverified: true`) and never written to Tier 1. The skip wins over the threshold.
+
+Read the `long_context` Slice:
+
+```bash
+lattice-rag eval $ARGS --output noul-050.json
+GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.35 lattice-rag eval $ARGS --output noul-035.json
+GUARDRAIL_SKIP_MASSIVE_CONTEXT=true      lattice-rag eval $ARGS --output noul-skip.json
+```
+
+The kept configuration of #47 and #48 is applied through the environment, which `app.py` `lifespan()` and `cli.py` `_build_harness()` both read. Record it in `.env.example` and in the deployment's env vars.
+
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

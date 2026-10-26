@@ -108,3 +108,50 @@ def test_reranker_revision_is_pinned_unless_overridden(monkeypatch: pytest.Monke
     )
     monkeypatch.setenv("RERANKER_ONNX_REVISION", "abc123")
     assert load_config(require_typesafe=False).reranker_onnx_revision == "abc123"
+
+
+# --- Phase 5 experiment switches (#47, #48) --------------------------------------------
+
+_PHASE5_VARS = (
+    "GRAPH_CONTEXT_IN_PROMPT",
+    "GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD",
+    "GUARDRAIL_SKIP_MASSIVE_CONTEXT",
+)
+
+
+def test_phase5_switches_default_to_current_behaviour(monkeypatch: pytest.MonkeyPatch):
+    for var in _PHASE5_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    cfg = load_config(require_typesafe=False)
+
+    assert cfg.graph_context_in_prompt == "on"
+    assert cfg.guardrail_massive_context_threshold == 0.5
+    assert cfg.guardrail_skip_massive_context is False
+
+
+def test_phase5_switches_read_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "Relational")
+    monkeypatch.setenv("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "0.35")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "true")
+
+    cfg = load_config(require_typesafe=False)
+
+    assert cfg.graph_context_in_prompt == "relational"
+    assert cfg.guardrail_massive_context_threshold == 0.35
+    assert cfg.guardrail_skip_massive_context is True
+
+
+@pytest.mark.parametrize(
+    ("var", "value"),
+    [
+        ("GRAPH_CONTEXT_IN_PROMPT", "sometimes"),
+        ("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "1.5"),
+        ("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "maybe"),
+    ],
+)
+def test_phase5_switches_reject_invalid_values(monkeypatch: pytest.MonkeyPatch, var, value):
+    monkeypatch.setenv(var, value)
+
+    with pytest.raises(ValueError, match=var):
+        load_config(require_typesafe=False)

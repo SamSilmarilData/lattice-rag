@@ -26,6 +26,9 @@ class PipelineState:
 
     # --- Retrieval ---
     graph_context: dict[str, Any] | None = None  # SubgraphResult as dict
+    # The part of graph_context the generator was given (GRAPH_CONTEXT_IN_PROMPT); the
+    # Live Tier judge sees exactly this, so it never judges evidence the answer lacked
+    prompt_graph_context: dict[str, Any] | None = None
 
     # --- Reranked chunks that passed the guardrail (Jev Noul) ---
     filtered_chunks: list[dict[str, Any]] = field(default_factory=list)
