@@ -15,6 +15,9 @@ from lattice_rag.security import sanitize_error_detail
 
 logger = logging.getLogger(__name__)
 
+# Broad cross-document answers need more room than the default budget.
+MASSIVE_CONTEXT_MAX_TOKENS = 1536
+
 OFFLINE_MESSAGE = (
     "I'm sorry, all generation services are currently unavailable. Please try again in a moment."
 )
@@ -83,7 +86,9 @@ class ResilientSynthesizer:
         # Massive context queries route directly to large-context Gemini
         if route == "massive_context" and self.gemini is not None:
             try:
-                answer = await self.gemini.synthesize(query, context_chunks, graph_context)
+                answer = await self.gemini.synthesize(
+                    query, context_chunks, graph_context, max_tokens=MASSIVE_CONTEXT_MAX_TOKENS
+                )
                 return SynthesisResult(answer=answer, degraded=False, provider="gemini")
             except Exception as e:
                 logger.warning(
@@ -129,7 +134,9 @@ class ResilientSynthesizer:
         """
         outcome = outcome if outcome is not None else StreamOutcome()
 
+        extra: dict[str, int] = {}
         if route == "massive_context":
+            extra = {"max_tokens": MASSIVE_CONTEXT_MAX_TOKENS}
             providers = [("gemini", self.gemini, False)]
             primary = "gemini"
         else:
@@ -143,7 +150,7 @@ class ResilientSynthesizer:
             try:
                 guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
                 with guard:
-                    async for tok in client.stream(query, context_chunks, graph_context):
+                    async for tok in client.stream(query, context_chunks, graph_context, **extra):
                         emitted = True
                         yield tok
                 outcome.provider = name

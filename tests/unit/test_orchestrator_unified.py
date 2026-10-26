@@ -170,7 +170,7 @@ async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestr
         raise RuntimeError("Groq 503")
         yield "never"  # pragma: no cover
 
-    async def _gemini_stream(q, ch, g):
+    async def _gemini_stream(q, ch, g, **_kw):
         yield "Gemini answer."
 
     c["groq"].stream = _groq_stream_fail
@@ -243,7 +243,7 @@ async def test_massive_context_retrieves_more_evidence_in_both_paths(mock_orches
     )
     c["gemini"].synthesize = AsyncMock(return_value="Summary.")
 
-    async def _gemini_stream(q, ch, g):
+    async def _gemini_stream(q, ch, g, **_kw):
         yield "Summary."
 
     c["gemini"].stream = _gemini_stream
@@ -408,7 +408,7 @@ def _scenario_components(scenario: str) -> dict:
     gemini_answer = "Summary." if scenario == "massive_context" else "Gemini answer."
     gemini.synthesize = AsyncMock(return_value=gemini_answer)
 
-    async def _gemini_stream(q, ch, g):
+    async def _gemini_stream(q, ch, g, **_kw):
         yield gemini_answer
 
     groq.stream = _groq_stream

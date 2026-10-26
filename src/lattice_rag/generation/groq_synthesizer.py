@@ -21,7 +21,7 @@ class GroqSynthesizer:
         self,
         api_key: str | None = None,
         model: str = "qwen/qwen3.8-27b",
-        max_tokens: int = 256,
+        max_tokens: int = 768,
         client: AsyncGroq | None = None,
     ) -> None:
         """Initializes the AsyncGroq client with configurable model and API key.
@@ -50,6 +50,7 @@ class GroqSynthesizer:
         query: str,
         context_chunks: list[dict[str, Any]],
         graph_context: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """Non-streaming synthesis of a grounded answer."""
         logger.info("groq_synthesizing_answer", model=self.model)
@@ -65,9 +66,11 @@ class GroqSynthesizer:
                         {"role": "system", "content": prompt.system},
                         {"role": "user", "content": prompt.user},
                     ],
-                    max_tokens=self.max_tokens,
+                    max_tokens=max_tokens or self.max_tokens,
                     stream=False,
                 )
+                if response.choices[0].finish_reason == "length":
+                    logger.warning("generation_truncated", provider="groq", model=self.model)
                 return response.choices[0].message.content or ""
             except Exception as e:
                 err_str = str(e)
@@ -88,6 +91,7 @@ class GroqSynthesizer:
         query: str,
         context_chunks: list[dict[str, Any]],
         graph_context: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncGenerator[str, None]:
         """Streaming synthesis of a grounded answer yielding delta text tokens."""
         logger.info("groq_streaming_synthesis", model=self.model)
@@ -104,13 +108,15 @@ class GroqSynthesizer:
                         {"role": "system", "content": prompt.system},
                         {"role": "user", "content": prompt.user},
                     ],
-                    max_tokens=self.max_tokens,
+                    max_tokens=max_tokens or self.max_tokens,
                     stream=True,
                 )
                 async for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         emitted = True
                         yield chunk.choices[0].delta.content
+                    if chunk.choices and chunk.choices[0].finish_reason == "length":
+                        logger.warning("generation_truncated", provider="groq", model=self.model)
                 return
             except Exception as e:
                 err_str = str(e)

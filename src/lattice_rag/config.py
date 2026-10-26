@@ -34,7 +34,7 @@ class AppConfig:
     reranker_onnx_revision: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
     gemini_model: str = "gemini-3.8-flash"
-    llm_max_tokens: int = 256
+    llm_max_tokens: int = 768
     cors_allow_origins: tuple[str, ...] = ()
     query_rate_limit_per_minute: int = 60
     # Reverse proxies in front of the app whose X-Forwarded-For entries are trusted.
@@ -92,7 +92,7 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         reranker_onnx_revision=os.environ.get("RERANKER_ONNX_REVISION") or None,
         groq_model=os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
-        llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", "256")),
+        llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", "768")),
         cors_allow_origins=_split_csv(os.environ.get("CORS_ALLOW_ORIGINS", "")),
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
         trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),
