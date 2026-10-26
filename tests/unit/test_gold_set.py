@@ -203,3 +203,21 @@ def test_missing_case_is_rejected_with_its_name(tmp_path: Path) -> None:
     message = str(exc.value)
     assert "case" in message
     assert "queries[2]" in message
+
+
+def test_expected_entity_absent_from_the_corpus_is_rejected(tmp_path: Path) -> None:
+    data = _raw()
+    data["queries"][0]["expected_entities"] = ["Zyxquorp Engine"]
+
+    with pytest.raises(
+        GoldSetError, match="expected entity 'Zyxquorp Engine' is not in the corpus"
+    ):
+        load_gold_set(_write(tmp_path, data))
+
+
+def test_expected_entity_matches_the_corpus_ignoring_case(tmp_path: Path) -> None:
+    data = _raw()
+    word = data["corpus"][0]["text"].split()[0]
+    data["queries"][0]["expected_entities"] = [word.upper()]
+
+    load_gold_set(_write(tmp_path, data))

@@ -21,11 +21,12 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
 ``load_gold_set`` rejects a file that is structurally wrong (missing field, unknown
 Slice, Case or Route) or whose content is inconsistent (a Gold Passage that is not verbatim
 in its Document, a passage for an unknown Document, duplicate ids, or a Slice whose
-passage count makes no sense).
+passage count makes no sense) or an expected entity the corpus never mentions.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -80,6 +81,20 @@ class GoldSet(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     queries: list[GoldQuery]
 
 
+def _fold(text: str) -> str:
+    """Whitespace-collapsed, case-folded text for case-insensitive containment checks."""
+    return " ".join(text.split()).casefold()
+
+
+def _mentions(folded_text: str, entity: str) -> bool:
+    """Whether ``entity`` appears in ``folded_text`` as a whole term, ignoring case.
+
+    Whole term: not inside a longer word, so "Rust" is not found in "trust".
+    """
+    pattern = rf"(?<!\w){re.escape(_fold(entity))}(?!\w)"
+    return re.search(pattern, folded_text) is not None
+
+
 def find_problems(gold_set: GoldSet) -> list[str]:
     """Return every content problem in the Gold Set; an empty list means it is valid."""
     problems: list[str] = []
@@ -92,8 +107,16 @@ def find_problems(gold_set: GoldSet) -> list[str]:
             problems.append(f"duplicate document_id {doc.document_id!r}")
         docs[doc.document_id] = doc
 
+    corpus_text = _fold("\n".join(doc.text for doc in gold_set.corpus))
+
     seen_ids: set[str] = set()
     for q in gold_set.queries:
+        problems.extend(
+            f"{q.id}: expected entity {entity!r} is not in the corpus"
+            for entity in q.expected_entities
+            if not entity.strip() or not _mentions(corpus_text, entity)
+        )
+
         if q.id in seen_ids:
             problems.append(f"duplicate query id {q.id!r}")
         seen_ids.add(q.id)

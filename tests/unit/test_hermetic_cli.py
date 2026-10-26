@@ -67,9 +67,7 @@ def test_hermetic_passes_without_api_keys_and_exports_the_report(
     assert report["overall"]["recall"] == 1.0
 
 
-def test_hermetic_prints_and_exports_the_per_case_breakdown(
-    keyless: None, tmp_path: Path
-) -> None:
+def test_hermetic_prints_and_exports_the_per_case_breakdown(keyless: None, tmp_path: Path) -> None:
     dataset, thresholds = _write_inputs(tmp_path, floor=0.9)
     out = tmp_path / "report.json"
 

@@ -168,6 +168,7 @@ interface EvalQueryResult {
   provider: "groq" | "gemini" | "redis_faq" | "offline" | null;
   chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error
   routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)
+  graphRecall: number | null;        // Graph Recall; null when the query lists no expected entities or the pipeline failed
 }
 
 type Route = "vector_exact" | "graph_relational" | "hybrid" | "chitchat" | "massive_context";
@@ -198,8 +199,16 @@ interface EvalRunResponse {
   routeAccuracyUnverified: number;     // Not scored: Jev could not route, the fallback Route was used
   routeAccuracyErrored: number;        // Not scored: the pipeline failed, no Route was chosen
   misroutes: Misroute[];               // Scored queries off their Expected Route
+  graphRecall: number | null;          // Mean per-query Graph Recall; null if no query was scored
+  graphRecallBySlice: Record<Slice, number>;  // Same, per Slice (only Slices with a scored query)
+  graphRecallScored: number;           // Queries with expected entities whose pipeline ran
 }
 ```
+
+**Graph Recall** is the share of a query's `expected_entities` that appear among the
+Entities of its graph context (the nodes `GraphTraverser` surfaced), matched by name with
+whitespace collapsed and case folded, as `entity_key()` does. It is computed from the
+pipeline's output, not judged by Jev, and is advisory: it never affects `passedGate`.
 
 **Route Accuracy** scores only router decisions. A query is scored when it is outside the
 `chitchat` Slice (chitchat is routed deterministically, never by Jev; this matches the 17/27

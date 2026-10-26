@@ -25,7 +25,7 @@ from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
-from lattice_rag.storage.db import LatticeStore
+from lattice_rag.storage.db import LatticeStore, entity_key
 from lattice_rag.storage.extract import EntityExtractor
 from lattice_rag.vocabulary import Route
 
@@ -160,6 +160,9 @@ class EvalRunner:
                     chosen_route = cast("Route", pipeline_state.route)
                     route_verified = pipeline_state.route_verified
                     provider = pipeline_state.provider
+                    graph_recall = graph_recall_of(
+                        item.expected_entities, pipeline_state.graph_context
+                    )
                     if pipeline_state.degraded:
                         logger.error(
                             "eval_query_provider_degraded",
@@ -173,6 +176,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            graph_recall=graph_recall,
                         )
 
                     try:
@@ -190,6 +194,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            graph_recall=graph_recall,
                         )
                     except Exception as e:
                         # Fail the query rather than aborting the run
@@ -205,6 +210,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            graph_recall=graph_recall,
                         )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
@@ -236,6 +242,7 @@ class EvalRunner:
             f"- **Mean Answer Relevance**: {_fmt(report.mean_answer_relevance)}",
             f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
             *_route_accuracy_lines(report),
+            *_graph_recall_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
@@ -322,6 +329,7 @@ def _apply_gate(
         results=results,
         route_accuracy_floor=rules.route_accuracy_floor,
         **_route_accuracy(queries, results),
+        **_graph_recall(queries, results),
     )
 
 
@@ -360,8 +368,55 @@ def _route_accuracy(queries: list[GoldQuery], results: list[EvalQueryResult]) ->
     }
 
 
+def _name_key(name: str) -> str:
+    """Entity name as ``entity_key()`` normalizes it: whitespace-collapsed and case-folded."""
+    return entity_key(name, "")[0]
+
+
+def graph_recall_of(expected: list[str], graph_context: object) -> float | None:
+    """Share of ``expected`` entity names among the graph context's Entity names.
+
+    ``None`` when the query lists no expected entities. A missing or malformed graph
+    context surfaced no Entities, so its recall is 0.0.
+    """
+    wanted = {_name_key(e) for e in expected}
+    if not wanted:
+        return None
+    nodes = graph_context.get("nodes") if isinstance(graph_context, dict) else None
+    surfaced = {
+        _name_key(str(n["name"])) for n in nodes or [] if isinstance(n, dict) and n.get("name")
+    }
+    return round(len(wanted & surfaced) / len(wanted), 4)
+
+
+def _graph_recall(queries: list[GoldQuery], results: list[EvalQueryResult]) -> dict[str, Any]:
+    """Graph Recall fields: per-query means, overall and per Slice. Advisory, never gates."""
+    by_slice: dict[str, list[float]] = {}
+    for q, r in zip(queries, results, strict=True):
+        if r.graph_recall is not None:
+            by_slice.setdefault(q.slice, []).append(r.graph_recall)
+    scored = [v for vs in by_slice.values() for v in vs]
+    return {
+        "graph_recall": round(sum(scored) / len(scored), 4) if scored else None,
+        "graph_recall_by_slice": {s: round(sum(v) / len(v), 4) for s, v in by_slice.items()},
+        "graph_recall_scored": len(scored),
+    }
+
+
 def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def _graph_recall_lines(report: EvalRunResponse) -> list[str]:
+    scored = report.graph_recall_scored
+    lines = [
+        f"- **Graph Recall** (advisory, unjudged): {_fmt(report.graph_recall)} over "
+        f"{scored} {'query' if scored == 1 else 'queries'} with expected entities"
+    ]
+    lines += [
+        f"  - {name}: {_fmt(rec)}" for name, rec in sorted(report.graph_recall_by_slice.items())
+    ]
+    return lines
 
 
 def _route_accuracy_lines(report: EvalRunResponse) -> list[str]:
