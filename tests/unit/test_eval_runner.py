@@ -500,7 +500,7 @@ async def test_baseline_without_pass_thresholds_is_rejected(
 
 @pytest.mark.asyncio
 async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_dataset_and_baseline):
-    """Chitchat is judged on the reply only; unanswerable has no context-precision target."""
+    """Chitchat is judged on the reply only; unanswerable on faithfulness and correctness."""
     _, base_path = mock_dataset_and_baseline
     doc_text = "LatticeDB is embedded."
     ds_path = _write(
@@ -537,7 +537,7 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
     }
     assert by_query == {
         "hello": {"answer_relevance", "answer_correctness"},
-        "unknowable": {"faithfulness", "answer_relevance", "answer_correctness"},
+        "unknowable": {"faithfulness", "answer_correctness"},
         "what is it": {
             "faithfulness",
             "context_precision",
@@ -545,3 +545,49 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
             "answer_correctness",
         },
     }
+
+
+class _MetricHonouringEvaluator:
+    """Fake evaluator: scores only the requested metrics; a refusal is irrelevant to the query."""
+
+    SCORES = {
+        "faithfulness": 0.95,
+        "context_precision": 0.9,
+        "answer_relevance": 0.1,
+        "answer_correctness": 0.9,
+    }
+
+    async def evaluate_query(self, *, query, metrics, thresholds, **_: object) -> EvalQueryResult:
+        scores = {m: self.SCORES[m] for m in metrics}
+        passed = all(v >= getattr(thresholds, m) for m, v in scores.items())
+        return EvalQueryResult(query=query, passed=passed, **scores)
+
+
+@pytest.mark.asyncio
+async def test_correct_refusal_on_unanswerable_passes_without_answer_relevance(tmp_path: Path):
+    ds_path = _write(
+        tmp_path / "ds.json",
+        {
+            "version": "2.0.0",
+            "domain": "t",
+            "corpus": [],
+            "queries": [_gold_query("u", "unknowable", "unanswerable")],
+        },
+    )
+    base_path = _write(tmp_path / "base.json", _baseline(faithfulness=0.9))
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(
+        answer="The knowledge base does not contain this.", filtered_chunks=[]
+    )
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=_MetricHonouringEvaluator())  # type: ignore[arg-type]
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    (result,) = resp.results
+    assert result.passed is True
+    assert result.answer_relevance is None
+    assert resp.mean_answer_relevance is None
+    assert resp.passed_gate is True
+    report = runner.format_markdown_report(resp)
+    row = next(line for line in report.splitlines() if "unknowable" in line)
+    assert row.split("|")[4].strip() == "n/a"  # the Relevance column

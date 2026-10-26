@@ -175,6 +175,7 @@ class EvalRunner:
                             ground_truth=item.reference_answer,
                             metrics=metrics_for_slice(item.slice),
                             thresholds=pass_thresholds,
+                            graph_context=pipeline_state.graph_context,
                         )
                         return msgspec.structs.replace(scored, provider=provider)
                     except Exception as e:

@@ -15,6 +15,7 @@ from lattice_rag.eval.gate import (
     PassThresholds,
     query_passes,
 )
+from lattice_rag.generation.prompt import graph_triples
 from lattice_rag.security import SecretStr, query_fingerprint
 
 logger = structlog.get_logger(__name__)
@@ -132,8 +133,12 @@ class JevEvaluator:
         ground_truth: str,
         metrics: Sequence[str] = METRICS,
         thresholds: PassThresholds = DEFAULT_PASS_THRESHOLDS,
+        graph_context: dict[str, Any] | None = None,
     ) -> EvalQueryResult:
         """Judge one answer on ``metrics``; ``ground_truth`` is the Gold Set reference answer.
+
+        ``graph_context`` is the subgraph the generator was given; its triples are
+        judged as part of the context.
 
         Metrics not in ``metrics`` are left ``None``. Pass/fail applies ``thresholds``
         to every judged metric.
@@ -148,6 +153,9 @@ class JevEvaluator:
             text = c.get("text", "") if isinstance(c, dict) else str(c)
             if text:
                 context_parts.append(f"[{i + 1}] {text}")
+
+        if graph_context:
+            context_parts.append("Graph triples:\n" + "\n".join(graph_triples(graph_context)))
 
         context_text = "\n\n".join(context_parts) if context_parts else "NO_CONTEXT_RETRIEVED"
 
