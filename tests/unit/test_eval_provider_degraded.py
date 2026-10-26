@@ -44,14 +44,14 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
     }
     ds = tmp_path / "ds.json"
     ds.write_text(
-        json.dumps({"version": "2.0.0", "domain": "t", "corpus": [], "queries": [query]}),
+        json.dumps({"version": "3.0.0", "domain": "t", "corpus": [], "queries": [query]}),
         encoding="utf-8",
     )
     base = tmp_path / "base.json"
     base.write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "metrics": {"faithfulness": 0.85},
                 "gate_thresholds": {
                     "max_regression_delta": 0.06,

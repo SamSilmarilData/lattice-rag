@@ -21,7 +21,7 @@ METRIC_NAMES = ("faithfulness", "context_precision", "answer_relevance", "answer
 
 def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
     dataset = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [],
         "queries": [
@@ -36,7 +36,7 @@ def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
         ],
     }
     baseline = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "metrics": {"faithfulness": 0.5, "context_precision": 0.5, "answer_relevance": 0.5},
         "gate_thresholds": {
             "max_regression_delta": 0.06,

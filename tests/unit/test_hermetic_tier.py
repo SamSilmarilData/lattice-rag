@@ -119,7 +119,7 @@ def _q(
 
 def gold_set(*extra: GoldQuery) -> GoldSet:
     return GoldSet(
-        version="2.0.0",
+        version="3.0.0",
         domain="test",
         corpus=[
             GoldDocument(document_id="doc_astro", title="Astronomy", text=ASTRONOMY),
@@ -247,6 +247,28 @@ async def test_passage_spanning_overlapping_chunks_is_recalled_from_either_side_
     (outcome,) = report.queries
     assert outcome.recall == recall
     assert outcome.reciprocal_rank == rr
+
+
+async def test_a_chunk_that_starts_where_its_predecessor_starts_is_still_resolved() -> None:
+    # Two ~300-char sentences cannot share a Chunk, so Chunk 1 is sentence one alone and
+    # Chunk 2 carries sentence one as overlap: both start at offset 0 of the Document.
+    first = "Lorem " * 50 + "ends here."
+    second = "Ipsum " * 50 + "ends there."
+    base = gold_set()
+    long_doc = GoldDocument(document_id="doc_long", title="Long", text=f"{first} {second} Tail.")
+
+    report = await run_hermetic_tier(
+        GoldSet(
+            version=base.version,
+            domain=base.domain,
+            corpus=[*base.corpus, long_doc],
+            queries=base.queries,
+        ),
+        thresholds(0.0, 0.0),
+        fake_embedding_service(),
+    )
+
+    assert len(report.queries) == len(base.queries)
 
 
 GREETING_REPLY = (

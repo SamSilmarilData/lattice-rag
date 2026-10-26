@@ -1,4 +1,4 @@
-"""Gold Set v2: loading, validation, and the shipped dataset itself."""
+"""Gold Set v3: loading, validation, and the shipped dataset itself."""
 
 from __future__ import annotations
 
@@ -27,8 +27,54 @@ def _write(tmp_path: Path, data: dict[str, Any]) -> Path:
 def test_shipped_gold_set_is_valid() -> None:
     gold = load_gold_set(SHIPPED)
 
-    assert gold.version == "2.0.0"
-    assert len(gold.queries) >= 30
+    assert gold.version == "3.0.0"
+    assert len(gold.queries) == 30
+
+
+def test_shipped_corpus_is_the_five_documents_plus_the_long_form_docs() -> None:
+    from lattice_rag.ingestion.ingester import chunk_text
+
+    gold = load_gold_set(SHIPPED)
+
+    ids = {d.document_id for d in gold.corpus}
+    assert {
+        "doc_latticedb_internals",
+        "doc_fastembed_reranking",
+        "doc_gliner_extraction",
+        "doc_typesafe_system_one",
+        "doc_litestar_granian_stack",
+    } <= ids
+    for stem in ("architecture", "storage_and_schema", "api_reference", "deployment", "security"):
+        assert any(i.startswith(f"doc_{stem}_") for i in ids), stem
+    assert any(i.startswith("doc_performance_benchmark_") for i in ids)
+    chunks = sum(len(chunk_text(d.text)) for d in gold.corpus)
+    assert 120 <= chunks <= 220
+
+
+def test_corpus_sends_graph_triples_to_the_generation_prompt_not_the_reranker() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    text = " ".join(d.text for d in gold.corpus)
+    assert "appended to candidate text chunks" not in text
+    assert "jointly score" not in text
+    assert "graph triples are not appended to candidates" in text
+    assert "generation prompt" in text
+    by_id = {q.id: q for q in gold.queries}
+    for qid in ("eval_04", "eval_20", "eval_21", "eval_30"):
+        answer = by_id[qid].reference_answer.lower()
+        assert "reranker scores" not in answer
+        assert "linearized graph triples" not in answer
+    assert "prompt" in by_id["eval_04"].reference_answer.lower()
+    assert "prompt" in by_id["eval_21"].reference_answer.lower()
+
+
+def test_no_neo4j_or_pinecone_comparison_without_corpus_backing() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    query = next(q for q in gold.queries if q.id == "eval_19")
+    corpus = " ".join(d.text for d in gold.corpus)
+    for name in ("Neo4j", "Pinecone"):
+        assert name not in query.query + query.reference_answer or name in corpus
 
 
 def test_altered_passage_is_rejected(tmp_path: Path) -> None:
@@ -105,5 +151,5 @@ def test_v1_dataset_is_rejected(tmp_path: Path) -> None:
     data = _raw()
     data["version"] = "1.0.0"
 
-    with pytest.raises(GoldSetError, match="expected '2.0.0'"):
+    with pytest.raises(GoldSetError, match="expected '3.0.0'"):
         load_gold_set(_write(tmp_path, data))

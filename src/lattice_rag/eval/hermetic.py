@@ -177,7 +177,8 @@ class _SeededCorpus:
             if start < 0:
                 raise HermeticError(f"{doc.document_id}: chunk {chunk_id} not found in its text")
             self.chunk_spans[chunk_id] = _Span(doc.document_id, start, start + len(norm))
-            cursor = start + 1
+            # Overlap can start a Chunk exactly where its predecessor starts
+            cursor = start
 
     def passage_span(self, doc_id: str, text: str) -> _Span:
         norm = _normalize(text)

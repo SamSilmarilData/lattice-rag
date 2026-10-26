@@ -21,7 +21,7 @@ PASS_THRESHOLDS = {
 
 def _baseline(**metrics: float) -> dict:
     return {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "metrics": metrics
         or {"faithfulness": 0.85, "context_precision": 0.80, "answer_relevance": 0.88},
         "gate_thresholds": {
@@ -44,7 +44,7 @@ def _result(query: str = "q", score: float = 0.9, **overrides: float) -> EvalQue
 def mock_dataset_and_baseline(tmp_path: Path):
     """Create sample dataset and baseline files."""
     dataset = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [],
         "queries": [
@@ -329,7 +329,7 @@ async def test_eval_runner_rejects_invalid_gold_set_before_running(tmp_path: Pat
     ds_path.write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "domain": "test",
                 "corpus": [],
                 "queries": [{"id": "q1", "query": "Q", "ground_truth": "old v1 field"}],
@@ -421,7 +421,7 @@ async def test_floor_and_pass_thresholds_come_from_the_baseline_file(tmp_path: P
     ds_path = _write(
         tmp_path / "ds.json",
         {
-            "version": "2.0.0",
+            "version": "3.0.0",
             "domain": "t",
             "corpus": [],
             "queries": [_gold_query("q1", "Q", "unanswerable")],
@@ -506,7 +506,7 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
     ds_path = _write(
         tmp_path / "slices.json",
         {
-            "version": "2.0.0",
+            "version": "3.0.0",
             "domain": "t",
             "corpus": [{"document_id": "d", "title": "D", "text": doc_text}],
             "queries": [
@@ -568,7 +568,7 @@ async def test_correct_refusal_on_unanswerable_passes_without_answer_relevance(t
     ds_path = _write(
         tmp_path / "ds.json",
         {
-            "version": "2.0.0",
+            "version": "3.0.0",
             "domain": "t",
             "corpus": [],
             "queries": [_gold_query("u", "unknowable", "unanswerable")],

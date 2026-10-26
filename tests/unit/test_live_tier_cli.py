@@ -84,7 +84,7 @@ def test_eval_without_a_live_key_fails_and_names_it(mocked_live_eval, monkeypatc
 # --- Baseline measurement from repeated Live Tier runs ---------------------------------
 
 _BASELINE = {
-    "version": "2.0.0",
+    "version": "3.0.0",
     "updated_at": "2026-01-01T00:00:00Z",
     "total_queries": 3,
     "metrics": {"faithfulness": 0.5},

@@ -139,7 +139,7 @@ def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "ds.json").write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "domain": "test",
                 "corpus": [],
                 "queries": [
@@ -158,7 +158,7 @@ def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "base.json").write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "metrics": {},
                 "gate_thresholds": {
                     "max_regression_delta": 0.03,

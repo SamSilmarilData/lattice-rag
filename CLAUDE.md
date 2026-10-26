@@ -53,7 +53,7 @@ Evaluation is split into two tiers (ADR-0002). Actions are pinned to commit SHAs
   - A pipeline or judge error occurs, or an answer is still degraded after one retry (`provider_degraded`). The query fails without being judged.
   - Noul vetoes an answer.
 
-The Gold Set (`eval_dataset.json`, format 2.0.0, loaded and validated by `eval/gold_set.py`) tags each query with a Slice, an `expected_route`, a `reference_answer` and verbatim Gold Passages. When metrics move on purpose, re-measure with three `lattice-rag eval --output` runs and `lattice-rag measure-baseline` (see `docs/production-readiness.md` §6).
+The Gold Set (`eval_dataset.json`, format 3.0.0, loaded and validated by `eval/gold_set.py`) tags each query with a Slice, an `expected_route`, a `reference_answer` and verbatim Gold Passages. When metrics move on purpose, re-measure with three `lattice-rag eval --output` runs and `lattice-rag measure-baseline` (see `docs/production-readiness.md` §6).
 
 ## Architecture
 

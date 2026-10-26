@@ -1,9 +1,9 @@
-"""Gold Set v2: the evaluation dataset's schema, loader and validator.
+"""Gold Set v3: the evaluation dataset's schema, loader and validator.
 
-The file format (``eval_dataset.json``, version 2.0.0) is::
+The file format (``eval_dataset.json``, version 3.0.0) is::
 
     {
-      "version": "2.0.0",
+      "version": "3.0.0",
       "domain": "...",
       "corpus": [{"document_id": "...", "title": "...", "text": "..."}],
       "queries": [{
@@ -31,7 +31,7 @@ import msgspec
 
 from lattice_rag.vocabulary import Route, Slice
 
-GOLD_SET_VERSION: Final = "2.0.0"
+GOLD_SET_VERSION: Final = "3.0.0"
 
 # Slices whose queries the corpus cannot (unanswerable) or should not (chitchat) answer.
 PASSAGE_FREE_SLICES: Final[frozenset[str]] = frozenset({"unanswerable", "chitchat"})

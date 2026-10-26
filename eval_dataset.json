@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "3.0.0",
   "domain": "High-Performance AI Engineering & Database Internals",
   "corpus": [
     {
@@ -10,12 +10,12 @@
     {
       "document_id": "doc_fastembed_reranking",
       "title": "FastEmbed Quantized Embeddings and Cross-Encoder Reranking",
-      "text": "FastEmbed provides CPU-quantized dense and sparse vector generation without requiring GPU hardware. The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity. For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding. During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+      "text": "FastEmbed provides CPU-quantized dense and sparse vector generation without requiring GPU hardware. The default dense model is BAAI/bge-small-en-v1.5, generating 384-dimensional normalized vector embeddings optimized for cosine similarity. For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding. The cross-encoder scores every candidate on its own chunk text only: graph triples are not appended to candidates, because they are identical for every candidate and could not change the ordering. Paths traversed in LatticeDB from the entities of the final chunks are instead linearized into triples formatted as 'source --[relation type]--> target' and sent to the generation prompt."
     },
     {
       "document_id": "doc_gliner_extraction",
       "title": "GLiNER Zero-Shot Named Entity Recognition and Triples",
-      "text": "The knowledge extraction pipeline employs GLiNER (Generalist and Lightweight Model for Named Entity Recognition). By default, the system leverages urchade/gliner_small-v2.1 as an efficient in-process extractor. GLiNER extracts domain entities corresponding to predefined labels including person, organization, technology, concept, algorithm, database, and protocol. Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created between their respective nodes in LatticeDB with relationship type derived from context. Extracted entities are tied to their originating text chunk through [:CONTAINS] edges, ensuring tight provenance tracking and citation grounding."
+      "text": "The knowledge extraction pipeline employs GLiNER (Generalist and Lightweight Model for Named Entity Recognition). By default, the system loads fastino/GLiNER2.5-Decide as an efficient in-process extractor and falls back to urchade/gliner_small-v2.1 when that model is unavailable. GLiNER extracts domain entities corresponding to predefined labels including person, organization, technology, concept, algorithm, database, and protocol. Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a [:RELATION] edge is created between their respective nodes in LatticeDB, with a relationship type built from the two entity types, such as CO_OCCURS_IN_TECHNOLOGY_DATABASE. Extracted entities are tied to their originating text chunk through [:CONTAINS] edges, ensuring tight provenance tracking and citation grounding."
     },
     {
       "document_id": "doc_typesafe_system_one",
@@ -25,7 +25,217 @@
     {
       "document_id": "doc_litestar_granian_stack",
       "title": "Litestar and Granian Rust-Optimized Web Framework",
-      "text": "The web API layer is built on Litestar 2.24+ and served by Granian, a high-performance HTTP server written in Rust that delivers 2 to 4 times the throughput of standard Python Uvicorn servers. All data transfer objects are defined as msgspec.Struct instances with rename='camel' to ensure zero-copy sub-millisecond JSON serialization. The service provides dual query APIs: a synchronous POST /api/v1/query endpoint and a streaming POST /api/v1/query/stream endpoint emitting typed Server-Sent Events (SSE) with stage, token, and done events for frontend telemetry. Error handling complies with RFC 9457 Problem Details, and all logging and error responses pass through automated regex sanitizers to scrub API keys, tokens, and authorization headers before reaching the network."
+      "text": "The web API layer is built on Litestar 2.24+ and served by Granian, a high-performance HTTP server written in Rust that delivers 2 to 4 times the throughput of standard Python Uvicorn servers. All data transfer objects are defined as msgspec.Struct instances with rename='camel' to ensure zero-copy sub-millisecond JSON serialization. The service provides dual query APIs: a synchronous POST /api/v1/query endpoint and a streaming POST /api/v1/query/stream endpoint emitting typed Server-Sent Events (SSE) with stage, token, and done events for frontend telemetry. If a provider fails after its first token, the stream sends an error event before the final done event. Error handling complies with RFC 9457 Problem Details, and all logging and error responses pass through automated regex sanitizers to scrub API keys, tokens, and authorization headers before reaching the network."
+    },
+    {
+      "document_id": "doc_architecture_0_system_architecture_technica",
+      "title": "System Architecture & Technical Design",
+      "text": "# System Architecture & Technical Design\n\nThis document details the architectural principles, subsystems, and execution lifecycle of the **`lattice-rag`** engine.\n\n## 1. Design Philosophy: The In-Process Paradigm\n\nTraditional RAG and GraphRAG architectures introduce severe performance and cost bottlenecks:\n- **Network Boundaries:** Hitting remote vector databases (Pinecone, Qdrant) over HTTP incurs 30–100ms per search.\n- **Heavy Infrastructure Footprint:** JVM-based graph servers (Neo4j) consume gigabytes of memory and require dedicated cloud clusters.\n- **Uncontrolled Context Windows:** Shoveling raw retrieved text into frontier LLMs inflates generation costs and increases hallucination surface.\n\n`lattice-rag` adopts an **in-process, single-binary architecture**:\n1. All graph nodes, edges, HNSW vector indices, and BM25 inverted indices reside inside a **single local file** (`data/lattice_rag.db`) managed by **LatticeDB**.\n2. All embeddings and entity extractions run locally on **CPU** using quantized ONNX models via **FastEmbed** and **GLiNER2.5-Decide**.\n3. Small, calibrated \"System One\" decision models (**TypeSafe AI Jev**) act as front-door traffic controllers and context guardrails, reducing token expenditures."
+    },
+    {
+      "document_id": "doc_architecture_1_2_end_to_end_query_execution",
+      "title": "System Architecture & Technical Design: 2. End-to-End Query Execution Lifecycle",
+      "text": "## 2. End-to-End Query Execution Lifecycle\n\nThe following sequence diagram illustrates the lifecycle of a user query through the system:\n\n## 3. Subsystem Breakdown\n\n### 3.1 Web Server & API Layer (Litestar + Granian + msgspec)\n- **Granian ASGI Server:** Multi-threaded Rust HTTP engine running on Python 3.12 without the overhead of standard Python web servers.\n- **Litestar Framework:** Employs explicit parameter markers (`JSONBody`, `FromQuery`, `FromPath`) and DTO architectures.\n- **msgspec Structs:** All request/response schemas use strict `msgspec.Struct` with `rename=\"camel\"`, outperforming Pydantic by 2–4x in serialization speed.\n- **Interactive Documentation:** Native **Scalar** OpenAPI interface rendered directly at `/schema/scalar`."
+    },
+    {
+      "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+      "title": "System Architecture & Technical Design: 3.2 System 1 Decision Routing (TypeSafe AI Jev)",
+      "text": "### 3.2 System 1 Decision Routing (TypeSafe AI Jev)\nInstead of invoking large generative models for intent recognition, `lattice-rag` uses **TypeSafe AI Jev**:\n- **Front-Door Router (`routing/router.py`):**\n  Uses the `Choice` primitive to classify queries into:\n  - `vector_exact`: Direct factual lookups and code definitions.\n  - `graph_relational`: Questions requiring multi-step relational hops across entities.\n  - `hybrid`: Broad semantic queries needing both text context and relational graph structure.\n  - `chitchat`: Greetings and pleasantries. Messages made up entirely of small talk (\"hi!\", \"thanks a lot\", \"what can you do?\") skip the Jev call through a deterministic fast path; a question that merely contains such a word (\"How does HNSW help recall?\") is always routed by Jev.\n  - `massive_context`: Cross-corpus summarizations requiring 1M token analysis.\n- **Context Guardrail (`routing/guardrail.py`):**\n  Uses the boolean `Noul` primitive to batch-score retrieved chunks against the user query, pruning irrelevant or tangential passages. It returns a per-request `GuardrailResult(chunks, low_grounding)`; when no chunk passes, the answer is generated without evidence, flagged `lowGrounding: true` in the response, and never cached. If Noul itself cannot run, the candidates pass through unchecked and the answer is an Unverified Answer (`unverified: true`), also never cached; the same applies when routing falls back to `hybrid`, and when a Tier 1 near-duplicate is found but its Noul equivalence check cannot run (the answer is recomputed rather than served). In mock-key mode the router and guardrail are not called at all. An optional `RerankScoreGate` (`GUARDRAIL_SKIP_RERANK_SCORE`, off by default) keeps chunks whose cross-encoder score clears the value without asking Noul; it is enabled only with Live Tier evidence (production-readiness §6)."
+    },
+    {
+      "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+      "title": "System Architecture & Technical Design: 3.3 Storage Engine (LatticeDB)",
+      "text": "### 3.3 Storage Engine (LatticeDB)\n- Embedded single-file property-graph engine (`data/lattice_rag.db`).\n- **Unified Querying:**\n  - HNSW vector similarity search (`<=>` operator) across 384-dimensional dense vectors.\n  - BM25 full-text inverted index (`@@` operator) on text content.\n  - Sub-millisecond graph traversals using native C bindings.\n\n### 3.4 3-Stage Hybrid Retrieval Pipeline\n1. **Stage 1 (Vector Candidate Recall):** The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`). Each candidate keeps its `doc_id` and `position` for citations.\n2. **Stage 2 (Relational Traversal):** Runs after Stage 3 and the context guardrail. It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates, and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.\n3. **Stage 3 (Precision Reranking):** The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`). Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead. Each candidate costs about 100 ms on CPU, which is why the headroom is small."
+    },
+    {
+      "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+      "title": "System Architecture & Technical Design: 3.5 Multi-Tier Caching & Circuit Breaker",
+      "text": "### 3.5 Multi-Tier Caching & Circuit Breaker\n\n`ResilientSynthesizer` (`generation/resilient_synthesizer.py`) is the single generation path for both `RAGOrchestrator.run()` and `stream_query()`. It owns one `pybreaker` circuit breaker around Groq, paired with a 3-tier cascade:\n\n- **Tier 1 (Semantic Vector Cache & Primary Groq):** Evaluates incoming query against in-memory query embeddings. If cosine similarity $\\ge 0.90$, Jev's `Noul` primitive verifies semantic equivalence before the cached answer is returned. Standard non-cached queries route to primary **GroqCloud** (`GROQ_MODEL`). Only answers from the primary provider that were grounded in guardrail-approved evidence are cached.\n- **Tier 2 (Circuit Breaker & Cascade 1 Fallback):** The breaker records every Groq outcome from both the buffered and streaming paths (`fail_max=3`, `reset_timeout=30s`). A Groq call that ends in an error counts as one failure. The Groq SDK and `GroqSynthesizer` retry HTTP 429 internally first, so a rate-limited call only counts once its retries are exhausted. Client disconnects (`asyncio.CancelledError`) are not counted. After 3 consecutive failures the circuit opens and Groq is skipped in favour of **Gemini** (`GEMINI_MODEL`) until the reset timeout lets a probe through. `massive_context` reverses the provider order: Gemini first, then Groq under the same breaker, then the FAQ. An answer from any provider other than the route's primary (Groq, or Gemini on `massive_context`) or from the FAQ is marked `degraded: true`.\n- **Tier 3 (Cascade 2 Offline FAQ Hash):** If both LLM providers fail, the system returns the closest pre-computed answer from the Redis hash (`cache:fallback:queries`, seeded from `fallback_queries.json`). This answer is for the closest *seeded* question, not necessarily the one asked, so it is always marked degraded.\n- **Streaming:** The cascade only moves to the next provider while nothing has been emitted. If a provider fails after its first token, the stream sends an `error` event and ends with `done` (`degraded: true`) rather than appending a second provider's answer.\n\n### 3.6 Keeping CPU Work Off the Event Loop\nEmbedding, reranking, GLiNER extraction and LatticeDB reads and writes run in worker threads via `asyncio.to_thread()`, so the Litestar event loop keeps serving other requests. ONNX Runtime releases the GIL during inference, so the heaviest work (embedding and reranking) runs in parallel with request handling, without the pickling and model-reload cost of a process pool."
+    },
+    {
+      "document_id": "doc_storage_and_schema_0_storage_engine_graph_schema_",
+      "title": "Storage Engine & Graph Schema (LatticeDB)",
+      "text": "# Storage Engine & Graph Schema (LatticeDB)\n\n`lattice-rag` uses **LatticeDB** (v0.15+), an embedded, serverless, single-file property-graph database. It acts as an in-process SQLite for connected graph, vector, and full-text data.\n\n## 1. Graph Data Model\n\nThe graph follows a **Hierarchical Document-Chunk-Entity** architecture:\n\n### Node Labels & Properties\n\n| Label | Properties | Description |\n|---|---|---|\n| `:Document` | `doc_id` (str), `title` (str) | Top-level document container. |\n| `:Chunk` | `text` (str), `position` (int), `doc_id` (str), `embedding` (vector[384]) | Text segment with dense ONNX embedding and BM25 index. |\n| `:Entity` | `name` (str), `entity_type` (str) | Extracted semantic entity (e.g. `LatticeDB`, `FastEmbed`). Entities carry no vector; retrieval reaches them through `CONTAINS` edges from chunks. |"
+    },
+    {
+      "document_id": "doc_storage_and_schema_1_edge_relationships",
+      "title": "Storage Engine & Graph Schema (LatticeDB): Edge Relationships",
+      "text": "### Edge Relationships\n\n| Edge | Source $\\to$ Target | Properties | Purpose |\n|---|---|---|---|\n| `HAS_CHUNK` | `:Document` $\\to$ `:Chunk` | — | Preserves document hierarchy and reading order. |\n| `CONTAINS` | `:Chunk` $\\to$ `:Entity` | — | Grounding link tying entities to their exact source passage. |\n| `RELATION` | `:Entity` $\\to$ `:Entity` | `type` (str) | Semantic multi-hop relationship extracted by GLiNER. |\n\n### Ingest Validation & Entity Identity\n\n`ingest_document_bundle` validates the whole Document Bundle before it opens the write transaction, so a rejected bundle writes nothing:\n\n- Every chunk embedding must have the store's `vector_dimensions`, or `EmbeddingDimensionError` is raised. A mismatch used to be skipped silently, which left chunks invisible to vector search.\n- Each `(chunk_ref, entities, relations)` entry must name its chunk by index into the bundle's chunk list. An out-of-range or non-integer reference raises `UnresolvedChunkReferenceError`; it is never attributed to another chunk. `ingest_entities(chunk_id, ...)` raises the same error when `chunk_id` is not a stored Chunk.\n\nBoth are `IngestValidationError` subclasses; the ingest endpoint returns `422` and `lattice-rag ingest` exits with the message.\n\nAn Entity's identity is its **name plus type**, normalized by `entity_key()` (trimmed, internal whitespace collapsed, case-folded) both in the canonical-entity cache and inside the transaction. `Mercury`/`planet` and `Mercury`/`element` are two nodes; `LatticeDB`/`database` and ` latticedb`/`Database` are one. Relation endpoints carry only a name, so they resolve against the same chunk's entities first, then entities earlier in the same document; they never resolve by bare name across the whole graph."
+    },
+    {
+      "document_id": "doc_storage_and_schema_2_2_indices_search_operations",
+      "title": "Storage Engine & Graph Schema (LatticeDB): 2. Indices & Search Operations",
+      "text": "## 2. Indices & Search Operations\n\nLatticeDB supports three native search modalities in a single file:\n\n### 2.1 HNSW Vector Similarity Search\nOnly chunks have 384-dimensional dense vectors, generated by FastEmbed (`BAAI/bge-small-en-v1.5`). Ingestion does not embed entities.\n\nDatabases seeded before this change may still hold entity vectors in the same HNSW index. `LatticeStore.vector_search` over-fetches (`max(3 * top_k, 20)`), drops nodes without chunk text, and widens the fetch (x4 per round, up to 4,096) until it has `top_k` chunks or the index is exhausted. Re-seed such a database to reclaim the index space.\n\n- **Querying:**\n  ```python\n  raw_results = db.vector_search(query_embedding, k=10)\n  ```\n  Returns `List[VectorSearchResult]` with `node_id` and L2 distance in sub-millisecond time.\n- **Scoring:** Converted to similarity via:\n  $$\\text{Score} = \\frac{1}{1 + \\text{distance}}$$"
+    },
+    {
+      "document_id": "doc_storage_and_schema_3_2_2_bm25_full_text_inverted_",
+      "title": "Storage Engine & Graph Schema (LatticeDB): 2.2 BM25 Full-Text Inverted Index",
+      "text": "### 2.2 BM25 Full-Text Inverted Index\nConfigured during database initialization:\n```python\ndb.create_node_fts_index(\"Chunk\", \"text\")\ndb.create_node_fts_index(\"Entity\", \"name\")\n```\n- **Querying:**\n  ```python\n  raw_results = db.fts_search(\"Chunk\", \"text\", query_text, limit=10)\n  ```\n  Returns BM25-ranked relevance scores for exact keyword and term matching.\n\n### 2.3 Document Equality Index\n`LatticeStore` creates an equality index on `Document.doc_id` at startup (building it backfills an existing database):\n```python\ndb.create_node_property_index(\"Document\", \"doc_id\")\ntxn.find_nodes_by_label_property(\"Document\", \"doc_id\", doc_id)\n```\nThe duplicate-document check on ingest and document delete both use it, so neither scans every Document."
+    },
+    {
+      "document_id": "doc_storage_and_schema_4_2_4_reciprocal_rank_fusion_r",
+      "title": "Storage Engine & Graph Schema (LatticeDB): 2.4 Reciprocal Rank Fusion (RRF)",
+      "text": "### 2.4 Reciprocal Rank Fusion (RRF)\nVector similarity and BM25 search results are fused using standard RRF ($k=60$):\n$$\\text{RRF}(d) = \\sum_{m \\in \\{\\text{vector}, \\text{bm25}\\}} \\frac{1}{60 + \\text{rank}_m(d)}$$\n\n## 3. Transaction & Commit Semantics\n\n> [!IMPORTANT]\n> **Explicit Commit Requirement:**  \n> In LatticeDB, write transactions (`with db.write() as txn:`) **default to rollback on context exit**. You must explicitly invoke `txn.commit()` before exiting the block:\n\n```python\nwith db.write() as txn:\n    doc = txn.create_node(labels=[\"Document\"], properties={\"doc_id\": \"1\", \"title\": \"Guide\"})\n    chunk = txn.create_node(labels=[\"Chunk\"], properties={\"text\": \"Content\", \"position\": 0})\n    txn.set_vector(chunk.id, \"embedding\", embedding_array)\n    txn.create_edge(doc.id, chunk.id, \"HAS_CHUNK\")\n    \n    # CRITICAL: Commit transaction\n    txn.commit()\n```"
+    },
+    {
+      "document_id": "doc_storage_and_schema_5_3_1_document_delete",
+      "title": "Storage Engine & Graph Schema (LatticeDB): 3.1 Document Delete",
+      "text": "### 3.1 Document Delete\n`LatticeStore.delete_document(doc_id)` runs in one write transaction. It removes the Document, its Chunks (with their vectors and BM25 entries), every edge on those nodes, and each Entity that no remaining Chunk `CONTAINS`; entities shared with other documents stay. LatticeDB's `delete_node` does not remove a node's edges, so the store deletes them explicitly first. Deleted entities leave the canonical-entity cache only after commit. `delete_document_in_txn(txn, doc_id)` exposes the same steps inside a caller's transaction. `DocumentIngester.delete` holds the ingest write lock while it runs and clears Tier 1 afterwards.\n\nOn the deployed instance, documents ingested or deleted at runtime are ephemeral ([ADR-0001](adr/0001-seeded-database-single-instance.md)).\n\n## 4. Multi-Hop Relational Traversal\n\nMulti-hop graph traversal pivots from Stage 1 entity anchors through `RELATION` edges:\n\n```python\nsubgraph = store.traverse_from_entities(\n    entity_ids=[anchor_id],\n    max_hops=2,      # 1 hop for factual queries, 2 for relational\n    budget=25        # Hard limit to guarantee < 1s latency\n)\n```\n\nThe traversal uses native C bindings (`txn.get_outgoing_edges()` and `txn.get_edge_property()`) to expand nodes along relationship paths in microseconds."
+    },
+    {
+      "document_id": "doc_api_reference_0_api_dto_contract_reference",
+      "title": "API & DTO Contract Reference",
+      "text": "# API & DTO Contract Reference\n\n`lattice-rag` provides a high-throughput REST and Server-Sent Events (SSE) streaming API built on **Litestar 2.24+** and **Granian**.\n\n## 1. Interactive Documentation\n\nAn interactive Scalar OpenAPI documentation portal is automatically served at:\n```\nhttp://localhost:8000/schema/scalar\n```\n\n## 2. Endpoints Overview\n\n| Method | Path | Auth | Request | Response Body | Description |\n|---|---|---|---|---|---|\n| `GET` | `/` | — | — | `text/html` | Studio SPA (or fallback landing page). |\n| `POST` | `/api/v1/query` | rate-limited | `QueryRequest` | `QueryResponse` | Synchronous RAG query. |\n| `POST` | `/api/v1/query/stream` | rate-limited | `QueryRequest` | `text/event-stream` | SSE stream of stage, token, error and done events. |\n| `POST` | `/api/v1/ingest` | **admin** | `IngestRequest` | `IngestResponse` | Ingest a document. `409` if `documentId` already exists, unless `replace` is `true`: then the old version is deleted and the new one inserted in one transaction (a failed replace leaves the old version intact) and Tier 1 is cleared; `422` if the payload fails ingest validation (embedding dimension mismatch, unresolved chunk reference), in which case nothing is written. Runtime documents are ephemeral on the deployed instance (see §2.2). |\n| `DELETE` | `/api/v1/documents/{documentId}` | **admin** | — | `204`, no body | Delete a document, its chunks and their edges, and every entity no remaining chunk references; then clear Tier 1. `404` if `documentId` is not stored. |\n| `GET` | `/api/v1/graph/subgraph` | **admin** | query `limit` (1–500, default 50) | `SubgraphDTO` | Knowledge graph snapshot for the visualizer. |\n| `GET` | `/api/v1/cache/stats` | **admin** | — | `CacheStatsResponse` | Tier 1 hit/miss counts and generation circuit-breaker state. |\n| `POST` | `/api/v1/eval/jobs` | **admin** | query `dataset`, `baseline` (bare `*.json` names in the project root), `limit`, `use_temp_db` (default `true`) | `202` `EvalJobResponse` | Start an evaluation run in the background and return its handle immediately. `409` if a run is already in progress. |\n| `GET` | `/api/v1/eval/jobs/{jobId}` | **admin** | — | `EvalJobResponse` | Status of an Eval Job and, once it has succeeded, its `EvalRunResponse` report. `404` for an unknown or expired handle. |\n| `POST` | `/api/v1/benchmark/run` | **admin** | — | `BenchmarkRunResponse` | Retrieval-only latency benchmark (6 iterations, 2 warmup) with SLA checks. |\n| `GET` | `/health` | — | — | `HealthResponse` | Health and configuration status. |"
+    },
+    {
+      "document_id": "doc_api_reference_1_2_1_authentication_limits",
+      "title": "API & DTO Contract Reference: 2.1 Authentication & Limits",
+      "text": "### 2.1 Authentication & Limits\n- **Public endpoints** (no key): `/`, `/health`, `POST /api/v1/query` and `POST /api/v1/query/stream`.\n- **Admin-only endpoints**: `POST /api/v1/ingest`, `GET /api/v1/graph/subgraph`, `GET /api/v1/cache/stats`, `POST /api/v1/eval/jobs`, `GET /api/v1/eval/jobs/{jobId}` and `POST /api/v1/benchmark/run`.\n- **Admin endpoints** require `X-Admin-Key: <ADMIN_API_KEY>`. A missing or wrong key returns `401`; if `ADMIN_API_KEY` is unset on the server, these endpoints are disabled. After 5 wrong keys within 5 minutes a client gets `429` for the rest of that window.\n- **Query endpoints** are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60) and return `429` when exceeded. Clients are identified by the socket peer, or by `X-Forwarded-For` when `TRUSTED_PROXY_HOPS` is set (see `docs/deployment.md`).\n- **Validation** failures return `400` problem details: `query` must be 1–2,000 characters, `text` 1–200,000, `documentId` must match `[A-Za-z0-9_.-]{1,128}`, and request bodies are capped at 1 MB.\n- **Eval runs are serialized.** Only one Eval Job runs at a time per server process; a start request while one is running is rejected with `409` (it is not queued), so parallel requests cannot multiply judge and LLM API cost. Poll `GET /api/v1/eval/jobs/{jobId}` until `status` leaves `running`. The 20 most recent jobs are kept in memory and are lost on restart. A failed job's `error` carries only a reference id for the server logs. The `lattice-rag eval` CLI runs in its own process and does not go through this queue.\n- **Unexpected errors** return `500` with a generic `detail` and a `requestId` to correlate with server logs; exception text is never returned."
+    },
+    {
+      "document_id": "doc_api_reference_2_2_2_runtime_documents_are_ep",
+      "title": "API & DTO Contract Reference: 2.2 Runtime Documents Are Ephemeral",
+      "text": "### 2.2 Runtime Documents Are Ephemeral\nThe deployed instance serves a **Seeded Database** from the container's ephemeral disk ([ADR-0001](adr/0001-seeded-database-single-instance.md)). Documents added with `POST /api/v1/ingest` (and removals made with `DELETE /api/v1/documents/{documentId}`) apply only to the running instance and are lost on restart or redeploy. Durable content goes through `lattice-rag seed` at build time. Every `IngestResponse` repeats this in its `persistence` field.\n\n## 3. Data Transfer Objects (DTOs)\n\nAll DTOs are declared as `msgspec.Struct` with `rename=\"camel\"` for zero-copy JSON parsing."
+    },
+    {
+      "document_id": "doc_api_reference_3_3_1_queryrequest",
+      "title": "API & DTO Contract Reference: 3.1 `QueryRequest`",
+      "text": "### 3.1 `QueryRequest`\n```typescript\ninterface QueryRequest {\n  query: string;           // The natural language question (1–2,000 chars)\n}\n```\n\n### 3.2 `QueryResponse`\n```typescript\ninterface QueryResponse {\n  answer: string;                  // Synthesized LLM response\n  route: string;                   // 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context'\n  cached: boolean;                 // Whether Tier 1 semantic cache was hit\n  latencyMs: number;               // Total execution latency in milliseconds\n  sources: SourceChunk[];          // Attributed source text chunks\n  graphPath?: SubgraphDTO;         // Traversed entity graph nodes and edges\n  timings: StageTiming[];          // Stage latency breakdown (triage, retrieval, generation)\n  degraded: boolean;               // True if the answer came from Gemini fallback or the FAQ cache\n  lowGrounding: boolean;           // True if no retrieved chunk passed the relevance guardrail\n  unverified: boolean;             // True if routing, the guardrail or cache verification could not run (Unverified Answer); never cached\n}\n```"
+    },
+    {
+      "document_id": "doc_api_reference_4_3_3_sourcechunk_subgraphdto",
+      "title": "API & DTO Contract Reference: 3.3 `SourceChunk` & `SubgraphDTO`",
+      "text": "### 3.3 `SourceChunk` & `SubgraphDTO`\n```typescript\ninterface SourceChunk {\n  chunkId: number;         // LatticeDB node id\n  text: string;\n  score: number;           // Cross-encoder score (fused RRF score if not reranked)\n  documentId: string;\n  position: number;        // Chunk position within its document\n}\n// The answer cites sources as [Chunk N], where N is the index in `sources`.\n\ninterface SubgraphDTO {\n  nodes: GraphNode[];\n  edges: GraphEdge[];\n}\n\ninterface GraphNode {\n  nodeId: number;\n  label: string;\n  name: string;\n  properties?: Record<string, unknown>;\n}\n\ninterface GraphEdge {\n  sourceId: number;\n  targetId: number;\n  relationType: string;\n}\n```"
+    },
+    {
+      "document_id": "doc_api_reference_5_3_4_ingestrequest_ingestresp",
+      "title": "API & DTO Contract Reference: 3.4 `IngestRequest` & `IngestResponse`",
+      "text": "### 3.4 `IngestRequest` & `IngestResponse`\n```typescript\ninterface IngestRequest {\n  documentId: string;      // Unique identifier for the document\n  title: string;           // Document title\n  text: string;            // Raw document text content\n  tags?: string[];         // Up to 32 tags (1–64 chars), stored on the Document node\n  replace?: boolean;       // Default false. True replaces an existing document atomically\n}\n\ninterface IngestResponse {\n  documentId: string;\n  chunkCount: number;      // Number of chunks stored in LatticeDB\n  entityCount: number;     // Number of entities extracted by GLiNER\n  relationCount: number;   // Number of relationships established\n  persistence: string;     // States that runtime documents are ephemeral on the deployed instance\n}\n```"
+    },
+    {
+      "document_id": "doc_api_reference_6_3_5_cachestatsresponse_healt",
+      "title": "API & DTO Contract Reference: 3.5 `CacheStatsResponse` & `HealthResponse`",
+      "text": "### 3.5 `CacheStatsResponse` & `HealthResponse`\n```typescript\ninterface CacheStatsResponse {\n  tier1Hits: number;\n  tier1Misses: number;\n  tier1CachedQueries: number;\n  tier2CircuitStatus: \"closed\" | \"open\" | \"half-open\";  // Groq circuit breaker (shared by /query and /query/stream)\n  tier2CachedQueries: number;\n}\n\ninterface HealthResponse {\n  status: \"healthy\" | \"degraded\" | \"unhealthy\";\n  latticedbConnected: boolean;\n  redisConnected: boolean;\n  typesafeConfigured: boolean;\n  groqConfigured: boolean;\n  geminiConfigured: boolean;\n}\n```\n\n### 3.6 `EvalJobResponse`, `EvalRunResponse`, `EvalQueryResult` & `Misroute`\n```typescript\ninterface EvalJobResponse {\n  jobId: string;                           // Handle for GET /api/v1/eval/jobs/{jobId}\n  status: \"running\" | \"succeeded\" | \"failed\";\n  startedAt: string;                       // ISO 8601, UTC\n  finishedAt: string | null;               // Set once the job is no longer running\n  report: EvalRunResponse | null;          // Set when status is \"succeeded\"\n  error: string | null;                    // Generic message with a log reference when status is \"failed\"\n}\n\n// Each metric is a Jev Score normalized to [0.0, 1.0], or null when it was not judged:\n// it does not apply to the query's Slice (chitchat: relevance + correctness only;\n// unanswerable: faithfulness + correctness only), or the query failed and was never judged.\ninterface EvalQueryResult {\n  query: string;                     // Evaluated benchmark query\n  passed: boolean;                   // Judged, and every judged metric >= its pass threshold\n  faithfulness: number | null;       // Answer vs retrieved context; 0.0 on a contradiction veto\n  contextPrecision: number | null;   // Retrieved context vs what the reference answer needs\n  answerRelevance: number | null;    // Answer vs the query\n  answerCorrectness: number | null;  // Answer vs the Gold Set reference answer\n  // Set when the query failed; it is then not judged. provider_degraded: the answer still came\n  // from a non-primary provider after one retry\n  error: \"pipeline_error\" | \"judge_error\" | \"provider_degraded\" | null;\n  // Provider that generated the answer; null when nothing was generated\n  // (pipeline error, chitchat, cache hit)\n  provider: \"groq\" | \"gemini\" | \"redis_faq\" | \"offline\" | null;\n  chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error\n  routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)\n}\n\ntype Route = \"vector_exact\" | \"graph_relational\" | \"hybrid\" | \"chitchat\" | \"massive_context\";\ntype Slice = \"factoid\" | \"multihop\" | \"unanswerable\" | \"chitchat\" | \"long_context\";\n\n// A scored query whose chosen Route differs from its Expected Route\ninterface Misroute {\n  queryId: string;                   // Gold Set query id\n  slice: Slice;\n  chosenRoute: Route;\n  expectedRoute: Route;\n}\n\ninterface EvalRunResponse {\n  totalQueries: number;                // Total evaluated queries\n  passedGate: boolean;                 // See the gate rules below\n  regressionDelta: number;             // Worst mean delta vs the baseline's measured metrics\n  meanFaithfulness: number | null;     // Means are over queries where the metric was judged\n  meanContextPrecision: number | null;\n  meanAnswerRelevance: number | null;\n  meanAnswerCorrectness: number | null;\n  failedQueries: number;               // Queries with an error (not judged, excluded from means)\n  results: EvalQueryResult[];          // Granular query evaluation results\n  routeAccuracy: number | null;        // Share of scored queries on their Expected Route; null if none scored\n  routeAccuracyBySlice: Record<Slice, number>;  // Same, per Slice (only Slices with a scored query)\n  routeAccuracyFloor: number | null;   // Advisory floor from gate_thresholds; never fails the gate\n  routeAccuracyScored: number;         // The denominator of routeAccuracy\n  routeAccuracyUnverified: number;     // Not scored: Jev could not route, the fallback Route was used\n  routeAccuracyErrored: number;        // Not scored: the pipeline failed, no Route was chosen\n  misroutes: Misroute[];               // Scored queries off their Expected Route\n}\n```\n\n**Route Accuracy** scores only router decisions. A query is scored when it is outside the\n`chitchat` Slice (chitchat is routed deterministically, never by Jev; this matches the 17/27\nbaseline definition), its pipeline ran, and Jev chose the Route. Unverified fallback routes\nand pipeline errors are counted in `routeAccuracyUnverified` and `routeAccuracyErrored`\ninstead, so a Jev outage or a broken pipeline shows as `null` or a small denominator, never\nas accurate routing.\n\nThe gate rules live in `eval_baseline.json` under `gate_thresholds`. All are required except\n`route_accuracy_floor`, which is optional and advisory (reported, never gates):\n`passedGate` is false when any query failed, when any judged metric of any query is below\n`min_query_floor`, or when a mean drops more than `max_regression_delta` below its value in\n`metrics`. A metric absent from `metrics` is reported but not regression-checked. `metrics`\nand `max_regression_delta` are measured, not chosen: `lattice-rag measure-baseline` derives\nthem from three Live Tier runs (two standard deviations of the noisiest metric) and records\nthe raw runs under `measurement`.\n`pass_thresholds` sets the per-query, per-metric threshold behind `passed`."
+    },
+    {
+      "document_id": "doc_api_reference_7_3_7_stagebenchmarkdto_benchm",
+      "title": "API & DTO Contract Reference: 3.7 `StageBenchmarkDTO` & `BenchmarkRunResponse`",
+      "text": "### 3.7 `StageBenchmarkDTO` & `BenchmarkRunResponse`\n```typescript\ninterface StageBenchmarkDTO {\n  stage: string;          // Name of the pipeline stage profiled\n  samplesCount: number;   // Number of iterations executed\n  meanMs: number;         // Arithmetic mean latency (ms)\n  minMs: number;          // Minimum latency recorded (ms)\n  p50Ms: number;          // 50th percentile (median) latency (ms)\n  p90Ms: number;          // 90th percentile latency (ms)\n  p95Ms: number;          // 95th percentile latency (ms)\n  p99Ms: number;          // 99th percentile latency (ms)\n  maxMs: number;          // Maximum latency recorded (ms)\n  qps: number;            // Queries / Operations per second throughput\n}\n\ninterface BenchmarkRunResponse {\n  totalDurationSec: number;     // Total benchmark suite execution time\n  subSecondSlaMet: boolean;     // Retrieval-only E2E p95 < 1,000ms (no routing, guardrail or LLM)\n  tier1CacheSlaMet: boolean;    // Tier 1 exact-hit p95 < 25ms\n  stages: StageBenchmarkDTO[];  // Stage-by-stage latency percentiles\n}\n```"
+    },
+    {
+      "document_id": "doc_api_reference_8_4_server_sent_events_sse_pro",
+      "title": "API & DTO Contract Reference: 4. Server-Sent Events (SSE) Protocol",
+      "text": "## 4. Server-Sent Events (SSE) Protocol\n\nWhen querying `/api/v1/query/stream`, events are streamed in standard SSE format:\n\n```http\nPOST /api/v1/query/stream HTTP/1.1\nContent-Type: application/json\n\n{\"query\": \"What is the relation between LatticeDB and FastEmbed?\"}\n```\n\n**Stream Event Structure:** every `data:` line is a camelCase JSON object matching one of the `Stream*` DTOs in `api/dtos.py` (mirrored in `frontend/src/types.ts`).\n\n```\nevent: stage\ndata: {\"stage\":\"triage\",\"status\":\"started\"}\n\nevent: stage\ndata: {\"stage\":\"retrieval\",\"route\":\"hybrid\"}\n\nevent: stage\ndata: {\"stage\":\"generation\",\"chunksCount\":5}\n\nevent: token\ndata: {\"delta\":\"LatticeDB\"}\n\nevent: token\ndata: {\"delta\":\" unites HNSW and BM25 in a single binary [Chunk 0].\"}\n\nevent: done\ndata: {\"answer\":\"LatticeDB unites ...\",\"route\":\"hybrid\",\"cached\":false,\"latencyMs\":528.2,\"sources\":[...],\"graphPath\":{...},\"timings\":[...],\"degraded\":false,\"lowGrounding\":false,\"unverified\":false}\n```\n\n| Event | Payload | When |\n|---|---|---|\n| `stage` | `{stage, status?, route?, chunksCount?}` | A pipeline stage starts (`triage`, `cache_hit`, `chitchat`, `retrieval`, `generation`). |\n| `token` | `{delta}` | Next piece of answer text. |\n| `error` | `{detail}` | Generation stopped early (the provider failed after its first token), or the request failed (`detail` carries a reference id). |\n| `done` | Same fields as `QueryResponse` | Final event of a completed stream. |"
+    },
+    {
+      "document_id": "doc_deployment_0_zero_cost_production_deploym",
+      "title": "Zero-Cost Production Deployment Guide",
+      "text": "# Zero-Cost Production Deployment Guide\n\nThis guide details how to host and operate `lattice-rag` for **$0.00/month** in production without compromising on retrieval quality or downgrading our state-of-the-art **`bge-reranker-v2-m3`** cross-encoder.\n\n## 1. Memory Architecture & The 512MB RAM Ceiling\n\nDuring Phase 6 profiling, resident memory consumption across all pipeline subsystems was empirically benchmarked on macOS/Linux:\n\n| Component | Resident Memory (RAM) | Notes |\n|---|---|---|\n| **Base Python Runtime + Granian** | ~14 MB | In-process ASGI server overhead |\n| **FastEmbed `bge-small-en-v1.5`** | ~289 MB | INT8 ONNX dense bi-encoder |\n| **Cross-Encoder `bge-reranker-v2-m3`** | **1,176 MB (1.17 GB)** | SOTA multilingual cross-encoder (544MB ONNX weights expand to ~887MB during inference) |\n| **LatticeDB + Caches** | ~35 MB | SQLite property graph + FTS5 indices + vector tables |\n| **Total Peak Working Set** | **~1.51 GB** | Required allocation: **$\\ge$ 2 GB RAM** |\n\n> [!WARNING]\n> **512MB Free Tier OOM Hazard:**\n> Platforms offering only 512MB RAM (such as Render Free, Koyeb Free, or basic Hugging Face CPU Spaces) **will crash with an Out-Of-Memory (OOM) kill** when executing cross-encoder reranking. To maintain uncompromised retrieval precision, `lattice-rag` is deployed to free-tier environments providing **$\\ge$ 2GB RAM**."
+    },
+    {
+      "document_id": "doc_deployment_1_2_option_a_google_cloud_run_",
+      "title": "Zero-Cost Production Deployment Guide: 2. Option A: Google Cloud Run (Always Free Tier) — Recommended",
+      "text": "## 2. Option A: Google Cloud Run (Always Free Tier) — Recommended\n\nGoogle Cloud Run provides an **Always Free tier** every single month that perfectly accommodates `lattice-rag`:\n- **360,000 GiB-seconds** of memory per month\n- **180,000 vCPU-seconds** per month\n- **2,000,000 requests** per month\n- Configurable instance memory up to **2 GiB or 4 GiB**\n\n### Zero-Cost Calculation\nCloud Run scales to zero when idle. An active GraphRAG query with hybrid retrieval, graph traversal, cross-encoder reranking, and Jev guardrail finishes in ~800ms:\n$$\\text{Free Queries} = \\frac{360,000 \\text{ GiB-seconds}}{2 \\text{ GiB} \\times 0.8\\text{s}} \\approx \\mathbf{225,000 \\text{ queries / month for } \\$0.00}$$"
+    },
+    {
+      "document_id": "doc_deployment_2_deployment_steps",
+      "title": "Zero-Cost Production Deployment Guide: Deployment Steps",
+      "text": "### Deployment Steps\n\n1. **Prerequisites**: Install the [Google Cloud CLI (`gcloud`)](https://cloud.google.com/sdk/docs/install) and authenticate:\n   ```bash\n   gcloud auth login\n   gcloud config set project YOUR_PROJECT_ID\n   ```\n\n2. **Store the API keys in Secret Manager** (once per project). The deploy script refuses to run until all four exist, and keys are never passed as plain environment variables or baked into the image:\n   ```bash\n   for name in TYPESAFE_API_KEY GROQ_API_KEY GEMINI_API_KEY ADMIN_API_KEY; do\n     read -rsp \"$name: \" value && echo\n     printf '%s' \"$value\" | gcloud secrets create \"$name\" --data-file=-\n   done\n   ```\n   Grant the Cloud Run runtime service account `roles/secretmanager.secretAccessor` on these secrets.\n\n3. **One-Command Automated Deployment**:\n   ```bash\n   ./scripts/deploy_cloud_run.sh YOUR_PROJECT_ID us-central1\n   ```\n   The service is deployed with `--max-instances 1` because the LatticeDB file lives on the instance's ephemeral disk: documents ingested at runtime are lost on restart or redeploy, while the golden corpus is pre-seeded into the image. The service is publicly reachable, but ingest, eval and benchmark require the `X-Admin-Key` header.\n\n4. **Verify Deployment**:\n   Open the Cloud Run service URL in your browser:\n   - Root UI: `https://<service-url>/`\n   - API Health: `https://<service-url>/health`\n   - Interactive Scalar API Docs: `https://<service-url>/schema/scalar`"
+    },
+    {
+      "document_id": "doc_deployment_3_3_option_b_cloudflare_tunnel",
+      "title": "Zero-Cost Production Deployment Guide: 3. Option B: Cloudflare Tunnel (`cloudflared`) — Zero-Cost Edge Exposure",
+      "text": "## 3. Option B: Cloudflare Tunnel (`cloudflared`) — Zero-Cost Edge Exposure\n\nIf you have a local workstation (e.g., Apple Silicon M-series Mac or Linux box) with $\\ge 8$GB RAM, you can host `lattice-rag` locally with near-instant hardware-accelerated reranking (<100ms) and expose it globally via Cloudflare:\n\n1. **Install `cloudflared`**:\n   ```bash\n   brew install cloudflared  # macOS\n   ```\n\n2. **Start the Engine**:\n   ```bash\n   lattice-rag serve --host 127.0.0.1 --port 8000\n   ```\n\n3. **Launch the Public Tunnel**:\n   ```bash\n   cloudflared tunnel --url http://127.0.0.1:8000\n   ```\n   Cloudflare will output a public HTTPS URL (e.g., `https://random-words.trycloudflare.com`) with automated SSL, global edge caching, and DDoS mitigation — **100% free with zero configuration**."
+    },
+    {
+      "document_id": "doc_deployment_4_4_option_c_oracle_cloud_infr",
+      "title": "Zero-Cost Production Deployment Guide: 4. Option C: Oracle Cloud Infrastructure (OCI Always Free) — 24GB Cloud VM",
+      "text": "## 4. Option C: Oracle Cloud Infrastructure (OCI Always Free) — 24GB Cloud VM\n\nOracle Cloud provides the industry's most generous persistent compute tier for free:\n- **4 Ampere ARM vCPUs**\n- **24 GB RAM**\n- **200 GB persistent NVMe storage**\n- Runs 24/7 without scaling down\n\n1. Create an Ubuntu VM instance in the OCI Console.\n2. Install Docker:\n   ```bash\n   sudo apt-get update && sudo apt-get install -y docker.io\n   ```\n3. Clone and build `lattice-rag`:\n   ```bash\n   git clone https://github.com/your-org/lattice-rag.git\n   cd lattice-rag\n   docker build -t lattice-rag .\n   docker run -d --restart=always -p 8000:8000 --env-file .env lattice-rag\n   ```\n   If you put nginx or Caddy in front of the container, set `TRUSTED_PROXY_HOPS=1` in `.env` (see below)."
+    },
+    {
+      "document_id": "doc_deployment_5_client_identity_behind_rever",
+      "title": "Zero-Cost Production Deployment Guide: Client identity behind reverse proxies (`TRUSTED_PROXY_HOPS`)",
+      "text": "## Client identity behind reverse proxies (`TRUSTED_PROXY_HOPS`)\n\nThe query rate limit (`QUERY_RATE_LIMIT_PER_MINUTE`) and the admin-key lockout both key on the client's address. `TRUSTED_PROXY_HOPS` says how many reverse proxies sit between the client and the app:\n\n| Value | Client identity | Use for |\n|-------|-----------------|---------|\n| `0` (default) | Socket peer; `X-Forwarded-For` is ignored | Direct exposure, local dev |\n| `1` | Rightmost `X-Forwarded-For` entry | Cloud Run, a single nginx/Caddy, Cloudflare Tunnel |\n| `N` | `N`th entry from the right | `N` proxies that each append to `X-Forwarded-For` |\n\nEvery proxy appends the address it received the request from, so entries to the left of the trusted ones were written by the client and are ignored. A header with fewer than `N` entries is not trusted and the socket peer is used.\n\nSet the value to the real hop count. Too low, and every client behind the proxy shares one identity (one rate-limit budget, one lockout). Too high, and clients can choose their identity by sending their own `X-Forwarded-For`. `scripts/deploy_cloud_run.sh` sets `TRUSTED_PROXY_HOPS=1`; override it (`TRUSTED_PROXY_HOPS=2 ./scripts/deploy_cloud_run.sh ...`) when an external HTTPS load balancer fronts the service.\n\n**Admin-key lockout.** A client that sends a wrong `X-Admin-Key` 5 times within 5 minutes gets `429` from the admin endpoints for the rest of that window, even with the right key. Other clients are unaffected, and a successful attempt clears the count. Counts are kept in process memory per server worker and reset on restart."
+    },
+    {
+      "document_id": "doc_deployment_6_5_cold_start_optimization",
+      "title": "Zero-Cost Production Deployment Guide: 5. Cold-Start Optimization",
+      "text": "## 5. Cold-Start Optimization\n\n`lattice-rag`'s multi-stage `Dockerfile` incorporates two key production optimizations:\n1. **Pre-Baked Model Weights**: ONNX weights for `bge-small-en-v1.5` and `bge-reranker-v2-m3` are downloaded during image creation (`docker build`), eliminating 600MB+ network pulls on container cold start.\n2. **Pre-Seeded Database**: `lattice-rag seed` ingests the golden corpus at build time (it needs no API keys and skips documents that already exist), so the graph, HNSW and BM25 indexes are ready when the container starts.\n\nThe runtime stage runs as an unprivileged user (`uid 10001`), excludes compilers (dependencies are built in a separate stage), and declares a `HEALTHCHECK` on `/health`."
+    },
+    {
+      "document_id": "doc_security_0_secret_security_sensitivity_",
+      "title": "Secret Security & Sensitivity Architecture",
+      "text": "# Secret Security & Sensitivity Architecture\n\n`lattice-rag` enforces a zero-trust credential security architecture to guarantee that API keys, authentication tokens, and private connection strings are never exposed in logs, error payloads, terminal outputs, or version control.\n\n## 1. Multi-Layer Security Boundary\n\n## 2. Git & Filesystem Hygiene\n\n### 2.1 Git Boundary Protection\nThe `.gitignore` file enforces that secrets and database files can never be committed:\n```gitignore\n# Secrets and Environment Variables\n.env\n.env.*\n!.env.example\napikeys.md\n*.pem\n*.key\nsecrets/\n\n# Embedded Databases & Cache\ndata/\n*.db\n*.db-*\n*.latticedb\n```\n\nA sanitized template (`.env.example`) is checked into git with documented variable names and blank values."
+    },
+    {
+      "document_id": "doc_security_1_2_2_automated_credential_mig",
+      "title": "Secret Security & Sensitivity Architecture: 2.2 Automated Credential Migration (`setup-keys`)",
+      "text": "### 2.2 Automated Credential Migration (`setup-keys`)\nStoring API keys in plain text files like `apikeys.md` is a common credential exposure hazard.\n\n`lattice-rag` provides an automated, secure migration utility:\n```bash\nlattice-rag setup-keys\n```\n\n**What it does:**\n1. Reads `apikeys.md` if present.\n2. Extracts recognized keys (`TYPESAFE_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `ADMIN_API_KEY`, `REDIS_URL`).\n3. Appends the ones `.env` does not already define. `.env` is created with `0600` permissions from the start (`os.open(..., 0o600)`), not chmod-ed after the write.\n4. Deletes `apikeys.md`. If no recognizable key was found, `apikeys.md` is left untouched so nothing is lost."
+    },
+    {
+      "document_id": "doc_security_2_3_runtime_memory_protection",
+      "title": "Secret Security & Sensitivity Architecture: 3. Runtime & Memory Protection",
+      "text": "## 3. Runtime & Memory Protection\n\n### 3.1 `SecretStr` Type\nAPI keys are never stored as plain strings in memory configurations. They are wrapped in `SecretStr`:\n\n```python\nfrom lattice_rag.security import SecretStr\n\nkey = SecretStr(\"sk-live_9876543210abcdef\")\n\n# __str__ and __repr__ return masked representations:\nprint(str(key))   # 'sk-****cdef'\nprint(repr(key))  # \"SecretStr('sk-****cdef')\"\n\n# Raw access requires explicit call:\nraw = key.get_secret_value()\n```\n\nSupported mask patterns:\n- `sk-****{last_4}` (OpenAI, TypeSafe)\n- `gsk_****{last_4}` (Groq)\n- `AIza****{last_4}` (Google Gemini)\n- `[REDACTED]` (General secrets)"
+    },
+    {
+      "document_id": "doc_security_3_3_2_log_redaction",
+      "title": "Secret Security & Sensitivity Architecture: 3.2 Log Redaction",
+      "text": "### 3.2 Log Redaction\nOne pattern, `security.REDACT_PATTERN`, matches `sk-`, `gsk_` and `AIza` keys, bearer tokens, `token=` parameters and URI credentials (including password-only forms such as `redis://:secret@host`). It is applied at two points:\n- **`RedactingFormatter`** renders every log line, then redacts the *whole rendered line*, tracebacks included. The web app installs it as Litestar's `standard` formatter, and the CLI installs it through `configure_logging()`.\n- **`configure_structlog()`** routes `structlog` through stdlib logging, so structlog events (used by the routing, caching, generation and eval modules) pass through the same redacting formatter instead of printing directly.\n\n`RedactingFilter` remains available for redacting a record's message and arguments before formatting. User queries are not logged at INFO level."
+    },
+    {
+      "document_id": "doc_security_4_3_3_rfc_9457_error_shielding",
+      "title": "Secret Security & Sensitivity Architecture: 3.3 RFC 9457 Error Shielding",
+      "text": "### 3.3 RFC 9457 Error Shielding\nUnexpected exceptions never reach clients verbatim. The global handler logs the sanitized exception server-side with a request id, and returns a generic `500` problem document that carries only that id (`requestId`). HTTP errors such as validation `400`s, `401`, `404` and `409` keep their normal problem-details responses. Mid-stream failures on `/api/v1/query/stream` are reported in-band as an SSE `error` event with the same kind of reference.\n\n### 3.4 Access Control & Abuse Limits\n- **Admin key:** `POST /api/v1/ingest`, `DELETE /api/v1/documents/{documentId}`, `GET /api/v1/graph/subgraph`, `GET /api/v1/cache/stats`, `/api/v1/eval/jobs` (start and status) and `POST /api/v1/benchmark/run` require an `X-Admin-Key` header matching `ADMIN_API_KEY` (constant-time comparison). The graph snapshot exposes the whole ingested knowledge graph and the cache stats expose operational state, so they are admin-only alongside the write and cost endpoints. With no `ADMIN_API_KEY` configured these endpoints reject every request (fail closed). A client that sends a wrong key 5 times within 5 minutes is locked out with `429` for the rest of that window; its key is not checked while locked, and other clients are unaffected.\n- **Public endpoints:** `/`, `/api/v1/query`, `/api/v1/query/stream` and `/health` need no key, so the studio and uptime checks keep working. The studio's Full Graph view loads only once an admin key has been entered. The query endpoints are rate-limited per client (`QUERY_RATE_LIMIT_PER_MINUTE`, default 60).\n- **Client identity:** the rate limit and the admin-key lockout identify clients by the socket peer. `X-Forwarded-For` is used only when `TRUSTED_PROXY_HOPS` is set to N > 0, taking the Nth entry from the right, so client-forged entries to the left are ignored. See `docs/deployment.md`.\n- **Input bounds:** queries are limited to 2,000 characters, documents to 200,000 characters, `documentId` to `[A-Za-z0-9_.-]{1,128}`, request bodies to 1 MB, and the graph `limit` to 1–500.\n- **Eval files:** the eval endpoint only accepts bare `*.json` file names in the project root for `dataset` and `baseline`, so it cannot be pointed at arbitrary server paths.\n- **CORS:** same-origin only unless `CORS_ALLOW_ORIGINS` lists trusted origins."
+    },
+    {
+      "document_id": "doc_security_5_3_5_prompt_injection_hardeni",
+      "title": "Secret Security & Sensitivity Architecture: 3.5 Prompt-Injection Hardening",
+      "text": "### 3.5 Prompt-Injection Hardening\nIngested documents become evidence in LLM prompts. Both providers share one prompt (`generation/prompt.py`). A system message states that evidence and the question are untrusted data whose instructions must not be followed. The user message wraps each chunk in `<chunk>` tags inside `<evidence>`, and escapes `<` in evidence and the question so neither can close a block or inject a fake `<question>`. This reduces, but cannot eliminate, the risk; the admin key on `/ingest` controls who can add evidence in the first place.\n\n### 3.6 Process-Level Isolation\nSecrets are loaded strictly into memory from `.env` via `python-dotenv` at process startup. They are **never** passed as CLI arguments, preventing exposure in system process tables (`ps aux`) to other OS users.\n\n## 4. CI/CD Protection\n- **No Hardcoded Keys in CI:** Pull requests and automated eval workflows inject credentials via GitHub Actions Repository Secrets (`${{ secrets.TYPESAFE_API_KEY }}`).\n- **Secret Scanning Test:** `tests/unit/test_security_audit.py::test_git_tracked_files_zero_secrets` scans every git-tracked file for live key patterns as part of the unit suite that CI runs on every push and PR."
+    },
+    {
+      "document_id": "doc_performance_benchmark_0_production_latency_throughpu",
+      "title": "Production Latency, Throughput & Performance Profiling",
+      "text": "# Production Latency, Throughput & Performance Profiling\n\nThis document outlines the empirical latency benchmarks, throughput metrics, resource profile, and architectural performance guarantees of the `lattice-rag` Hybrid GraphRAG engine.\n\n## 1. Executive Summary & Dual-SLA Guarantees\n\nTraditional GraphRAG architectures suffer from severe cloud latency inflation and high recurring costs caused by separate network hops between microservices (e.g., Pinecone/Weaviate for vectors, Neo4j for property graphs, and external reranker APIs). \n\n`lattice-rag` unifies **LatticeDB** (embedded property-graph + HNSW + BM25 in a single binary), **FastEmbed** (local CPU-quantized dense embeddings), and **INT8 ONNX `bge-reranker-v2-m3`** into an entirely in-process execution pipeline."
+    },
+    {
+      "document_id": "doc_performance_benchmark_1_dual_sla_production_enforcem",
+      "title": "Production Latency, Throughput & Performance Profiling: Dual-SLA Production Enforcements",
+      "text": "### Dual-SLA Production Enforcements\n\n| SLA Target | Target Threshold | Empirical Result ($p95$) | Status | Enforcement Mechanism |\n|---|---|---|---|---|\n| **Sub-Second Retrieval SLA** | Retrieval-only E2E $p95 < 1,000$ms | **812.6ms** | **[PASSED]** | `--sla-check` CLI & `BenchmarkEngine` |\n| **Tier 1 Cache Latency SLA** | Exact-hit $p95 < 25$ms | **0.03ms** | **[PASSED]** | In-memory exact-match map |\n\n**Scope of the numbers.** The default (zero-cost) benchmark measures *retrieval only*: Stage 1, Stage 2 and Stage 3, without Jev routing, the Noul guardrail or the LLM call, which all depend on external network latency. `lattice-rag benchmark --live` runs the full pipeline (bypassing the Tier 1 cache) and reports it as a separate scope. The Tier 1 SLA covers the exact-match path; the similarity-scan row excludes the Jev Noul verification call that a real fuzzy hit makes."
+    },
+    {
+      "document_id": "doc_performance_benchmark_2_2_empirical_benchmark_matrix",
+      "title": "Production Latency, Throughput & Performance Profiling: 2. Empirical Benchmark Matrix",
+      "text": "## 2. Empirical Benchmark Matrix\n\nThe following metrics were captured with `lattice-rag benchmark --iterations 5 --warmup 1` on an Apple M2 (8 cores) against the seeded golden-corpus database:\n\n```\n+-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+\n| Pipeline Stage                                            | p50      | p90      | p95      | p99      | Mean     | QPS      |\n+-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+\n| Tier 1 Cache: exact hit                                   |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  51590.5 |\n| Tier 1 Cache: similarity scan (excl. Noul call)           |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  33845.7 |\n| Stage 1: Hybrid Retrieval (HNSW+BM25)                     |    6.8ms |    7.2ms |    7.2ms |    7.2ms |    6.9ms |    145.8 |\n| Stage 2: Graph Traversal (2-hop)                          |    1.5ms |    1.6ms |    1.7ms |    1.7ms |    1.6ms |    638.7 |\n| Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3)        |  278.3ms |  291.2ms |  293.7ms |  295.8ms |  281.4ms |      3.6 |\n| End-to-End: retrieval only (no routing, guardrail or LLM) |  801.9ms |  811.4ms |  812.6ms |  813.5ms |  798.7ms |      1.3 |\n+-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+\n```"
+    },
+    {
+      "document_id": "doc_performance_benchmark_3_stage_by_stage_architectural",
+      "title": "Production Latency, Throughput & Performance Profiling: Stage-by-Stage Architectural Breakdown",
+      "text": "### Stage-by-Stage Architectural Breakdown\n\n1. **Tier 1 Cache (exact hit $p95 = 0.03$ms)**:\n   - Exact (normalized) query strings resolve from an in-memory map without embedding the query.\n   - Paraphrased queries ($\\text{cosine} \\ge 0.90$) are found by a vectorized NumPy dot product, then confirmed by a TypeSafe AI Jev Noul call. That network call dominates a real fuzzy hit and is excluded from the similarity-scan row.\n\n2. **Stage 1: Hybrid Retrieval ($p95 = 7.2$ms)**:\n   - Query embedding via FastEmbed (`BAAI/bge-small-en-v1.5`, 384 dimensions). In the full pipeline this embedding is computed once during triage and reused here.\n   - LatticeDB HNSW search and BM25 full-text search, merged with Reciprocal Rank Fusion ($k=60$) into `top_k + 3` candidates.\n\n3. **Stage 2: Graph Traversal ($p95 = 1.7$ms)**:\n   - Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API.\n   - Earlier versions of this benchmark passed entity ids where chunk ids were expected, so the traversal found no anchors and timed a no-op (about 0.3 ms). The figure above measures a real traversal.\n\n4. **Stage 3: Cross-Encoder Reranking ($p95 = 293.7$ms for 3 chunks)**:\n   - INT8 ONNX `BAAI/bge-reranker-v2-m3` scores each candidate's chunk text (`intra_op_num_threads=4`). Cost grows roughly linearly at about 100 ms per candidate on this CPU, which is why Stage 1 adds only 3 candidates of headroom.\n\n5. **End-to-End, retrieval only ($p95 = 812.6$ms)**:\n   - Stage 1 + Stage 2 + Stage 3 for `top_k=5` (8 reranked candidates), without routing, guardrail or generation.\n   - The rerank stage dominates. Routing, the guardrail and the LLM call add network-bound latency on top; measure them with `--live`."
+    },
+    {
+      "document_id": "doc_performance_benchmark_4_rerank_headroom_and_top_k_tu",
+      "title": "Production Latency, Throughput & Performance Profiling: Rerank headroom and `top_k` tuning (#20)",
+      "text": "### Rerank headroom and `top_k` tuning (#20)\n\n`RERANK_HEADROOM` (3) and `top_k` (5, or 12 for `massive_context`) are changed only when the retrieval benchmark and the Hermetic Tier agree. Sweep of `RERANK_HEADROOM` on the 30-query Gold Set (macOS, CPU, real models, no keys; latencies are per query over the 26 non-chitchat queries, miss path = exact miss + embed + semantic scan + offline route + retrieval at `top_k=5`):\n\n| Headroom | Hermetic recall (overall / multihop) | MRR overall | Miss path p50 / p95 | Retrieval `top_k=12` p50 |\n|---|---|---|---|---|\n| 3 (shipped) | 1.000 / 1.000 | 0.978 | 893 / 1069 ms | 1120 ms |\n| 2 | 0.986 / 0.944 | 0.978 | 1222 / 1362 ms | 1771 ms |\n| 1 | 0.986 / 0.944 | 0.978 | 990 / 1203 ms | 1630 ms |\n| 0 | 0.986 / 0.944 | 0.978 | 842 / 1222 ms | 1649 ms |\n\nEvery value under 3 loses a multihop Gold Passage, and the latency saving is smaller than run-to-run noise on a shared CPU (the eval chunks are long, so the cost per candidate varies). Both stay unchanged. On the cache paths, an exact Tier 1 hit costs under 0.1 ms, and a lookup that is not exact costs the query embedding plus the cosine scan (about 10–20 ms) before any routing starts.\n\nThe optional rerank-score Noul skip (`GUARDRAIL_SKIP_RERANK_SCORE`) affects only the guardrail, which the retrieval-only benchmark does not run. It ships off; see [production-readiness.md, section 6](production-readiness.md#rerank-score-noul-skip-off-by-default) for how to enable it."
+    },
+    {
+      "document_id": "doc_performance_benchmark_5_3_resource_memory_footprint",
+      "title": "Production Latency, Throughput & Performance Profiling: 3. Resource & Memory Footprint",
+      "text": "## 3. Resource & Memory Footprint\n\n| Metric | Profile | Rationale |\n|---|---|---|\n| **RAM Footprint (Cold)** | $\\sim 85$ MB | Litestar + Granian base server. |\n| **RAM Footprint (Warm ML)** | $\\sim 420$ MB | FastEmbed embeddings, GLiNER NER model, and INT8 ONNX cross-encoder loaded in memory. |\n| **Container Memory Target** | $1,024$ MB (1 GB) | Safely runs inside free/low-tier container environments (e.g. Render, Railway, Fly.io, Google Cloud Run). |\n| **Database Storage Footprint** | $\\sim 65$ MB | LatticeDB stores chunks, 384-dim HNSW vector indices, BM25 inverted index, and property graph nodes/edges in a single file (`data/lattice_rag.db`). |"
+    },
+    {
+      "document_id": "doc_performance_benchmark_6_4_in_process_vs_cloud_hosted",
+      "title": "Production Latency, Throughput & Performance Profiling: 4. In-Process vs Cloud-Hosted Vector/Graph Architecture",
+      "text": "## 4. In-Process vs Cloud-Hosted Vector/Graph Architecture\n\n| Dimension | `lattice-rag` (In-Process) | Traditional Cloud GraphRAG Stack |\n|---|---|---|\n| **Architecture** | Single container, single process | App + Pinecone/Weaviate + Neo4j Aura + Cohere Rerank API |\n| **Network Hops** | 0 external network hops | 4–6 HTTPS roundtrips per query |\n| **Retrieval Latency** | **$813$ms** ($p95$, retrieval only) | $1,800$ms – $3,500$ms ($p95$) |\n| **Monthly Cloud Cost** | **$0.00** | $150 – $800+ / month (minimum SaaS tiers) |\n| **Deployment Complexity** | Single Docker container (`docker run`) | Multi-tenant VPC peering, secrets management, distributed schema migrations |\n| **Data Privacy** | In-process, single host | Customer text sent to multiple 3rd-party vector/graph clouds |"
+    },
+    {
+      "document_id": "doc_performance_benchmark_7_5_how_to_run_benchmarks",
+      "title": "Production Latency, Throughput & Performance Profiling: 5. How to Run Benchmarks",
+      "text": "## 5. How to Run Benchmarks\n\n### 5.1 Command Line Interface (CLI)\n\nRun the automated benchmark suite with dual-SLA validation:\n```bash\n# Run local zero-cost CPU micro-benchmarks with dual-SLA validation\nlattice-rag benchmark --iterations 5 --warmup 1 --sla-check\n\n# Run benchmark against custom query dataset and export to JSON\nlattice-rag benchmark --dataset eval_dataset.json --output benchmark_results.json\n```\n\n### 5.2 Interactive Visual Studio\n\n1. Navigate to the **Evaluation Matrix** tab in the Studio (`http://localhost:8000`).\n2. Click **Run Performance Benchmark** in the top action bar.\n3. Inspect live SLA validation badges ([PASSED] / [FAILED]) and stage-by-stage percentiles ($p50, p90, p95, p99$, Throughput QPS)."
+    },
+    {
+      "document_id": "doc_performance_benchmark_8_5_3_automated_rest_api",
+      "title": "Production Latency, Throughput & Performance Profiling: 5.3 Automated REST API",
+      "text": "### 5.3 Automated REST API\n\nThe endpoint requires the admin key and runs a fixed retrieval-only suite (6 iterations, 2 warmup):\n```bash\ncurl -X POST \"http://localhost:8000/api/v1/benchmark/run\" -H \"X-Admin-Key: $ADMIN_API_KEY\"\n```\nResponse (abridged to two stages and a subset of fields; each stage also has `minMs`, `p90Ms`, `p99Ms` and `maxMs`):\n```json\n{\n  \"totalDurationSec\": 7.91,\n  \"subSecondSlaMet\": true,\n  \"tier1CacheSlaMet\": true,\n  \"stages\": [\n    {\n      \"stage\": \"Stage 1: Hybrid Retrieval (HNSW+BM25)\",\n      \"samplesCount\": 5,\n      \"meanMs\": 6.9,\n      \"p50Ms\": 6.8,\n      \"p95Ms\": 7.2,\n      \"qps\": 145.8\n    },\n    {\n      \"stage\": \"End-to-End: retrieval only (no routing, guardrail or LLM)\",\n      \"samplesCount\": 3,\n      \"meanMs\": 798.7,\n      \"p50Ms\": 801.9,\n      \"p95Ms\": 812.6,\n      \"qps\": 1.3\n    }\n  ]\n}\n```"
     }
   ],
   "queries": [
@@ -88,14 +298,18 @@
     },
     {
       "id": "eval_04",
-      "query": "How are traversed graph paths incorporated into candidate chunks during cross-encoder reranking?",
+      "query": "How are traversed graph paths used when answering a question, and does the cross-encoder reranker see them?",
       "slice": "multihop",
       "expected_route": "hybrid",
-      "reference_answer": "Graph paths traversed in LatticeDB are linearized into triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to the candidate chunks, so the cross-encoder scores text relevance and relational graph context together.",
+      "reference_answer": "The cross-encoder does not see them: it scores every candidate on its own chunk text only, because graph triples are identical for every candidate and could not change the ordering. The paths traversed in LatticeDB from the entities of the final chunks are linearized into triples and sent to the generation prompt instead.",
       "gold_passages": [
         {
           "document_id": "doc_fastembed_reranking",
-          "text": "During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+          "text": "The cross-encoder scores every candidate on its own chunk text only: graph triples are not appended to candidates, because they are identical for every candidate and could not change the ordering. Paths traversed in LatticeDB from the entities of the final chunks are instead linearized into triples formatted as 'source --[relation type]--> target' and sent to the generation prompt."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead."
         }
       ],
       "expected_entities": [
@@ -110,19 +324,20 @@
       "query": "What GLiNER model is loaded for entity extraction and what heuristic creates relations between entities?",
       "slice": "multihop",
       "expected_route": "hybrid",
-      "reference_answer": "Entities are extracted with urchade/gliner_small-v2.1, and the EntityExtractor creates a [:RELATION] edge between two entities whenever they co-occur within the same sentence (a sentence-level co-occurrence heuristic).",
+      "reference_answer": "By default the system loads fastino/GLiNER2.5-Decide and falls back to urchade/gliner_small-v2.1 when that model is unavailable. The EntityExtractor creates a [:RELATION] edge between two entities whenever they co-occur within the same sentence (a sentence-level co-occurrence heuristic).",
       "gold_passages": [
         {
           "document_id": "doc_gliner_extraction",
-          "text": "By default, the system leverages urchade/gliner_small-v2.1 as an efficient in-process extractor."
+          "text": "By default, the system loads fastino/GLiNER2.5-Decide as an efficient in-process extractor and falls back to urchade/gliner_small-v2.1 when that model is unavailable."
         },
         {
           "document_id": "doc_gliner_extraction",
-          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created between their respective nodes in LatticeDB with relationship type derived from context."
+          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a [:RELATION] edge is created between their respective nodes in LatticeDB, with a relationship type built from the two entity types, such as CO_OCCURS_IN_TECHNOLOGY_DATABASE."
         }
       ],
       "expected_entities": [
         "GLiNER",
+        "fastino/GLiNER2.5-Decide",
         "urchade/gliner_small-v2.1",
         "EntityExtractor"
       ]
@@ -201,11 +416,15 @@
       "query": "What typed lifecycle events are emitted by the POST /api/v1/query/stream endpoint?",
       "slice": "factoid",
       "expected_route": "vector_exact",
-      "reference_answer": "The streaming endpoint emits typed Server-Sent Events of three kinds: stage, token, and done.",
+      "reference_answer": "The streaming endpoint emits typed Server-Sent Events: stage, token and done lifecycle events. If a provider fails after its first token, it sends an error event before the final done event.",
       "gold_passages": [
         {
           "document_id": "doc_litestar_granian_stack",
           "text": "The service provides dual query APIs: a synchronous POST /api/v1/query endpoint and a streaming POST /api/v1/query/stream endpoint emitting typed Server-Sent Events (SSE) with stage, token, and done events for frontend telemetry."
+        },
+        {
+          "document_id": "doc_litestar_granian_stack",
+          "text": "If a provider fails after its first token, the stream sends an error event before the final done event."
         }
       ],
       "expected_entities": [
@@ -333,14 +552,13 @@
     },
     {
       "id": "eval_16",
-      "query": "How does the architecture prevent heavy CPU tasks like ONNX embeddings from blocking Litestar's async loop?",
+      "query": "Which message broker does the system use to schedule ingestion retries?",
       "slice": "unanswerable",
       "expected_route": "hybrid",
       "reference_answer": "The knowledge base does not contain this information.",
       "gold_passages": [],
       "expected_entities": [
-        "Litestar",
-        "FastEmbed"
+        "Litestar"
       ]
     },
     {
@@ -383,7 +601,7 @@
     },
     {
       "id": "eval_19",
-      "query": "How does LatticeDB's in-process model compare with remote database architectures like Neo4j or Pinecone?",
+      "query": "How does LatticeDB's in-process model differ from a remote database server?",
       "slice": "factoid",
       "expected_route": "hybrid",
       "reference_answer": "LatticeDB is an embedded, in-process database that works much like SQLite for graph and vector data; running inside the host application process removes the network boundary that a remote database has.",
@@ -395,8 +613,7 @@
       ],
       "expected_entities": [
         "LatticeDB",
-        "Neo4j",
-        "Pinecone",
+        "SQLite",
         "In-Process"
       ]
     },
@@ -405,7 +622,7 @@
       "query": "Describe the full end-to-end flow from receiving a user query to generating an SSE-streamed response.",
       "slice": "long_context",
       "expected_route": "massive_context",
-      "reference_answer": "Requests arrive at the Litestar API served by Granian. The Jev Choice primitive routes the query. LatticeDB answers HNSW vector and BM25 text searches together with multi-hop graph queries. The bge-reranker-v2-m3 cross-encoder reranks candidates with linearized graph triples, and the Jev Noul guardrail prunes passages below 0.50 relevance. The streaming endpoint emits typed Server-Sent Events with stage, token, and done events.",
+      "reference_answer": "Granian serves the Litestar API. A Jev Choice call routes the query. Retrieval reuses the triage query embedding, runs HNSW vector search and BM25 search in LatticeDB and fuses them by Reciprocal Rank Fusion into top_k + 3 candidates. The bge-reranker-v2-m3 cross-encoder scores every candidate on its own chunk text, the Jev Noul guardrail prunes passages below 0.50 relevance, and a graph traversal from the entities of the final chunks produces triples that go to the generation prompt, not to the reranker. Groq (with a fallback cascade) generates the answer, and the streaming endpoint emits typed Server-Sent Events: stage, token and done.",
       "gold_passages": [
         {
           "document_id": "doc_litestar_granian_stack",
@@ -416,16 +633,24 @@
           "text": "First, the Choice primitive acts as a front-door router, classifying incoming prompts in 70 to 500 milliseconds into vector_exact, graph_relational, hybrid, chitchat, or massive_context routes."
         },
         {
-          "document_id": "doc_latticedb_internals",
-          "text": "It uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search using the <=> operator and BM25 inverted index text searches using the @@ operator in a single local binary file."
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`)."
         },
         {
-          "document_id": "doc_fastembed_reranking",
-          "text": "During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`)."
         },
         {
           "document_id": "doc_typesafe_system_one",
           "text": "Second, the boolean Noul primitive serves as a context guardrail, evaluating retrieved candidate chunks in parallel and pruning tangential passages with relevance probability below 0.50."
+        },
+        {
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead."
+        },
+        {
+          "document_id": "doc_architecture_4_3_5_multi_tier_caching_circu",
+          "text": "Standard non-cached queries route to primary **GroqCloud** (`GROQ_MODEL`)."
         },
         {
           "document_id": "doc_litestar_granian_stack",
@@ -443,29 +668,29 @@
     },
     {
       "id": "eval_21",
-      "query": "Which model scores the relation triples that GLiNER's co-occurrence heuristic creates, and in what form are they given to it?",
+      "query": "Where do the relation edges that GLiNER's co-occurrence heuristic creates end up when a question is answered?",
       "slice": "multihop",
       "expected_route": "hybrid",
-      "reference_answer": "GLiNER's EntityExtractor creates [:RELATION] edges between entities that co-occur in a sentence; at reranking time the traversed paths are linearized into 'Entity1 --[RELATION]--> Entity2' triples and scored by the BAAI/bge-reranker-v2-m3 cross-encoder.",
+      "reference_answer": "The EntityExtractor stores them as [:RELATION] edges between entities that co-occur in a sentence. At query time a traversal starting from the entities of the final chunks walks those edges (1 hop, 2 for graph_relational), and the resulting paths are linearized into triples that go to the generation prompt. The cross-encoder reranker does not score them.",
       "gold_passages": [
         {
           "document_id": "doc_gliner_extraction",
-          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created between their respective nodes in LatticeDB with relationship type derived from context."
+          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a [:RELATION] edge is created between their respective nodes in LatticeDB, with a relationship type built from the two entity types, such as CO_OCCURS_IN_TECHNOLOGY_DATABASE."
         },
         {
           "document_id": "doc_fastembed_reranking",
-          "text": "During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+          "text": "The cross-encoder scores every candidate on its own chunk text only: graph triples are not appended to candidates, because they are identical for every candidate and could not change the ordering. Paths traversed in LatticeDB from the entities of the final chunks are instead linearized into triples formatted as 'source --[relation type]--> target' and sent to the generation prompt."
         },
         {
-          "document_id": "doc_fastembed_reranking",
-          "text": "For precision stage-3 reranking, the engine integrates BAAI/bge-reranker-v2-m3 in an INT8 quantized ONNX format from onnx-community/bge-reranker-v2-m3-ONNX. This cross-encoder features an 8,192 token context window, 568 million parameters, and executes inference in under 100 milliseconds on CPU via dynamic token batch padding."
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates, and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`)."
         }
       ],
       "expected_entities": [
         "GLiNER",
         "EntityExtractor",
         "RELATION",
-        "BAAI/bge-reranker-v2-m3"
+        "LatticeDB"
       ]
     },
     {
@@ -550,7 +775,7 @@
         },
         {
           "document_id": "doc_gliner_extraction",
-          "text": "By default, the system leverages urchade/gliner_small-v2.1 as an efficient in-process extractor."
+          "text": "By default, the system loads fastino/GLiNER2.5-Decide as an efficient in-process extractor and falls back to urchade/gliner_small-v2.1 when that model is unavailable."
         },
         {
           "document_id": "doc_typesafe_system_one",
@@ -591,7 +816,7 @@
         },
         {
           "document_id": "doc_gliner_extraction",
-          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a semantic directed relationship edge [:RELATION] is created between their respective nodes in LatticeDB with relationship type derived from context."
+          "text": "Following entity extraction, the EntityExtractor extracts relation triples using sentence-level co-occurrence heuristics: when two entities co-occur within the same sentence, a [:RELATION] edge is created between their respective nodes in LatticeDB, with a relationship type built from the two entity types, such as CO_OCCURS_IN_TECHNOLOGY_DATABASE."
         },
         {
           "document_id": "doc_gliner_extraction",
@@ -616,19 +841,23 @@
       "query": "Compare every mechanism the system uses to judge or filter the relevance of retrieved text.",
       "slice": "long_context",
       "expected_route": "massive_context",
-      "reference_answer": "Three mechanisms judge relevance: hybrid HNSW and BM25 search in LatticeDB recalls candidates; the bge-reranker-v2-m3 cross-encoder jointly scores chunk text and linearized graph triples; and the Jev Noul guardrail prunes passages with relevance probability below 0.50. Separately, Jev Score evaluates content against ordered criteria.",
+      "reference_answer": "Hybrid HNSW and BM25 search in LatticeDB, fused by Reciprocal Rank Fusion, recalls the candidates. The bge-reranker-v2-m3 cross-encoder scores every candidate on its own chunk text and keeps the top_k. The Jev Noul guardrail then prunes passages with relevance probability below 0.50; an optional, off-by-default RerankScoreGate keeps chunks whose cross-encoder score clears a value without asking Noul. Separately, Jev Score evaluates content against ordered descriptive criteria.",
       "gold_passages": [
         {
-          "document_id": "doc_latticedb_internals",
-          "text": "It uniquely unites Cypher multi-hop graph queries with native HNSW vector similarity search using the <=> operator and BM25 inverted index text searches using the @@ operator in a single local binary file."
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`)."
         },
         {
-          "document_id": "doc_fastembed_reranking",
-          "text": "During reranking, graph paths traversed in LatticeDB are linearized into structured triples formatted as 'Entity1 --[RELATION]--> Entity2' and appended to candidate text chunks, allowing the cross-encoder to jointly score semantic text relevance and relational graph context."
+          "document_id": "doc_architecture_3_3_3_storage_engine_latticedb",
+          "text": "The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`)."
         },
         {
           "document_id": "doc_typesafe_system_one",
           "text": "Second, the boolean Noul primitive serves as a context guardrail, evaluating retrieved candidate chunks in parallel and pruning tangential passages with relevance probability below 0.50."
+        },
+        {
+          "document_id": "doc_architecture_2_3_2_system_1_decision_routin",
+          "text": "An optional `RerankScoreGate` (`GUARDRAIL_SKIP_RERANK_SCORE`, off by default) keeps chunks whose cross-encoder score clears the value without asking Noul"
         },
         {
           "document_id": "doc_typesafe_system_one",

@@ -30,7 +30,7 @@ def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
 
 def _gold_set_with_one_document() -> dict[str, object]:
     return {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [{"document_id": "d1", "title": "D1", "text": "Hello world."}],
         "queries": [

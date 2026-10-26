@@ -47,7 +47,7 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
         "queries": full_ds["queries"][:2],  # First 2 queries (cite only doc 1)
     }
     mini_baseline = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "metrics": {
             "faithfulness": 0.80,
             "context_precision": 0.75,
