@@ -17,11 +17,40 @@ _ROUTER_INSTRUCTIONS = (
     "for a Hybrid GraphRAG system."
 )
 _ROUTER_CRITERIA = {
-    "vector_exact": "Precise factual lookups, e.g., 'What is X?', 'Define Y'.",
-    "graph_relational": "Multi-hop relational queries, e.g., 'How does X relate to Y?', 'What connects A to B?'.",
-    "hybrid": "Complex queries needing both vector and graph context, e.g., 'Explain the relationship between X, Y, and Z in the context of W'.",
-    "chitchat": "Greetings, small talk, non-technical conversation.",
-    "massive_context": "Queries requiring cross-document synthesis, e.g., 'Summarize all findings about...', 'Compare everything we know about...'.",
+    "vector_exact": (
+        "A question answered by a single fact, name, number, setting or short explanation "
+        "stated in one place, even when it is phrased as 'how' or 'why'. Not a request "
+        "to relate several things or to cover a whole process. "
+        "Examples: 'What model is used for X?', 'What threshold does Y use?', "
+        "'Why was Z chosen over W?', 'What is the maximum number of Q?'."
+    ),
+    "graph_relational": (
+        "A question about how named entities, components or node types are connected: "
+        "which edges, links or relationships join them, or the path between them. "
+        "Examples: 'What edges link A, B and C?', 'How is X connected to Y?', "
+        "'What role does the relationship R play between A and B?'."
+    ),
+    "hybrid": (
+        "A focused question about one mechanism that needs specific facts plus how "
+        "two or three parts interact, but is not a full-system walkthrough. "
+        "Examples: 'How do traversed results feed into the reranking step?', "
+        "'What does component X do and how does it hand off to component Y?', "
+        "'How does design A compare with design B?'."
+    ),
+    "chitchat": (
+        "Greetings, thanks, goodbyes and small talk with no technical content. "
+        "Examples: 'hello there', 'thanks so much!', 'what can you do?'."
+    ),
+    "massive_context": (
+        "A request to cover a whole process, stack or set of mechanisms across many "
+        "parts of the documents: an end-to-end flow, a step-by-step walk through "
+        "everything that happens, a summary of the whole system, or a comparison of "
+        "every mechanism of a kind. Multi-part questions that list several areas to "
+        "cover belong here. "
+        "Examples: 'Describe the full end-to-end flow of X', 'Walk through everything "
+        "that happens to Y from start to finish', 'Summarize the whole stack: A, B, C "
+        "and D', 'Compare every mechanism used to do Z'."
+    ),
 }
 
 
