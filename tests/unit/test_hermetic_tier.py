@@ -230,11 +230,11 @@ SPANNING = "radiate across the spectrum. Relativistic jets launched"
     ("keywords", "recall", "rr"),
     [
         (["accretion"], 0.0, 1.0),  # the first Chunk holds only the start of the passage
-        (["sourdough", "relativistic"], 0.0, 0.5),  # the second Chunk holds only its end
+        (["sourdough", "relativistic"], 1.0, 0.5),  # the second Chunk carries the overlap sentence
         (["sourdough", "accretion", "relativistic"], 1.0, 0.5),  # together they cover it
     ],
 )
-async def test_passage_spanning_two_chunks_is_recalled_only_when_both_are_retrieved(
+async def test_passage_spanning_overlapping_chunks_is_recalled_from_either_side_of_the_overlap(
     keywords: list[str], recall: float, rr: float
 ) -> None:
     report = await run_hermetic_tier(
