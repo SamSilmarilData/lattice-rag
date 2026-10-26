@@ -55,7 +55,12 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
     return ds, base
 
 
-async def _evaluator_calls(files: tuple[Path, Path], graph_context: dict | None) -> list[dict]:
+_UNSET: dict = {}
+
+
+async def _evaluator_calls(
+    files: tuple[Path, Path], graph_context: dict | None, prompt_graph: dict | None = _UNSET
+) -> list[dict]:
     seen: list[dict] = []
 
     class FakeEvaluator:
@@ -70,6 +75,7 @@ async def _evaluator_calls(files: tuple[Path, Path], graph_context: dict | None)
         answer="a",
         filtered_chunks=[{"text": "chunk"}],
         graph_context=graph_context,
+        prompt_graph_context=graph_context if prompt_graph is _UNSET else prompt_graph,
         degraded=False,
         provider="groq",
     )
@@ -85,6 +91,12 @@ async def test_runner_hands_generator_graph_to_evaluator(files):
 
 async def test_runner_passes_no_graph_when_none_retrieved(files):
     calls = await _evaluator_calls(files, None)
+    assert [c["graph_context"] for c in calls] == [None]
+
+
+async def test_runner_judges_only_the_graph_the_generator_received(files):
+    """GRAPH_CONTEXT_IN_PROMPT=off: the traversal ran, but the prompt carried no triples."""
+    calls = await _evaluator_calls(files, GRAPH, prompt_graph=None)
     assert [c["graph_context"] for c in calls] == [None]
 
 

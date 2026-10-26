@@ -61,18 +61,14 @@ One run per experiment arm; the full three-run set only for the final baseline.
 
 | Task | Detail | Decision rule |
 |---|---|---|
-| 5.1 Route ablation | Force each of `vector_exact`, `hybrid`, `graph_relational` onto every non-chitchat query in the Live Tier. | See ADR draft below, written before the numbers. |
+| 5.1 Route ablation | Force each of `vector_exact`, `hybrid`, `graph_relational` onto every non-chitchat query in the Live Tier. | See ADR-0003, written before the numbers. |
 | 5.2 Graph context ablation | `GRAPH_CONTEXT_IN_PROMPT` on/off, per Slice. | If it helps only `multihop`, send it only on `graph_relational` and `hybrid`, capped at 10 edges. Bidirectional traversal only if `multihop` gains. |
 | 5.3 Noul on broad queries | `long_context` Slice: Noul 0.50 (today), 0.35 for `massive_context`, guardrail skipped for `massive_context` (answer stays Unverified). | Keep the best on the `long_context` Slice. Prefer the per-route threshold on a tie. |
 | 5.4 Baseline | Three `lattice-rag eval --output` runs, then `lattice-rag measure-baseline`. Update `docs/production-readiness.md` section 6 if the procedure changed. | The Live Tier gate is green on the code it was measured on. |
 
-## ADR draft: Collapse retrieval Routes only on measured evidence
+## ADR
 
-`docs/adr/0003-collapse-routes-on-evidence.md`, status `proposed` until phase 5.1 reports.
-
-> `vector_exact`, `hybrid` and `graph_relational` run the same retrieval and differ only in graph hop count (1 versus 2). Each query still pays a Jev Choice call to pick among them. We keep all five Routes until the phase 5 ablation runs. If no retrieval Route beats the others by more than the baseline tolerance on any Slice, we collapse them into one retrieval Route (leaving retrieval, `massive_context` and `chitchat`), which drops one decision from the router's job and raises Route Accuracy by construction. We write the rule before the numbers arrive so the result cannot be argued after the fact.
->
-> Considered options: collapse now (a guess, no evidence the routes are redundant on a harder Gold Set); keep five Routes and differentiate retrieval per Route (more code, no evidence it would help).
+The route-collapse rule is recorded in `docs/adr/0003-collapse-routes-on-evidence.md`.
 
 ## Cross-cutting
 

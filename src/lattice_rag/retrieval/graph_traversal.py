@@ -12,13 +12,19 @@ logger = structlog.get_logger(__name__)
 class GraphTraverser:
     """Stage 2: 1-to-2 hop graph traversal over LatticeDB edges (in-process pointer walk)."""
 
-    def __init__(self, store: LatticeStore):
+    def __init__(self, store: LatticeStore, forced_hops: int | None = None):
         """Initialize GraphTraverser.
 
         Args:
             store: The LatticeDB store instance.
+            forced_hops: Walk this many hops on every Route instead of the per-Route count.
+                Eval-only: the Route ablation (#46, ADR-0003) sets it through
+                ``lattice-rag eval --force-hops``; the app never does.
         """
+        if forced_hops is not None and forced_hops not in (1, 2):
+            raise ValueError(f"forced_hops must be 1 or 2 hops, got {forced_hops}")
         self.store = store
+        self.forced_hops = forced_hops
 
     async def traverse(
         self, anchor_node_ids: list[int], route: str, budget: int = 25
@@ -36,8 +42,8 @@ class GraphTraverser:
         if not anchor_node_ids:
             return SubgraphResult(nodes=[], edges=[])
 
-        # Determine max_hops based on route
-        max_hops = 2 if route == "graph_relational" else 1
+        # Determine max_hops based on route, unless the Route ablation forces it
+        max_hops = self.forced_hops or (2 if route == "graph_relational" else 1)
 
         # Extract entity IDs from anchor chunks in rank order
         entity_ids = await asyncio.to_thread(

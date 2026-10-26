@@ -6,6 +6,20 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from lattice_rag.vocabulary import GraphContextMode
+
+__all__ = [
+    "NO_EVIDENCE",
+    "RELATIONAL_GRAPH_ROUTES",
+    "RELATIONAL_MAX_EDGES",
+    "SYSTEM_PROMPT",
+    "GraphContextMode",
+    "PromptMessages",
+    "build_messages",
+    "graph_for_prompt",
+    "graph_triples",
+]
+
 SYSTEM_PROMPT = "\n".join(
     [
         "You are lattice-rag, a precise technical assistant that answers questions from "
@@ -52,6 +66,32 @@ def graph_triples(graph_context: dict[str, Any]) -> list[str]:
         rel = edge.get("relation_type", "RELATION")
         lines.append(f"- {src} --[{rel}]--> {tgt}")
     return lines
+
+
+RELATIONAL_GRAPH_ROUTES = frozenset({"graph_relational", "hybrid"})
+RELATIONAL_MAX_EDGES = 10
+
+
+def graph_for_prompt(
+    graph_context: dict[str, Any] | None, route: str, mode: GraphContextMode
+) -> dict[str, Any] | None:
+    """The part of ``graph_context`` the generator is given under ``mode``.
+
+    ``relational`` keeps the first :data:`RELATIONAL_MAX_EDGES` edges (traversal order) and
+    only the nodes those edges connect; a subgraph left without edges sends nothing.
+    """
+    if not graph_context or mode is GraphContextMode.OFF:
+        return None
+    if mode is GraphContextMode.ON:
+        return graph_context
+    if route not in RELATIONAL_GRAPH_ROUTES:
+        return None
+    edges = list(graph_context.get("edges", []))[:RELATIONAL_MAX_EDGES]
+    if not edges:
+        return None
+    ends = {e.get("source_id") for e in edges} | {e.get("target_id") for e in edges}
+    nodes = [n for n in graph_context.get("nodes", []) if n.get("node_id", n.get("id")) in ends]
+    return {"nodes": nodes, "edges": edges}
 
 
 def build_messages(

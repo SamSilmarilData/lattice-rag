@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from lattice_rag.security import SecretStr
+from lattice_rag.vocabulary import GraphContextMode
 
 # Load environment variables from .env file at import time
 load_dotenv()
@@ -14,6 +15,8 @@ load_dotenv()
 DEFAULT_LLM_MAX_TOKENS = 768
 # onnx-community/bge-reranker-v2-m3-ONNX at its 2025-09-01 commit
 DEFAULT_RERANKER_ONNX_REVISION = "6f5ff65298512715a1e669753bc754d2bc8f367b"
+# Minimum Jev Noul probability for a chunk to pass the context guardrail
+DEFAULT_GUARDRAIL_THRESHOLD = 0.5
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,14 @@ class AppConfig:
     # Jev Noul guardrail. None (the default) sends every chunk to Noul. Enable only with
     # Live Tier results; see docs/production-readiness.md.
     guardrail_skip_rerank_score: float | None = None
+    # Phase 5 experiment switches (spec #22; docs/production-readiness.md §6). Defaults keep
+    # the measured behaviour. Graph triples in the generation prompt: on | off | relational
+    graph_context_in_prompt: GraphContextMode = GraphContextMode.ON
+    # Noul threshold for massive_context retrieval only; the other Routes keep the global one
+    guardrail_massive_context_threshold: float = DEFAULT_GUARDRAIL_THRESHOLD
+    # Skip Noul on massive_context: its answers become Unverified and never reach Tier 1.
+    # Wins over GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD.
+    guardrail_skip_massive_context: bool = False
     # Live Tier: seconds to wait before the single retry of a degraded answer, so a Groq 429
     # or an open circuit breaker can clear
     eval_degraded_retry_delay: float = 5.0
@@ -63,6 +74,11 @@ class AppConfig:
             raise ValueError(
                 f"Invalid TRUSTED_PROXY_HOPS: {self.trusted_proxy_hops}. Must be 0 or greater."
             )
+        if not 0.0 <= self.guardrail_massive_context_threshold <= 1.0:
+            raise ValueError(
+                "Invalid GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD: "
+                f"{self.guardrail_massive_context_threshold}. Must be between 0 and 1."
+            )
         if self.eval_degraded_retry_delay < 0:
             raise ValueError(
                 f"Invalid EVAL_DEGRADED_RETRY_DELAY: {self.eval_degraded_retry_delay}. "
@@ -76,6 +92,28 @@ def _split_csv(raw: str) -> tuple[str, ...]:
 
 def _optional_float(raw: str | None) -> float | None:
     return float(raw) if raw and raw.strip() else None
+
+
+_TRUE = frozenset({"1", "true", "yes", "on"})
+_FALSE = frozenset({"", "0", "false", "no", "off"})
+
+
+def _bool(name: str) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in _TRUE:
+        return True
+    if raw in _FALSE:
+        return False
+    raise ValueError(f"Invalid {name}: {raw!r}. Use true or false.")
+
+
+def _graph_context_mode(raw: str | None) -> GraphContextMode:
+    value = (raw or GraphContextMode.ON).strip().lower()
+    try:
+        return GraphContextMode(value)
+    except ValueError:
+        choices = " | ".join(m.value for m in GraphContextMode)
+        raise ValueError(f"Invalid GRAPH_CONTEXT_IN_PROMPT: {value!r}. Use {choices}.") from None
 
 
 def load_config(require_typesafe: bool = True) -> AppConfig:
@@ -112,6 +150,11 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
         trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),
         guardrail_skip_rerank_score=_optional_float(os.environ.get("GUARDRAIL_SKIP_RERANK_SCORE")),
+        graph_context_in_prompt=_graph_context_mode(os.environ.get("GRAPH_CONTEXT_IN_PROMPT")),
+        guardrail_massive_context_threshold=float(
+            os.environ.get("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD") or DEFAULT_GUARDRAIL_THRESHOLD
+        ),
+        guardrail_skip_massive_context=_bool("GUARDRAIL_SKIP_MASSIVE_CONTEXT"),
         eval_degraded_retry_delay=float(os.environ.get("EVAL_DEGRADED_RETRY_DELAY") or "5"),
     )
 

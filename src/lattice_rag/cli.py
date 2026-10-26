@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
+
+if TYPE_CHECKING:
+    from lattice_rag.vocabulary import GraphContextMode
 
 
 @click.group()
@@ -46,8 +49,17 @@ def serve(host: str | None, port: int | None) -> None:
     server_main(host=host, port=port)
 
 
-async def _build_harness() -> dict[str, Any]:
-    """Build unified CLI service harness with all dependencies wired."""
+async def _build_harness(
+    *, force_hops: int | None = None, graph_context: GraphContextMode | None = None
+) -> dict[str, Any]:
+    """Build unified CLI service harness with all dependencies wired.
+
+    Mirrors ``app.py`` ``lifespan()``. The keyword arguments are Live Tier experiment arms
+    (``lattice-rag eval``): ``force_hops`` is eval-only and has no app counterpart;
+    ``graph_context`` overrides ``GRAPH_CONTEXT_IN_PROMPT`` for one run.
+    """
+    import dataclasses
+
     from lattice_rag.caching.fallback_cache import FallbackCache
     from lattice_rag.caching.semantic_cache import SemanticCache
     from lattice_rag.config import get_config
@@ -57,11 +69,13 @@ async def _build_harness() -> dict[str, Any]:
     from lattice_rag.orchestration.graph import RAGOrchestrator
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
-    from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
+    from lattice_rag.routing.guardrail import ContextGuardrail, build_route_guardrails
     from lattice_rag.routing.router import QueryRouter
     from lattice_rag.storage.db import LatticeStore
 
     config = get_config()
+    if graph_context is not None:
+        config = dataclasses.replace(config, graph_context_in_prompt=graph_context)
     store = LatticeStore(config.latticedb_path)
     embed_svc = EmbeddingService(
         config.embed_model,
@@ -70,8 +84,11 @@ async def _build_harness() -> dict[str, Any]:
         onnx_reranker_revision=config.reranker_onnx_revision,
     )
     router = QueryRouter()
-    guardrail = with_rerank_skip(
-        ContextGuardrail(threshold=0.5), config.guardrail_skip_rerank_score
+    guardrail = build_route_guardrails(
+        lambda threshold: ContextGuardrail(threshold=threshold),
+        skip_rerank_score=config.guardrail_skip_rerank_score,
+        massive_context_threshold=config.guardrail_massive_context_threshold,
+        skip_massive_context=config.guardrail_skip_massive_context,
     )
     sem_cache = SemanticCache()
     fb_cache = FallbackCache(config.redis_url)
@@ -88,7 +105,7 @@ async def _build_harness() -> dict[str, Any]:
         max_output_tokens=config.llm_max_tokens,
     )
     cc = ChitchatHandler()
-    pipeline = RetrievalPipeline(store, embed_svc, guardrail)
+    pipeline = RetrievalPipeline(store, embed_svc, guardrail, forced_hops=force_hops)
     orchestrator = RAGOrchestrator(
         router=router,
         semantic_cache=sem_cache,
@@ -99,6 +116,7 @@ async def _build_harness() -> dict[str, Any]:
         chitchat=cc,
         embedding_service=embed_svc,
         answer_max_tokens=config.llm_max_tokens,
+        graph_context_in_prompt=config.graph_context_in_prompt,
     )
     return {
         "config": config,
@@ -480,7 +498,27 @@ def benchmark(
     default=None,
     help="Write the full run report (JSON) here, whether or not the gate passes",
 )
-def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str | None) -> None:
+@click.option(
+    "--force-hops",
+    type=click.IntRange(1, 2),
+    default=None,
+    help="Route ablation (#46): every non-chitchat query walks this many graph hops. "
+    "Route Accuracy still scores the router's own pick.",
+)
+@click.option(
+    "--graph-context",
+    type=click.Choice(["on", "off", "relational"], case_sensitive=False),
+    default=None,
+    help="Graph-context arm (#47): overrides GRAPH_CONTEXT_IN_PROMPT for this run.",
+)
+def run_eval(
+    dataset: str,
+    baseline: str,
+    fail_on_regression: bool,
+    output: str | None,
+    force_hops: int | None,
+    graph_context: str | None,
+) -> None:
     """Run the Live Tier: Jev-judged metrics over the Gold Set, compared with the baseline."""
     import asyncio
 
@@ -488,6 +526,7 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str 
     from lattice_rag.eval import EvalRunner, JevEvaluator
     from lattice_rag.eval.gate import format_metric
     from lattice_rag.storage.extract import EntityExtractor
+    from lattice_rag.vocabulary import GraphContextMode
 
     # Without the judge key nothing can be scored; without Groq every answer would come
     # from the fallback, so the run would measure the wrong system. Either is a failure.
@@ -507,9 +546,15 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str 
         )
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
+    graph_mode = GraphContextMode(graph_context.lower()) if graph_context else None
+    if force_hops is not None or graph_mode is not None:
+        click.echo(
+            f"Experiment arm: force_hops={force_hops or 'per-route'} "
+            f"graph_context={graph_mode or 'from config'}\n"
+        )
 
     async def _run() -> bool:
-        h = await _build_harness()
+        h = await _build_harness(force_hops=force_hops, graph_context=graph_mode)
         evaluator = JevEvaluator(api_key=h["config"].typesafe_api_key)
         runner = EvalRunner(
             orchestrator=h["orchestrator"],

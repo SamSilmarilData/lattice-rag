@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
+from lattice_rag.generation.prompt import GraphContextMode, graph_for_prompt
 from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
 
@@ -82,6 +83,7 @@ class RAGOrchestrator:
         chitchat: ChitchatHandler,
         embedding_service: Any,
         answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
+        graph_context_in_prompt: GraphContextMode = GraphContextMode.ON,
     ) -> None:
         self.router = router
         self.semantic_cache = semantic_cache
@@ -91,11 +93,31 @@ class RAGOrchestrator:
         self.gemini = gemini
         self.chitchat = chitchat
         self.embedding_service = embedding_service
+        self.answer_max_tokens = answer_max_tokens
+        self.graph_context_in_prompt = graph_context_in_prompt
         self.synthesizer = ResilientSynthesizer(
             groq=self.groq,
             gemini=self.gemini,
             fallback_cache=self.fallback_cache,
             default_max_tokens=answer_max_tokens,
+        )
+
+    def with_retrieval(self, retrieval_pipeline: RetrievalPipeline) -> RAGOrchestrator:
+        """The same orchestrator over another retrieval pipeline (the eval temp DB).
+
+        Every setting carries over, so a Live Tier arm measures the configuration it names.
+        """
+        return RAGOrchestrator(
+            router=self.router,
+            semantic_cache=self.semantic_cache,
+            fallback_cache=self.fallback_cache,
+            retrieval_pipeline=retrieval_pipeline,
+            groq=self.groq,
+            gemini=self.gemini,
+            chitchat=self.chitchat,
+            embedding_service=self.embedding_service,
+            answer_max_tokens=self.answer_max_tokens,
+            graph_context_in_prompt=self.graph_context_in_prompt,
         )
 
     # ── Public Interfaces ────────────────────────────────────────────────
@@ -117,6 +139,7 @@ class RAGOrchestrator:
             route=done["route"],
             cache_hit=done["cached"],
             graph_context=done["graph_path"],
+            prompt_graph_context=done["prompt_graph"],
             filtered_chunks=done["sources"],
             low_grounding=done["low_grounding"],
             unverified=done["unverified"],
@@ -169,6 +192,7 @@ class RAGOrchestrator:
                 cached=True,
                 sources=cached.get("sources", []),
                 graph_path=cached.get("graph_path"),
+                prompt_graph=cached.get("prompt_graph"),
                 degraded=False,
                 provider=None,
                 low_grounding=False,
@@ -196,6 +220,7 @@ class RAGOrchestrator:
                 cached=False,
                 sources=[],
                 graph_path=None,
+                prompt_graph=None,
                 degraded=False,
                 provider=None,
                 low_grounding=False,
@@ -218,13 +243,14 @@ class RAGOrchestrator:
         )
         chunks = retrieved.final_chunks
         graph_dict = subgraph_as_dict(retrieved.graph_context)
+        prompt_graph = graph_for_prompt(graph_dict, route, self.graph_context_in_prompt)
 
         # 3. Generation
         yield {"event": "stage", "data": {"stage": "generation", "chunks_count": len(chunks)}}
         t_stage = time.perf_counter()
         outcome = StreamOutcome()
         tokens: list[str] = []
-        async for tok in self._generate(query, chunks, graph_dict, route, outcome, streaming):
+        async for tok in self._generate(query, chunks, prompt_graph, route, outcome, streaming):
             tokens.append(tok)
             yield {"event": "token", "data": {"delta": tok}}
         if outcome.error:
@@ -246,7 +272,13 @@ class RAGOrchestrator:
             self.semantic_cache.put(
                 query,
                 triage.query_embedding,
-                {"answer": answer, "route": route, "sources": chunks, "graph_path": graph_dict},
+                {
+                    "answer": answer,
+                    "route": route,
+                    "sources": chunks,
+                    "graph_path": graph_dict,
+                    "prompt_graph": prompt_graph,
+                },
             )
 
         yield finish(
@@ -255,6 +287,7 @@ class RAGOrchestrator:
             cached=False,
             sources=chunks,
             graph_path=graph_dict,
+            prompt_graph=prompt_graph,
             degraded=outcome.degraded,
             provider=outcome.provider,
             low_grounding=retrieved.low_grounding,
