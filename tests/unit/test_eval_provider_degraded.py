@@ -22,7 +22,11 @@ PASS = {
 
 def _state(*, degraded: bool, provider: str) -> SimpleNamespace:
     return SimpleNamespace(
-        answer="an answer", filtered_chunks=[], degraded=degraded, provider=provider
+        answer="an answer",
+        filtered_chunks=[],
+        graph_context=None,
+        degraded=degraded,
+        provider=provider,
     )
 
 

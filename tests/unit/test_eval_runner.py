@@ -577,7 +577,10 @@ async def test_correct_refusal_on_unanswerable_passes_without_answer_relevance(t
     base_path = _write(tmp_path / "base.json", _baseline(faithfulness=0.9))
     mock_orch = AsyncMock()
     mock_orch.run.return_value = MagicMock(
-        answer="The knowledge base does not contain this.", filtered_chunks=[]
+        answer="The knowledge base does not contain this.",
+        filtered_chunks=[],
+        degraded=False,
+        provider="groq",
     )
 
     runner = EvalRunner(orchestrator=mock_orch, evaluator=_MetricHonouringEvaluator())  # type: ignore[arg-type]

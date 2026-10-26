@@ -64,7 +64,11 @@ async def _evaluator_calls(files: tuple[Path, Path], graph_context: dict | None)
 
     orch = AsyncMock()
     orch.run.return_value = MagicMock(
-        answer="a", filtered_chunks=[{"text": "chunk"}], graph_context=graph_context
+        answer="a",
+        filtered_chunks=[{"text": "chunk"}],
+        graph_context=graph_context,
+        degraded=False,
+        provider="groq",
     )
     runner = EvalRunner(orchestrator=orch, evaluator=FakeEvaluator())  # type: ignore[arg-type]
     await runner.run_evaluation(dataset_path=files[0], baseline_path=files[1])
