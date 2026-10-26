@@ -85,6 +85,7 @@ async def _build_harness() -> dict[str, Any]:
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
         model=config.gemini_model,
+        max_output_tokens=config.llm_max_tokens,
     )
     cc = ChitchatHandler()
     pipeline = RetrievalPipeline(store, embed_svc, guardrail)

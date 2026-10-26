@@ -15,6 +15,9 @@ from lattice_rag.security import sanitize_error_detail
 
 logger = logging.getLogger(__name__)
 
+# Broad cross-document answers need more room than the default budget.
+MASSIVE_CONTEXT_MAX_TOKENS = 1536
+
 OFFLINE_MESSAGE = (
     "I'm sorry, all generation services are currently unavailable. Please try again in a moment."
 )
@@ -78,6 +81,11 @@ class ResilientSynthesizer:
     def _primary(route: str) -> str:
         return "gemini" if route == "massive_context" else "groq"
 
+    @staticmethod
+    def _budget(route: str) -> dict[str, int]:
+        """Per-call answer budget; other routes keep each provider's configured default."""
+        return {"max_tokens": MASSIVE_CONTEXT_MAX_TOKENS} if route == "massive_context" else {}
+
     def _providers(self, route: str) -> list[tuple[str, Any, bool]]:
         """Cascade order for a route; only Groq runs under the circuit breaker."""
         groq = ("groq", self.groq, True)
@@ -98,7 +106,11 @@ class ResilientSynthesizer:
             try:
                 guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
                 with guard:
-                    answer = str(await client.synthesize(query, context_chunks, graph_context))
+                    answer = str(
+                        await client.synthesize(
+                            query, context_chunks, graph_context, **self._budget(route)
+                        )
+                    )
                 return SynthesisResult(
                     answer=answer,
                     degraded=name != self._primary(route),
@@ -135,7 +147,9 @@ class ResilientSynthesizer:
             try:
                 guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
                 with guard:
-                    async for tok in client.stream(query, context_chunks, graph_context):
+                    async for tok in client.stream(
+                        query, context_chunks, graph_context, **self._budget(route)
+                    ):
                         emitted = True
                         yield tok
                 outcome.provider = name
