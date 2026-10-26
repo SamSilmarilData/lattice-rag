@@ -44,6 +44,9 @@ class AppConfig:
     # Jev Noul guardrail. None (the default) sends every chunk to Noul. Enable only with
     # Live Tier results; see docs/production-readiness.md.
     guardrail_skip_rerank_score: float | None = None
+    # Live Tier: seconds to wait before the single retry of a degraded answer, so a Groq 429
+    # or an open circuit breaker can clear
+    eval_degraded_retry_delay: float = 5.0
     # True when the app booted without TYPESAFE_API_KEY and runs in degraded hermetic mode
     using_mock_keys: bool = False
 
@@ -54,6 +57,11 @@ class AppConfig:
         if self.trusted_proxy_hops < 0:
             raise ValueError(
                 f"Invalid TRUSTED_PROXY_HOPS: {self.trusted_proxy_hops}. Must be 0 or greater."
+            )
+        if self.eval_degraded_retry_delay < 0:
+            raise ValueError(
+                f"Invalid EVAL_DEGRADED_RETRY_DELAY: {self.eval_degraded_retry_delay}. "
+                "Must be 0 or greater."
             )
 
 
@@ -97,6 +105,7 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
         trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),
         guardrail_skip_rerank_score=_optional_float(os.environ.get("GUARDRAIL_SKIP_RERANK_SCORE")),
+        eval_degraded_retry_delay=float(os.environ.get("EVAL_DEGRADED_RETRY_DELAY") or "5"),
     )
 
 

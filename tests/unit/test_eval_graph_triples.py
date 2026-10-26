@@ -114,3 +114,12 @@ async def test_judge_context_includes_triples_with_graph():
     context = client.system_one.await_args.kwargs["state"]["context"]
     assert context.startswith("[1] chunk")
     assert "GLiNER --[EXTRACTS]--> Entity" in context
+
+
+async def test_judge_context_omits_triples_section_when_graph_has_no_edges():
+    evaluator, client = _judge()
+    await evaluator.evaluate_query(
+        **_BASE, graph_context={"nodes": [{"node_id": 1, "name": "GLiNER"}], "edges": []}
+    )
+    context = client.system_one.await_args.kwargs["state"]["context"]
+    assert context == "[1] chunk"

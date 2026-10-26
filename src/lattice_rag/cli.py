@@ -506,6 +506,7 @@ def run_eval(dataset: str, baseline: str, fail_on_regression: bool, output: str 
             evaluator=evaluator,
             embedding_service=h["embed_svc"],
             extractor=EntityExtractor(),
+            degraded_retry_delay=h["config"].eval_degraded_retry_delay,
         )
 
         try:

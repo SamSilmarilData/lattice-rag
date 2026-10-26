@@ -119,7 +119,7 @@ class RAGOrchestrator:
             unverified=done["unverified"],
             answer=done["answer"],
             degraded=done["degraded"],
-            provider=done.get("provider", ""),
+            provider=done["provider"],
             timings=done["timings"],
             total_latency_ms=done["latency_ms"],
         )
@@ -166,6 +166,7 @@ class RAGOrchestrator:
                 sources=cached.get("sources", []),
                 graph_path=cached.get("graph_path"),
                 degraded=False,
+                provider=None,
                 low_grounding=False,
                 unverified=False,
             )
@@ -191,6 +192,7 @@ class RAGOrchestrator:
                 sources=[],
                 graph_path=None,
                 degraded=False,
+                provider=None,
                 low_grounding=False,
                 unverified=False,
             )

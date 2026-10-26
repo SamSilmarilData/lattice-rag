@@ -37,10 +37,11 @@ def _escape(text: str) -> str:
 
 
 def graph_triples(graph_context: dict[str, Any]) -> list[str]:
-    """Render a subgraph as `- source --[RELATION]--> target` lines (unescaped)."""
+    """Render a subgraph's edges as `- source --[RELATION]--> target` lines (unescaped).
+
+    A subgraph without edges has no triples, so the result is empty.
+    """
     edges = graph_context.get("edges", [])
-    if not edges:
-        return [json.dumps(graph_context)]
     names = {
         n.get("node_id", n.get("id")): n.get("name", "") for n in graph_context.get("nodes", [])
     }
@@ -68,7 +69,9 @@ def build_messages(
         parts.append(f'<chunk index="{i}" doc="{_escape(str(doc_id))}">\n{text}\n</chunk>')
     if graph_context:
         parts.append("<graph>")
-        parts.extend(_escape(line) for line in graph_triples(graph_context))
+        # Without edges the generator still sees the raw subgraph (its entities)
+        lines = graph_triples(graph_context) or [json.dumps(graph_context)]
+        parts.extend(_escape(line) for line in lines)
         parts.append("</graph>")
     parts.append("</evidence>")
     parts.append(f"<question>\n{_escape(query)}\n</question>")

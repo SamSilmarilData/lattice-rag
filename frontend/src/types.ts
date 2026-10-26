@@ -94,6 +94,8 @@ export interface HealthResponse {
 // Slice, or the query failed (error is set) and was never sent to the judge.
 export type EvalQueryError = 'pipeline_error' | 'judge_error' | 'provider_degraded';
 
+export type GenerationProvider = 'groq' | 'gemini' | 'redis_faq' | 'offline';
+
 export interface EvalQueryResult {
   query: string;
   passed: boolean;
@@ -102,8 +104,9 @@ export interface EvalQueryResult {
   answerRelevance: number | null;
   answerCorrectness: number | null;
   error: EvalQueryError | null;
-  // Provider that produced the answer; null if the pipeline produced none
-  provider: string | null;
+  // Provider that generated the answer; null when nothing was generated
+  // (pipeline error, chitchat, cache hit)
+  provider: GenerationProvider | null;
 }
 
 // Means are over the queries where the metric was judged (null if none were)

@@ -154,8 +154,9 @@ class JevEvaluator:
             if text:
                 context_parts.append(f"[{i + 1}] {text}")
 
-        if graph_context:
-            context_parts.append("Graph triples:\n" + "\n".join(graph_triples(graph_context)))
+        triples = graph_triples(graph_context) if graph_context else []
+        if triples:
+            context_parts.append("Graph triples:\n" + "\n".join(triples))
 
         context_text = "\n\n".join(context_parts) if context_parts else "NO_CONTEXT_RETRIEVED"
 

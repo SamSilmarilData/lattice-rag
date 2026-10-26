@@ -215,6 +215,15 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
     tier2_cached_queries: int
 
 
+class GenerationProvider(StrEnum):
+    """Who generated an answer: Groq, Gemini, the Tier 2 FAQ, or the offline message."""
+
+    GROQ = "groq"
+    GEMINI = "gemini"
+    REDIS_FAQ = "redis_faq"
+    OFFLINE = "offline"
+
+
 class EvalQueryError(StrEnum):
     """Why a Gold Set query failed; a fixed code, never exception text."""
 
@@ -237,8 +246,9 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     answer_relevance: float | None = None
     answer_correctness: float | None = None
     error: EvalQueryError | None = None
-    # Which provider produced the answer ("groq", "gemini", "redis_faq", ...); None if no answer
-    provider: str | None = None
+    # Provider that generated the answer; None when nothing was generated
+    # (pipeline error, chitchat, cache hit)
+    provider: GenerationProvider | None = None
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):

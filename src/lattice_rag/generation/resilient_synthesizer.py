@@ -11,6 +11,7 @@ from typing import Any
 
 import pybreaker
 
+from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.security import sanitize_error_detail
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ class SynthesisResult:
 
     answer: str
     degraded: bool
-    provider: str
+    provider: GenerationProvider
 
 
 @dataclass
@@ -36,7 +37,7 @@ class StreamOutcome:
     Passed in by the caller so concurrent streams never share state.
     """
 
-    provider: str = ""
+    provider: GenerationProvider | None = None
     degraded: bool = False
     error: str | None = None
 
@@ -84,7 +85,9 @@ class ResilientSynthesizer:
         if route == "massive_context" and self.gemini is not None:
             try:
                 answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=False, provider="gemini")
+                return SynthesisResult(
+                    answer=answer, degraded=False, provider=GenerationProvider.GEMINI
+                )
             except Exception as e:
                 logger.warning(
                     "Gemini massive context synthesis failed: %s", sanitize_error_detail(str(e))
@@ -95,7 +98,9 @@ class ResilientSynthesizer:
             try:
                 with self.breaker.calling():
                     answer = str(await self.groq.synthesize(query, context_chunks, graph_context))
-                return SynthesisResult(answer=answer, degraded=False, provider="groq")
+                return SynthesisResult(
+                    answer=answer, degraded=False, provider=GenerationProvider.GROQ
+                )
             except Exception as e:
                 logger.warning(
                     "Primary Groq synthesis failed, cascading to Gemini: %s",
@@ -105,7 +110,9 @@ class ResilientSynthesizer:
         if self.gemini is not None:
             try:
                 answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=True, provider="gemini")
+                return SynthesisResult(
+                    answer=answer, degraded=True, provider=GenerationProvider.GEMINI
+                )
             except Exception as e2:
                 logger.warning(
                     "Gemini fallback synthesis failed, cascading to Redis FAQ: %s",
@@ -130,11 +137,14 @@ class ResilientSynthesizer:
         outcome = outcome if outcome is not None else StreamOutcome()
 
         if route == "massive_context":
-            providers = [("gemini", self.gemini, False)]
-            primary = "gemini"
+            providers = [(GenerationProvider.GEMINI, self.gemini, False)]
+            primary = GenerationProvider.GEMINI
         else:
-            providers = [("groq", self.groq, True), ("gemini", self.gemini, False)]
-            primary = "groq"
+            providers = [
+                (GenerationProvider.GROQ, self.groq, True),
+                (GenerationProvider.GEMINI, self.gemini, False),
+            ]
+            primary = GenerationProvider.GROQ
 
         for name, client, use_breaker in providers:
             if client is None:
@@ -169,7 +179,9 @@ class ResilientSynthesizer:
         return SynthesisResult(
             answer=answer,
             degraded=True,
-            provider="redis_faq" if self.fallback_cache else "offline",
+            provider=(
+                GenerationProvider.REDIS_FAQ if self.fallback_cache else GenerationProvider.OFFLINE
+            ),
         )
 
     async def _get_offline_fallback(self, query: str) -> str:

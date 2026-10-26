@@ -32,10 +32,6 @@ logger = structlog.get_logger(__name__)
 # Fixed failure codes on EvalQueryResult.error; exception text stays in the logs
 PIPELINE_ERROR = EvalQueryError.PIPELINE_ERROR
 JUDGE_ERROR = EvalQueryError.JUDGE_ERROR
-PROVIDER_DEGRADED = EvalQueryError.PROVIDER_DEGRADED
-
-# Pause before the single retry of a degraded answer, so a 429 or an open Groq breaker can clear
-DEGRADED_RETRY_DELAY_S = 5.0
 
 
 class EvalRunner:
@@ -47,7 +43,7 @@ class EvalRunner:
         evaluator: JevEvaluator,
         embedding_service: EmbeddingService | None = None,
         extractor: EntityExtractor | None = None,
-        degraded_retry_delay: float = DEGRADED_RETRY_DELAY_S,
+        degraded_retry_delay: float = 5.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Initialize EvalRunner with orchestrator, Jev evaluator, and optional support services."""
@@ -144,7 +140,10 @@ class EvalRunner:
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
                         if pipeline_state.degraded:
-                            # One retry after a pause; a still non-primary answer fails the query
+                            # One retry after a pause; a still non-primary answer fails the query.
+                            # The pause keeps the semaphore slot on purpose: releasing it would
+                            # let the next query call Groq inside the same rate-limit window
+                            # the pause is waiting out.
                             await self._sleep(self.degraded_retry_delay)
                             pipeline_state = await active_orchestrator.run(query, use_cache=False)
                     except Exception as e:
@@ -156,7 +155,7 @@ class EvalRunner:
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
-                    provider = pipeline_state.provider or None
+                    provider = pipeline_state.provider
                     if pipeline_state.degraded:
                         logger.error(
                             "eval_query_provider_degraded",
@@ -164,7 +163,10 @@ class EvalRunner:
                             provider=provider,
                         )
                         return EvalQueryResult(
-                            query=query, passed=False, error=PROVIDER_DEGRADED, provider=provider
+                            query=query,
+                            passed=False,
+                            error=EvalQueryError.PROVIDER_DEGRADED,
+                            provider=provider,
                         )
 
                     try:
