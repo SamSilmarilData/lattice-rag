@@ -214,7 +214,18 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 
 **Hermetic Tier and the runner's CPU.** The INT8 reranker's logits depend on which onnxruntime kernel the CPU selects. On GitHub's `ubuntu-latest` pool, x86 AVX-512 VNNI runners (AMD EPYC 9V74/9V45, Intel Xeon 8573C/6973P) and AVX2-only runners (AMD EPYC 7763) score the same Gold Set query/Chunk pairs up to 0.90 logits apart (mean 0.16). Scores are bit-identical on any two machines of the same kernel class, and the FP32 export agrees across every CPU. The runner pool is mixed, so the gate:
 - never compares a raw rerank score against a fixed value: the old `unanswerable_max_rerank_score` ceiling flaked on eval_22 (-0.146 on AVX2, +0.080 on VNNI, against a ceiling of 0.0);
-- needs floors with margin for ranking flips: eval_21's recall is 1.0 on AVX2 and 0.667 on VNNI. When floors are re-measured, take the lower value from both kernel classes. The `Log reranker kernel class` step in the job's log shows which class ran.
+- sets each floor from the lowest kernel class: rankings flip between classes (on Gold Set 3.0.0, eval_42's recall is 1.0 on VNNI and 0.5 on AVX2 and ARM; eval_10's reciprocal rank is 1.0 on VNNI and ARM and 0.5 on AVX2). The `Log reranker kernel class` step in the job's log shows which class ran.
+
+**Hermetic floors** (`hermetic_thresholds.json`, #44). Each floor is the lowest value measured across the CPU kernel classes, rounded down to two decimals, with no extra slack: the tier is deterministic within a kernel class. The measured values sit next to the floors under `measured`, and `load_thresholds` refuses a file whose floor is above any kernel class's measured value. Measured on Gold Set 3.0.0 (recall / MRR):
+
+| Group (queries) | AVX2 (EPYC 7763) | AVX-512 VNNI (EPYC 9V45) | ARM (Apple Silicon, local) | Floor |
+| :--- | :--- | :--- | :--- | :--- |
+| overall (66) | 0.6774 / 0.6625 | 0.6850 / 0.6665 | 0.6774 / 0.6716 | 0.67 / 0.66 |
+| factoid (41) | 0.7317 / 0.6524 | 0.7317 / 0.6484 | 0.7317 / 0.6524 | 0.73 / 0.64 |
+| multihop (15) | 0.6778 / 0.7667 | 0.7111 / 0.7667 | 0.6778 / 0.7667 | 0.67 / 0.76 |
+| long_context (10) | 0.4544 / 0.5478 | 0.4544 / 0.5908 | 0.4544 / 0.6075 | 0.45 / 0.54 |
+
+Recall is below 1.0 on every gated Slice, so the tier discriminates; the weakest Cases are `paraphrase` and `ambiguity` (recall about 0.36). To re-measure, run `lattice-rag hermetic --output` locally and read the per-query table from the `hermetic-tier` job log on at least one AVX2 and one VNNI runner (re-run the job until both classes have appeared), then take the lowest value per group. A floor that proves flaky is re-measured and the reason recorded, not padded with slack.
 
 **Live Tier** (`lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output live_tier_report.json`, on an ephemeral database; the report is uploaded as the `live-tier-report` artifact):
 - `lattice-rag eval` itself refuses to start without `TYPESAFE_API_KEY` or `GROQ_API_KEY` (without Groq every answer would come from the fallback, so the run would measure the wrong system).

@@ -37,7 +37,8 @@ RUN chown app:app /app
 USER app
 
 # Pre-download ONNX embedding & cross-encoder reranker weights to eliminate cold-start download delays
-RUN python -c "from lattice_rag.retrieval.embeddings import EmbeddingService; s = EmbeddingService(); s.embed_query('warmup'); s.rerank('warmup', ['doc'])"
+# Built from AppConfig so the pinned reranker revision is the one cached, not the latest
+RUN python -c "from lattice_rag.config import load_config; from lattice_rag.retrieval.embeddings import EmbeddingService; c = load_config(require_typesafe=False); s = EmbeddingService(c.embed_model, c.reranker_model, onnx_reranker_repo=c.reranker_onnx_repo, onnx_reranker_revision=c.reranker_onnx_revision); s.embed_query('warmup'); s.rerank('warmup', ['doc'])"
 
 COPY --chown=app:app --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY --chown=app:app eval_dataset.json eval_baseline.json fallback_queries.json ./

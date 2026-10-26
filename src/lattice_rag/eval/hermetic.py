@@ -63,12 +63,32 @@ class MetricFloor(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     mrr: float
 
 
+class KernelClassMeasurement(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
+    """Recall and MRR one CPU kernel class measured, overall and per Slice (floor-shaped)."""
+
+    overall: MetricFloor
+    slices: dict[str, MetricFloor]
+
+
+class Measurement(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
+    """The measured values the floors were derived from, per CPU kernel class.
+
+    The INT8 reranker ranks differently on x86 AVX2, AVX-512 VNNI and ARM, so each floor
+    must sit at or below the lowest kernel class's value or the gate flakes by runner.
+    """
+
+    gold_set_version: str
+    rule: str
+    kernel_classes: dict[str, KernelClassMeasurement]
+
+
 class HermeticThresholds(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
-    """The gate's floors: overall and per scored Slice."""
+    """The gate's floors: overall and per scored Slice, with the measurement behind them."""
 
     version: str
     overall: MetricFloor
     slices: dict[str, MetricFloor]
+    measured: Measurement | None = None
 
 
 class SliceMetrics(msgspec.Struct, frozen=True):
@@ -167,7 +187,33 @@ def load_thresholds(path: str | Path) -> HermeticThresholds:
             f"Hermetic thresholds {file} has version {thresholds.version!r}, "
             f"expected {THRESHOLDS_VERSION!r}"
         )
+    problems = _floors_above_measurement(thresholds)
+    if problems:
+        raise HermeticError(f"Hermetic thresholds {file}: " + "; ".join(problems))
     return thresholds
+
+
+def _floors_above_measurement(thresholds: HermeticThresholds) -> list[str]:
+    """Every floor that some kernel class measured below, so it would fail on that CPU."""
+    if thresholds.measured is None:
+        return []
+    problems = []
+    floors = {OVERALL: thresholds.overall, **thresholds.slices}
+    for kernel, measured in thresholds.measured.kernel_classes.items():
+        values = {OVERALL: measured.overall, **measured.slices}
+        for group, floor in floors.items():
+            value = values.get(group)
+            if value is None:
+                continue
+            for metric, low, actual in (
+                ("recall", floor.recall, value.recall),
+                ("mrr", floor.mrr, value.mrr),
+            ):
+                if low > actual:
+                    problems.append(
+                        f"{group} {metric} floor {low} is above the {actual} measured on {kernel}"
+                    )
+    return problems
 
 
 # ── Gold Passage → Chunk resolution ─────────────────────────────────────────────

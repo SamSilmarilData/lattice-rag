@@ -69,7 +69,7 @@ The following metrics were captured with `lattice-rag benchmark --iterations 5 -
 
 ### Rerank headroom and `top_k` tuning (#20)
 
-`RERANK_HEADROOM` (3) and `top_k` (5, or 12 for `massive_context`) are changed only when the retrieval benchmark and the Hermetic Tier agree. Sweep of `RERANK_HEADROOM` on the 30-query Gold Set (macOS, CPU, real models, no keys; latencies are per query over the 26 non-chitchat queries, miss path = exact miss + embed + semantic scan + offline route + retrieval at `top_k=5`):
+`RERANK_HEADROOM` (3) and `top_k` (5, or 12 for `massive_context`) are changed only when the retrieval benchmark and the Hermetic Tier agree. The sweep below predates Gold Set v3 (3.0.0, the long-form docs corpus): it ran on the 30-query Gold Set 2.0.0, so its recall figures are not comparable with today's Hermetic floors (see [production-readiness.md](production-readiness.md), Hermetic floors). Sweep of `RERANK_HEADROOM` on that Gold Set (macOS, CPU, real models, no keys; latencies are per query over the 26 non-chitchat queries, miss path = exact miss + embed + semantic scan + offline route + retrieval at `top_k=5`):
 
 | Headroom | Hermetic recall (overall / multihop) | MRR overall | Miss path p50 / p95 | Retrieval `top_k=12` p50 |
 |---|---|---|---|---|
