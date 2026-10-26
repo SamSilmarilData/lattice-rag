@@ -5,6 +5,5 @@
     "factoid": {"recall": 0.9, "mrr": 0.9},
     "multihop": {"recall": 0.9, "mrr": 0.85},
     "long_context": {"recall": 0.9, "mrr": 0.75}
-  },
-  "unanswerable_max_rerank_score": 0.0
+  }
 }

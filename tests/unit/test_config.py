@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lattice_rag.config import AppConfig, load_config
+from lattice_rag.config import DEFAULT_RERANKER_ONNX_REVISION, AppConfig, load_config
 from lattice_rag.security import SecretStr
 
 
@@ -79,3 +79,13 @@ def test_guardrail_skip_rerank_score_empty_means_off(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("GUARDRAIL_SKIP_RERANK_SCORE", "")
 
     assert load_config().guardrail_skip_rerank_score is None
+
+
+def test_reranker_revision_is_pinned_unless_overridden(monkeypatch: pytest.MonkeyPatch):
+    """An unset or empty RERANKER_ONNX_REVISION uses the pinned commit, never 'latest'."""
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == (
+        DEFAULT_RERANKER_ONNX_REVISION
+    )
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "abc123")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == "abc123"

@@ -12,9 +12,10 @@ Slices are not scored for recall; they are checked for their own behavior instea
 - ``chitchat`` queries must take the deterministic chitchat path and get the
   ChitchatHandler reply recorded as their reference answer.
 - Every other query (``unanswerable`` included) must *not* be short-circuited to chitchat,
-  and must retrieve without error. ``unanswerable`` queries additionally must not score
-  above the optional ``unanswerable_max_rerank_score`` ceiling: the cross-encoder should
-  find nothing in the corpus that answers them.
+  and must retrieve without error. The top rerank score is reported but never gated: the
+  INT8 cross-encoder's raw logits shift by up to ~0.9 between CPU kernels (x86 AVX2 vs
+  AVX-512 VNNI), so no fixed logit ceiling separates answerable from unanswerable.
+  Abstention is judged in the Live Tier instead.
 """
 
 from __future__ import annotations
@@ -54,12 +55,11 @@ class MetricFloor(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
 
 
 class HermeticThresholds(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
-    """The gate's floors: overall, per scored Slice, and the unanswerable score ceiling."""
+    """The gate's floors: overall and per scored Slice."""
 
     version: str
     overall: MetricFloor
     slices: dict[str, MetricFloor]
-    unanswerable_max_rerank_score: float | None = None
 
 
 class SliceMetrics(msgspec.Struct, frozen=True):
@@ -230,7 +230,6 @@ async def _evaluate_query(
     retriever: Retriever,
     corpus: _SeededCorpus,
     chitchat: ChitchatHandler,
-    ceiling: float | None,
 ) -> QueryOutcome:
     problems: list[str] = []
     chitchat_routed = is_pure_chitchat(q.query)
@@ -261,10 +260,6 @@ async def _evaluate_query(
     top_score = max(scores) if scores else None
 
     if q.slice in PASSAGE_FREE_SLICES:
-        if ceiling is not None and top_score is not None and top_score > ceiling:
-            problems.append(
-                f"top rerank score {top_score:.3f} exceeds the unanswerable ceiling {ceiling}"
-            )
         return QueryOutcome(q.id, q.slice, None, None, top_score, problems)
 
     spans = [corpus.chunk_spans.get(c.get("node_id", -1)) for c in chunks]
@@ -301,10 +296,7 @@ async def run_hermetic_tier(
             corpus = await _seed(store, embedding_service, gold_set)
             retriever = retriever_factory(store, embedding_service)
             outcomes = [
-                await _evaluate_query(
-                    q, retriever, corpus, chitchat, thresholds.unanswerable_max_rerank_score
-                )
-                for q in gold_set.queries
+                await _evaluate_query(q, retriever, corpus, chitchat) for q in gold_set.queries
             ]
         finally:
             store.close()
