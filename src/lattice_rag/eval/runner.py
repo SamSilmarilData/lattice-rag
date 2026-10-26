@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+import msgspec
 import structlog
 
 from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
@@ -30,6 +32,10 @@ logger = structlog.get_logger(__name__)
 # Fixed failure codes on EvalQueryResult.error; exception text stays in the logs
 PIPELINE_ERROR = EvalQueryError.PIPELINE_ERROR
 JUDGE_ERROR = EvalQueryError.JUDGE_ERROR
+PROVIDER_DEGRADED = EvalQueryError.PROVIDER_DEGRADED
+
+# Pause before the single retry of a degraded answer, so a 429 or an open Groq breaker can clear
+DEGRADED_RETRY_DELAY_S = 5.0
 
 
 class EvalRunner:
@@ -41,12 +47,16 @@ class EvalRunner:
         evaluator: JevEvaluator,
         embedding_service: EmbeddingService | None = None,
         extractor: EntityExtractor | None = None,
+        degraded_retry_delay: float = DEGRADED_RETRY_DELAY_S,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Initialize EvalRunner with orchestrator, Jev evaluator, and optional support services."""
         self.orchestrator = orchestrator
         self.evaluator = evaluator
         self.embedding_service = embedding_service
         self.extractor = extractor
+        self.degraded_retry_delay = degraded_retry_delay
+        self._sleep = sleep
 
     async def run_evaluation(
         self,
@@ -133,6 +143,10 @@ class EvalRunner:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
+                        if pipeline_state.degraded:
+                            # One retry after a pause; a still non-primary answer fails the query
+                            await self._sleep(self.degraded_retry_delay)
+                            pipeline_state = await active_orchestrator.run(query, use_cache=False)
                     except Exception as e:
                         # A pipeline error fails the query; it is never judged as an answer
                         logger.error(
@@ -142,8 +156,19 @@ class EvalRunner:
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
+                    provider = pipeline_state.provider or None
+                    if pipeline_state.degraded:
+                        logger.error(
+                            "eval_query_provider_degraded",
+                            **query_fingerprint(query),
+                            provider=provider,
+                        )
+                        return EvalQueryResult(
+                            query=query, passed=False, error=PROVIDER_DEGRADED, provider=provider
+                        )
+
                     try:
-                        return await self.evaluator.evaluate_query(
+                        scored = await self.evaluator.evaluate_query(
                             query=query,
                             retrieved_chunks=pipeline_state.filtered_chunks,
                             generated_answer=pipeline_state.answer,
@@ -151,6 +176,7 @@ class EvalRunner:
                             metrics=metrics_for_slice(item.slice),
                             thresholds=pass_thresholds,
                         )
+                        return msgspec.structs.replace(scored, provider=provider)
                     except Exception as e:
                         # Fail the query rather than aborting the run
                         logger.error(
@@ -158,7 +184,9 @@ class EvalRunner:
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        return EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
+                        return EvalQueryResult(
+                            query=query, passed=False, error=JUDGE_ERROR, provider=provider
+                        )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
@@ -193,14 +221,15 @@ class EvalRunner:
             "",
             "## Query Breakdown",
             "",
-            "| Query | Faithfulness | Precision | Relevance | Correctness | Passed |",
-            "| :--- | :---: | :---: | :---: | :---: | :---: |",
+            "| Query | Provider | Faithfulness | Precision | Relevance | Correctness | Passed |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for res in report.results:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
             status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
+                f"| {q_short} | {res.provider or '-'} "
+                f"| {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
                 f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
         return "\n".join(lines)

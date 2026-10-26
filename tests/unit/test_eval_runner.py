@@ -86,6 +86,8 @@ async def test_eval_runner_passes_gate(mock_dataset_and_baseline):
     mock_orch.run.return_value = MagicMock(
         answer="Valid answer",
         filtered_chunks=[{"text": "Valid context"}],
+        degraded=False,
+        provider="groq",
     )
     mock_orch.semantic_cache = None
 
@@ -120,6 +122,8 @@ async def test_eval_runner_fails_on_regression(mock_dataset_and_baseline):
     mock_orch.run.return_value = MagicMock(
         answer="Regressed answer",
         filtered_chunks=[{"text": "Context"}],
+        degraded=False,
+        provider="groq",
     )
     mock_orch.semantic_cache = None
 
@@ -148,7 +152,9 @@ async def test_eval_runner_fails_on_floor_violation(mock_dataset_and_baseline):
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="Ans", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="Ans", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = None
 
     mock_evaluator = AsyncMock()
@@ -195,7 +201,9 @@ async def test_eval_runner_bypasses_and_preserves_live_semantic_cache(mock_datas
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = MagicMock()
 
     mock_evaluator = AsyncMock()
@@ -263,7 +271,9 @@ async def test_eval_runner_records_evaluator_failure_instead_of_aborting(mock_da
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = None
 
     good = EvalQueryResult(
@@ -295,7 +305,9 @@ async def test_eval_runner_judges_against_the_reference_answer(mock_dataset_and_
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = EvalQueryResult(
         query="q", faithfulness=0.9, context_precision=0.9, answer_relevance=0.9, passed=True
@@ -358,7 +370,7 @@ async def test_pipeline_error_fails_query_without_judging(mock_dataset_and_basel
     mock_orch = AsyncMock()
     mock_orch.run.side_effect = [
         RuntimeError("groq exploded"),
-        MagicMock(answer="fine", filtered_chunks=[]),
+        MagicMock(answer="fine", filtered_chunks=[], degraded=False, provider="groq"),
     ]
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result("Test query 2")
@@ -386,7 +398,9 @@ async def test_floor_applies_to_answer_correctness(mock_dataset_and_baseline):
     """The per-query floor from the baseline covers every metric, not just faithfulness."""
     ds_path, base_path = mock_dataset_and_baseline
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.side_effect = [
         _result("Test query 1", 0.95),
@@ -419,7 +433,9 @@ async def test_floor_and_pass_thresholds_come_from_the_baseline_file(tmp_path: P
     base_path = _write(tmp_path / "base.json", baseline)
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result("Q", 0.9)
 
@@ -446,7 +462,9 @@ async def test_correctness_regression_against_baseline_fails_gate(
         ),
     )
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result(score=0.9, answer_correctness=0.75)
 
@@ -504,7 +522,9 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
         },
     )
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result()
 

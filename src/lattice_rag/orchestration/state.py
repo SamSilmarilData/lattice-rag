@@ -32,6 +32,7 @@ class PipelineState:
     # --- Generation ---
     answer: str = ""
     degraded: bool = False
+    provider: str = ""  # who answered: groq, gemini, redis_faq, offline; "" without generation
 
     # --- Telemetry ---
     timings: list[dict[str, Any]] = field(default_factory=list)

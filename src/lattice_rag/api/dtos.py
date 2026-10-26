@@ -220,6 +220,7 @@ class EvalQueryError(StrEnum):
 
     PIPELINE_ERROR = "pipeline_error"
     JUDGE_ERROR = "judge_error"
+    PROVIDER_DEGRADED = "provider_degraded"
 
 
 class EvalQueryResult(msgspec.Struct, rename="camel"):
@@ -236,6 +237,8 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     answer_relevance: float | None = None
     answer_correctness: float | None = None
     error: EvalQueryError | None = None
+    # Which provider produced the answer ("groq", "gemini", "redis_faq", ...); None if no answer
+    provider: str | None = None
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):

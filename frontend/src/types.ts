@@ -92,7 +92,7 @@ export interface HealthResponse {
 
 // A metric is null when it was not judged: it does not apply to the query's
 // Slice, or the query failed (error is set) and was never sent to the judge.
-export type EvalQueryError = 'pipeline_error' | 'judge_error';
+export type EvalQueryError = 'pipeline_error' | 'judge_error' | 'provider_degraded';
 
 export interface EvalQueryResult {
   query: string;
@@ -102,6 +102,8 @@ export interface EvalQueryResult {
   answerRelevance: number | null;
   answerCorrectness: number | null;
   error: EvalQueryError | null;
+  // Provider that produced the answer; null if the pipeline produced none
+  provider: string | null;
 }
 
 // Means are over the queries where the metric was judged (null if none were)

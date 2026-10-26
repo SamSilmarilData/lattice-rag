@@ -60,6 +60,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'What is the role of FastEmbed and what dense embedding model does it use by default?',
@@ -69,6 +70,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does GLiNER extract entities and what default entity types are recognized?',
@@ -78,6 +80,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Explain the three TypeSafe AI Jev primitives used in the architecture and their specific jobs.',
@@ -87,6 +90,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Why is Litestar paired with the Granian Rust ASGI server, and what JSON library is used?',
@@ -96,6 +100,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How are relation triples extracted from text and mapped into LatticeDB property-graph edges?',
@@ -105,6 +110,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does the cross-encoder reranker incorporate graph structure during scoring?',
@@ -114,6 +120,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does the front-door decision router triage queries and what routes does it choose between?',
@@ -123,6 +130,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'What role does the Jev Noul boolean primitive play in context guardrailing before synthesis?',
@@ -132,6 +140,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Compare the caching tiers in the architecture: Tier 1 vs Tier 2 fallback.',
@@ -141,6 +150,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Explain the end-to-end flow of a multi-hop graph_relational query through the pipeline.',
@@ -150,6 +160,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does the circuit breaker protect external LLM APIs and when does it trip?',
@@ -159,6 +170,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'What fallback synthesis provider is used if GroqCloud encounters rate limits or errors?',
@@ -168,6 +180,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does SSE streaming work in POST /api/v1/query/stream and what events are emitted?',
@@ -177,6 +190,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'What security precautions are implemented to prevent API keys from leaking in logs or error traces?',
@@ -186,6 +200,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Hello! Can you help me understand what you are capable of?',
@@ -195,6 +210,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Thanks for your assistance, that was very helpful!',
@@ -204,6 +220,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'Synthesize all findings across LatticeDB, FastEmbed, and GLiNER for in-process RAG.',
@@ -213,6 +230,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'How does Reciprocal Rank Fusion (RRF) combine dense vector and BM25 sparse rankings?',
@@ -222,6 +240,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
   {
     query: 'What happens when context guardrail rejects all retrieved candidate chunks?',
@@ -231,6 +250,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    provider: 'groq',
   },
 ];
 
