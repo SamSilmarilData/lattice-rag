@@ -4,10 +4,12 @@ import asyncio
 import contextlib
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
+import msgspec
 import structlog
 
-from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse, Misroute
 from lattice_rag.eval.gate import (
     METRICS,
     Baseline,
@@ -24,6 +26,7 @@ from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
 from lattice_rag.storage.extract import EntityExtractor
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -142,8 +145,13 @@ class EvalRunner:
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
+                    routing = {
+                        "chosen_route": cast("Route", pipeline_state.route),
+                        "route_verified": pipeline_state.route_verified,
+                    }
+
                     try:
-                        return await self.evaluator.evaluate_query(
+                        judged = await self.evaluator.evaluate_query(
                             query=query,
                             retrieved_chunks=pipeline_state.filtered_chunks,
                             generated_answer=pipeline_state.answer,
@@ -158,7 +166,8 @@ class EvalRunner:
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        return EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
+                        judged = EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
+                    return msgspec.structs.replace(judged, **routing)
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
@@ -173,7 +182,7 @@ class EvalRunner:
                 with contextlib.suppress(Exception):
                     temp_dir_obj.cleanup()
 
-        return _apply_gate(list(results), baseline)
+        return _apply_gate(queries_data, list(results), baseline)
 
     @staticmethod
     def format_markdown_report(report: EvalRunResponse) -> str:
@@ -188,6 +197,7 @@ class EvalRunner:
             f"- **Mean Context Precision**: {_fmt(report.mean_context_precision)}",
             f"- **Mean Answer Relevance**: {_fmt(report.mean_answer_relevance)}",
             f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
+            *_route_accuracy_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
@@ -219,13 +229,16 @@ class EvalRunner:
         return out
 
 
-def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunResponse:
+def _apply_gate(
+    queries: list[GoldQuery], results: list[EvalQueryResult], baseline: Baseline
+) -> EvalRunResponse:
     """Apply the baseline file's gate rules to per-query results.
 
     The gate fails when any query failed (pipeline or judge error), when any judged
     metric of any query is below ``min_query_floor``, or when a mean drops more than
     ``max_regression_delta`` below its baseline. A metric without a baseline mean is
-    reported but not regression-checked.
+    reported but not regression-checked. Route Accuracy is reported alongside and never
+    gates (ADR-0002). ``results[i]`` is the result of ``queries[i]``.
     """
     rules = baseline.gate_thresholds
     judged = [r for r in results if r.error is None]
@@ -268,4 +281,70 @@ def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunRe
         mean_answer_correctness=means["answer_correctness"],
         failed_queries=failed,
         results=results,
+        route_accuracy_floor=rules.route_accuracy_floor,
+        **_route_accuracy(queries, results),
     )
+
+
+def _route_accuracy(queries: list[GoldQuery], results: list[EvalQueryResult]) -> dict[str, Any]:
+    """Route Accuracy fields over the scored queries.
+
+    A query is scored when it is outside the chitchat Slice (routed deterministically, never
+    by Jev), its pipeline ran, and Jev chose the Route. Pipeline errors and unverified
+    fallback routes are counted instead, so an outage cannot read as accurate routing.
+    """
+    routed = [(q, r) for q, r in zip(queries, results, strict=True) if q.slice != "chitchat"]
+    errored = sum(r.chosen_route is None for _, r in routed)
+    ran = [(q, r) for q, r in routed if r.chosen_route is not None]
+    scored = [(q, r) for q, r in ran if r.route_verified]
+
+    by_slice: dict[str, list[bool]] = {}
+    for q, r in scored:
+        by_slice.setdefault(q.slice, []).append(r.chosen_route == q.expected_route)
+    hits = sum(ok for oks in by_slice.values() for ok in oks)
+    return {
+        "route_accuracy": round(hits / len(scored), 4) if scored else None,
+        "route_accuracy_by_slice": {s: round(sum(o) / len(o), 4) for s, o in by_slice.items()},
+        "route_accuracy_scored": len(scored),
+        "route_accuracy_unverified": len(ran) - len(scored),
+        "route_accuracy_errored": errored,
+        "misroutes": [
+            Misroute(
+                query_id=q.id,
+                slice=q.slice,
+                chosen_route=r.chosen_route,
+                expected_route=q.expected_route,
+            )
+            for q, r in scored
+            if r.chosen_route is not None and r.chosen_route != q.expected_route
+        ],
+    }
+
+
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def _route_accuracy_lines(report: EvalRunResponse) -> list[str]:
+    excluded = [
+        _plural(report.route_accuracy_unverified, "unverified fallback route"),
+        _plural(report.route_accuracy_errored, "pipeline error"),
+    ]
+    lines = [
+        f"- **Route Accuracy**: {_fmt(report.route_accuracy)} over "
+        f"{report.route_accuracy_scored} routed "
+        f"{'query' if report.route_accuracy_scored == 1 else 'queries'}"
+        f" (not scored: {', '.join(excluded)}; chitchat Slice excluded)"
+    ]
+    floor = report.route_accuracy_floor
+    if floor is not None and report.route_accuracy is not None:
+        status = "met" if report.route_accuracy >= floor else "MISSED"
+        lines.append(f"  - advisory floor {floor:.2f}: {status}")
+    lines += [
+        f"  - {name}: {_fmt(acc)}" for name, acc in sorted(report.route_accuracy_by_slice.items())
+    ]
+    lines += [
+        f"  - misroute {m.query_id} ({m.slice}): chose {m.chosen_route}, expected {m.expected_route}"
+        for m in report.misroutes
+    ]
+    return lines

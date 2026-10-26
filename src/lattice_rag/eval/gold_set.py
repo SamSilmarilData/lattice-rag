@@ -25,14 +25,13 @@ passage count makes no sense).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final
 
 import msgspec
 
-GOLD_SET_VERSION: Final = "2.0.0"
+from lattice_rag.vocabulary import Route, Slice
 
-Slice = Literal["factoid", "multihop", "unanswerable", "chitchat", "long_context"]
-Route = Literal["vector_exact", "graph_relational", "hybrid", "chitchat", "massive_context"]
+GOLD_SET_VERSION: Final = "2.0.0"
 
 # Slices whose queries the corpus cannot (unanswerable) or should not (chitchat) answer.
 PASSAGE_FREE_SLICES: Final[frozenset[str]] = frozenset({"unanswerable", "chitchat"})

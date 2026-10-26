@@ -94,6 +94,10 @@ export interface HealthResponse {
 // Slice, or the query failed (error is set) and was never sent to the judge.
 export type EvalQueryError = 'pipeline_error' | 'judge_error';
 
+// Mirror the Route and Slice Literals in src/lattice_rag/vocabulary.py
+export type Route = 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context';
+export type Slice = 'factoid' | 'multihop' | 'unanswerable' | 'chitchat' | 'long_context';
+
 export interface EvalQueryResult {
   query: string;
   passed: boolean;
@@ -102,9 +106,23 @@ export interface EvalQueryResult {
   answerRelevance: number | null;
   answerCorrectness: number | null;
   error: EvalQueryError | null;
+  // null when the pipeline failed; routeVerified is false for the System 1 fallback route
+  chosenRoute: Route | null;
+  routeVerified: boolean;
 }
 
-// Means are over the queries where the metric was judged (null if none were)
+// A query whose chosen Route differs from its Expected Route
+export interface Misroute {
+  queryId: string;
+  slice: Slice;
+  chosenRoute: Route;
+  expectedRoute: Route;
+}
+
+// Means are over the queries where the metric was judged (null if none were).
+// routeAccuracy is over routeAccuracyScored queries: outside the chitchat Slice, pipeline ran,
+// and Jev chose the Route. Unverified fallbacks and pipeline errors are counted, not scored.
+// Its floor is advisory and never fails the gate.
 export interface EvalRunResponse {
   totalQueries: number;
   passedGate: boolean;
@@ -115,6 +133,13 @@ export interface EvalRunResponse {
   meanAnswerCorrectness: number | null;
   failedQueries: number;
   results: EvalQueryResult[];
+  routeAccuracy: number | null;
+  routeAccuracyBySlice: Record<string, number>;
+  routeAccuracyFloor: number | null;
+  routeAccuracyScored: number;
+  routeAccuracyUnverified: number;
+  routeAccuracyErrored: number;
+  misroutes: Misroute[];
 }
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';

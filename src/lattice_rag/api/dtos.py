@@ -6,6 +6,11 @@ from typing import Annotated, Any
 
 import msgspec
 
+from lattice_rag.vocabulary import (  # noqa: TC001  (msgspec resolves annotations at runtime)
+    Route,
+    Slice,
+)
+
 # Request size bounds: keep user-supplied text small enough that embedding,
 # GLiNER extraction, and LLM prompts stay bounded per request.
 MAX_QUERY_CHARS = 2_000
@@ -236,12 +241,29 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     answer_relevance: float | None = None
     answer_correctness: float | None = None
     error: EvalQueryError | None = None
+    # The Route the pipeline chose; None when the pipeline failed before answering
+    chosen_route: Route | None = None
+    # False when chosen_route is the System 1 fallback because Jev could not route
+    route_verified: bool = True
+
+
+class Misroute(msgspec.Struct, rename="camel"):
+    """A Gold Set query whose chosen Route differs from its Expected Route."""
+
+    query_id: str
+    slice: Slice
+    chosen_route: Route
+    expected_route: Route
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):
     """Response DTO for an evaluation run.
 
     Means are over the queries where the metric was judged (``None`` if none were).
+    Route Accuracy is the share of scored queries whose chosen Route equals the Expected
+    Route (``None`` if none were scored). Scored means: outside the chitchat Slice (routed
+    deterministically), the pipeline ran, and Jev chose the Route. Unverified fallback
+    routes and pipeline errors are counted, not scored. Its floor is advisory only.
     """
 
     total_queries: int
@@ -253,6 +275,13 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     mean_answer_correctness: float | None = None
     failed_queries: int = 0
     results: list[EvalQueryResult] = []
+    route_accuracy: float | None = None
+    route_accuracy_by_slice: dict[str, float] = {}
+    route_accuracy_floor: float | None = None
+    route_accuracy_scored: int = 0
+    route_accuracy_unverified: int = 0
+    route_accuracy_errored: int = 0
+    misroutes: list[Misroute] = []
 
 
 class EvalJobStatus(StrEnum):

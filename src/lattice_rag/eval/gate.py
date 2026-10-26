@@ -10,6 +10,7 @@ every threshold the gate applies, so the gate's rules are visible in one place:
   "gate_thresholds": {
      "max_regression_delta": float,                  # allowed drop of any mean vs "metrics"
      "min_query_floor": float,                       # no judged metric of any query below this
+     "route_accuracy_floor": float,                  # optional; ADVISORY, reported, never gates
      "pass_thresholds": {"faithfulness": float, "context_precision": float,
                          "answer_relevance": float, "answer_correctness": float}},
   "measurement": {                                   # optional; written by measure-baseline
@@ -72,6 +73,8 @@ class GateThresholds(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     max_regression_delta: float
     min_query_floor: float
     pass_thresholds: PassThresholds
+    # Advisory per ADR-0002: reported next to Route Accuracy, never fails the gate
+    route_accuracy_floor: float | None = None
 
 
 TOLERANCE_SIGMAS: Final = 2.0

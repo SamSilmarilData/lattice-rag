@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Play, CheckCircle2, XCircle, Search, ArrowUpRight, ChevronDown, ChevronRight, BarChart2, ShieldAlert, Zap, Timer, Activity } from 'lucide-react';
-import { EvalQueryResult, EvalRunResponse, EvalJobResponse, BenchmarkRunResponse } from '../types';
+import { EvalQueryResult, EvalRunResponse, Misroute, EvalJobResponse, BenchmarkRunResponse } from '../types';
 import { adminFetch } from '../adminKey';
 
 const EVAL_POLL_INTERVAL_MS = 2000;
@@ -60,6 +60,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'What is the role of FastEmbed and what dense embedding model does it use by default?',
@@ -69,6 +71,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does GLiNER extract entities and what default entity types are recognized?',
@@ -78,6 +82,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Explain the three TypeSafe AI Jev primitives used in the architecture and their specific jobs.',
@@ -87,6 +93,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Why is Litestar paired with the Granian Rust ASGI server, and what JSON library is used?',
@@ -96,6 +104,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How are relation triples extracted from text and mapped into LatticeDB property-graph edges?',
@@ -105,6 +115,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does the cross-encoder reranker incorporate graph structure during scoring?',
@@ -114,6 +126,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does the front-door decision router triage queries and what routes does it choose between?',
@@ -123,6 +137,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'What role does the Jev Noul boolean primitive play in context guardrailing before synthesis?',
@@ -132,6 +148,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Compare the caching tiers in the architecture: Tier 1 vs Tier 2 fallback.',
@@ -141,6 +159,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Explain the end-to-end flow of a multi-hop graph_relational query through the pipeline.',
@@ -150,6 +170,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does the circuit breaker protect external LLM APIs and when does it trip?',
@@ -159,6 +181,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'What fallback synthesis provider is used if GroqCloud encounters rate limits or errors?',
@@ -168,6 +192,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does SSE streaming work in POST /api/v1/query/stream and what events are emitted?',
@@ -177,6 +203,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'What security precautions are implemented to prevent API keys from leaking in logs or error traces?',
@@ -186,6 +214,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Hello! Can you help me understand what you are capable of?',
@@ -195,6 +225,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Thanks for your assistance, that was very helpful!',
@@ -204,6 +236,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'Synthesize all findings across LatticeDB, FastEmbed, and GLiNER for in-process RAG.',
@@ -213,6 +247,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'How does Reciprocal Rank Fusion (RRF) combine dense vector and BM25 sparse rankings?',
@@ -222,6 +258,8 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
   {
     query: 'What happens when context guardrail rejects all retrieved candidate chunks?',
@@ -231,11 +269,55 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     answerCorrectness: null,
     passed: true,
     error: null,
+    chosenRoute: null,
+    routeVerified: true,
   },
 ];
 
+// Advisory: a missed floor is shown, never treated as a gate failure
+const floorMet = (accuracy: number, floor: number): boolean => accuracy >= floor;
+
+const RouteAccuracyPanel: React.FC<{ report: EvalRunResponse }> = ({ report }) => {
+  const accuracy = report.routeAccuracy;
+  const floor = report.routeAccuracyFloor;
+  const met = accuracy !== null && floor !== null ? floorMet(accuracy, floor) : null;
+  return (
+    <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-3.5 text-xs text-gray-300 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="font-semibold">
+          Route Accuracy: {accuracy === null ? 'n/a' : pct(accuracy, 1)}
+          <span className="ml-1 font-normal text-gray-400">
+            over {report.routeAccuracyScored} routed (not scored: {report.routeAccuracyUnverified} unverified,{' '}
+            {report.routeAccuracyErrored} errored)
+          </span>
+          {met !== null && floor !== null && (
+            <span className={`ml-2 font-normal ${met ? 'text-emerald-400' : 'text-amber-400'}`}>
+              advisory floor {pct(floor)} {met ? 'met' : 'missed'}
+            </span>
+          )}
+        </span>
+        <span className="text-gray-400">
+          {Object.entries(report.routeAccuracyBySlice)
+            .map(([name, acc]) => `${name} ${pct(acc)}`)
+            .join(' · ')}
+        </span>
+      </div>
+      {report.misroutes.length > 0 && (
+        <ul className="font-mono text-[11px] text-gray-400 space-y-0.5">
+          {report.misroutes.map((m: Misroute) => (
+            <li key={m.queryId}>
+              {m.queryId} ({m.slice}): chose {m.chosenRoute}, expected {m.expectedRoute}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) => {
-  const [evalData, setEvalData] = useState<EvalQueryResult[]>(INITIAL_EVAL_DATA);
+  const [evalReport, setEvalReport] = useState<EvalRunResponse | null>(null);
+  const evalData = evalReport?.results ?? INITIAL_EVAL_DATA;
   const [running, setRunning] = useState(false);
   const [evalLimit, setEvalLimit] = useState<number>(5);
   const [evalStatus, setEvalStatus] = useState<string | null>(null);
@@ -262,7 +344,7 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
     try {
       const data = await runEvalJob(evalLimit);
       if (data.results && data.results.length > 0) {
-        setEvalData(data.results);
+        setEvalReport(data);
         setEvalStatus(`✓ Eval Gate Completed: ${data.totalQueries} queries evaluated. Gate status: ${data.passedGate ? 'PASSED' : 'REGRESSION DETECTED'} (Faithfulness: ${pct(data.meanFaithfulness, 1)}, Precision: ${pct(data.meanContextPrecision, 1)}, Relevance: ${pct(data.meanAnswerRelevance, 1)}, Correctness: ${pct(data.meanAnswerCorrectness, 1)}, Failed: ${data.failedQueries})`);
       } else {
         setEvalStatus('Evaluation completed with empty results.');
@@ -391,6 +473,9 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
           </button>
         </div>
       )}
+
+      {/* Route Accuracy (advisory floor; never fails the gate) */}
+      {evalReport && <RouteAccuracyPanel report={evalReport} />}
 
       {/* Eval Error Alert */}
       {evalError && (
