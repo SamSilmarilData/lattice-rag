@@ -31,7 +31,7 @@ DEFAULT_SECOND_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 POOL_PROVIDERS = ("groq", "gemini")
 # Gemini thinking value meaning "send no thinking config; use the model's own default"
-THINKING_MODEL_DEFAULT = "default"
+THINKING_NONE = "none"
 _THINKING_LEVELS = frozenset({"minimal", "low", "medium", "high"})
 
 
@@ -40,7 +40,8 @@ class ModelSpec:
     """One Model Pool member as configured: a provider, a model and (Gemini only) thinking.
 
     ``thinking`` is a Gemini thinking setting: a token budget as digits (``"0"`` turns
-    thinking off) or a level name (``"low"``). ``None`` sends no thinking config.
+    thinking off) or a level name (``"low"``). ``None`` sends no thinking config (written
+    ``none`` in LLM_POOL and GEMINI_THINKING).
     """
 
     provider: str
@@ -55,12 +56,16 @@ class ModelSpec:
 def default_gemini_thinking(model: str) -> str | None:
     """The lowest thinking setting a Gemini model accepts, so thinking spares the answer budget.
 
-    Flash-Lite and 2.5 Flash accept a zero budget (thinking off). Other Gemini 3 models take
-    a level; ``low`` because gemini-3.8-flash rejects ``minimal`` with a 400. Unknown models
-    get no thinking config. Override per member with ``@<setting>`` in LLM_POOL, or with
-    GEMINI_THINKING for the default pool, when the API rejects a value.
+    Flash-Lite gets no thinking config: gemini-3.5-flash-lite rejects ``thinking_budget=0``
+    with a 400 and, without a config, does not think (probed 2026-10-27). 2.5 Flash accepts
+    a zero budget. Other Gemini 3 models take a level; ``low`` because gemini-3.8-flash
+    rejects ``minimal`` with a 400 (``low`` itself is unverified: 3.8-flash was returning
+    503s). Unknown models get no thinking config. Override per member with ``@<setting>`` in
+    LLM_POOL, or with GEMINI_THINKING for the default pool, when the API rejects a value.
     """
-    if "flash-lite" in model or model.startswith("gemini-2.5-flash"):
+    if "flash-lite" in model:
+        return None
+    if model.startswith("gemini-2.5-flash"):
         return "0"
     if model.startswith("gemini-3"):
         return "low"
@@ -69,14 +74,14 @@ def default_gemini_thinking(model: str) -> str | None:
 
 def _thinking(raw: str, *, model: str, source: str) -> str | None:
     value = raw.strip().lower()
-    if value == THINKING_MODEL_DEFAULT:
+    if value == THINKING_NONE:
         return None
     if value.isdigit() or value in _THINKING_LEVELS:
         return value
     levels = " | ".join(sorted(_THINKING_LEVELS))
     raise ValueError(
         f"Invalid {source} thinking setting {raw!r} for {model}: use a token budget "
-        f"(digits), {levels}, or {THINKING_MODEL_DEFAULT}."
+        f"(digits), {levels}, or {THINKING_NONE}."
     )
 
 
@@ -167,7 +172,7 @@ class AppConfig:
     llm_pool: tuple[ModelSpec, ...] = (
         ModelSpec("groq", DEFAULT_GROQ_MODEL),
         ModelSpec("groq", DEFAULT_SECOND_GROQ_MODEL),
-        ModelSpec("gemini", DEFAULT_GEMINI_MODEL, "0"),
+        ModelSpec("gemini", DEFAULT_GEMINI_MODEL),
     )
     llm_max_tokens: int = DEFAULT_LLM_MAX_TOKENS
     llm_timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS

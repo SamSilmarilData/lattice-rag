@@ -20,7 +20,8 @@ def test_default_pool_is_two_groq_models_then_gemini_flash_lite():
     assert cfg.llm_pool == (
         ModelSpec("groq", "qwen/qwen3.8-27b"),
         ModelSpec("groq", "openai/gpt-oss-120b"),
-        ModelSpec("gemini", "gemini-3.5-flash-lite", thinking="0"),
+        # Flash-Lite rejects thinking_budget=0 (400, probed 2026-10-27): send no config
+        ModelSpec("gemini", "gemini-3.5-flash-lite", thinking=None),
     )
 
 
@@ -50,14 +51,28 @@ def test_gemini_thinking_env_overrides_the_default_pool_setting(monkeypatch):
 def test_llm_pool_sets_order_members_and_thinking(monkeypatch):
     monkeypatch.setenv(
         "LLM_POOL",
-        "gemini:gemini-3.8-flash@default, groq:openai/gpt-oss-20b,gemini:gemini-3.5-flash-lite",
+        "gemini:gemini-3.8-flash@none, groq:openai/gpt-oss-20b,gemini:gemini-2.5-flash",
     )
     cfg = load_config(require_typesafe=False)
     assert cfg.llm_pool == (
         ModelSpec("gemini", "gemini-3.8-flash", thinking=None),
         ModelSpec("groq", "openai/gpt-oss-20b"),
-        ModelSpec("gemini", "gemini-3.5-flash-lite", thinking="0"),
+        ModelSpec("gemini", "gemini-2.5-flash", thinking="0"),
     )
+
+
+@pytest.mark.parametrize("raw", ["none", "NONE", " none "])
+def test_gemini_thinking_none_sends_no_thinking_config(monkeypatch, raw):
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("GEMINI_THINKING", raw)
+    cfg = load_config(require_typesafe=False)
+    assert cfg.llm_pool[-1] == ModelSpec("gemini", "gemini-3.8-flash", thinking=None)
+
+
+def test_flash_lite_thinking_can_still_be_set_explicitly(monkeypatch):
+    monkeypatch.setenv("LLM_POOL", "gemini:gemini-3.5-flash-lite@low")
+    cfg = load_config(require_typesafe=False)
+    assert cfg.llm_pool == (ModelSpec("gemini", "gemini-3.5-flash-lite", thinking="low"),)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +83,8 @@ def test_llm_pool_sets_order_members_and_thinking(monkeypatch):
         "groq:",  # empty model
         "groq:a,groq:a",  # duplicate member
         "groq:openai/gpt-oss-20b@low",  # thinking is Gemini-only
-        "gemini:gemini-3.8-flash@lots",  # not a level or a budget
+        "gemini:gemini-3.8-flash@lots",  # not a level, a budget or none
+        "gemini:gemini-3.8-flash@default",  # the keyword is none
     ],
 )
 def test_invalid_llm_pool_is_rejected(monkeypatch, raw):

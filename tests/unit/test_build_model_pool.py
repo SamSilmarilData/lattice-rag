@@ -34,7 +34,7 @@ def test_pool_members_follow_the_configured_order_with_their_adapters():
         _config(
             ModelSpec("groq", "qwen/qwen3.8-27b"),
             ModelSpec("groq", "openai/gpt-oss-120b"),
-            ModelSpec("gemini", "gemini-3.5-flash-lite", "0"),
+            ModelSpec("gemini", "gemini-3.5-flash-lite"),
         )
     )
 
