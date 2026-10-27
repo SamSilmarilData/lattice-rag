@@ -39,6 +39,18 @@ async def test_app_boots_without_llm_keys(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_lifespan_gives_every_pool_member_the_llm_timeout(tmp_path):
+    from lattice_rag.config import ModelSpec
+
+    pool = (ModelSpec("groq", "a"), ModelSpec("gemini", "g", "0"))
+    app = create_app(_config(tmp_path, llm_timeout_seconds=9.0, llm_pool=pool))
+    async with AsyncTestClient(app):
+        members = app.state.orchestrator.pool
+        assert [m.label for m in members] == ["groq:a", "gemini:g"]
+        assert [m.client.timeout_seconds for m in members] == [9.0, 9.0]
+
+
+@pytest.mark.asyncio
 async def test_query_endpoints_are_rate_limited(tmp_path):
     app = create_app(_config(tmp_path))
     async with AsyncTestClient(app) as client:

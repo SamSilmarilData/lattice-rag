@@ -51,10 +51,15 @@ export interface QueryResponse {
   sources: SourceChunk[];
   graphPath?: SubgraphDTO | null;
   timings: StageTiming[];
+  // True only when no Model Pool member gave a complete answer (FAQ / offline message)
   degraded: boolean;
   lowGrounding: boolean;
   // Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
   unverified: boolean;
+  // Who answered: a Model Pool member (provider + model), the FAQ (model null), or nobody
+  // (both null: chitchat, cache hit)
+  provider: GenerationProvider | null;
+  model: string | null;
 }
 
 export interface IngestRequest {
@@ -114,6 +119,8 @@ export interface EvalQueryResult {
   // Provider that generated the answer; null when nothing was generated
   // (pipeline error, chitchat, cache hit)
   provider: GenerationProvider | null;
+  // Model Pool member's model that answered; null for the FAQ or when nothing was generated
+  model: string | null;
   // Graph Recall: share of the query's expected entities among the graph context's Entities;
   // null when the query lists none or the pipeline failed. Unjudged and advisory.
   graphRecall: number | null;
@@ -153,6 +160,9 @@ export interface EvalRunResponse {
   graphRecall: number | null;
   graphRecallBySlice: Record<string, number>;
   graphRecallScored: number;
+  // Model mix: answers per Model Pool member ('provider:model'), plus the FAQ / offline
+  // fallback under its provider name
+  answersByModel: Record<string, number>;
 }
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';

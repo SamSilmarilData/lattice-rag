@@ -64,9 +64,11 @@ interface QueryResponse {
   sources: SourceChunk[];          // Attributed source text chunks
   graphPath?: SubgraphDTO;         // Traversed entity graph nodes and edges
   timings: StageTiming[];          // Stage latency breakdown (triage, retrieval, generation)
-  degraded: boolean;               // True if the answer came from Gemini fallback or the FAQ cache
+  degraded: boolean;               // True only if no Model Pool member answered (FAQ / offline message); never cached
   lowGrounding: boolean;           // True if no retrieved chunk passed the relevance guardrail
   unverified: boolean;             // True if routing, the guardrail or cache verification could not run (Unverified Answer); never cached
+  provider: "groq" | "gemini" | "redis_faq" | "offline" | null;  // Who answered; null for chitchat and cache hits
+  model: string | null;            // Model Pool member's model (e.g. "openai/gpt-oss-120b"); null for the FAQ, chitchat, cache hits
 }
 ```
 
@@ -125,7 +127,7 @@ interface CacheStatsResponse {
   tier1Hits: number;
   tier1Misses: number;
   tier1CachedQueries: number;
-  tier2CircuitStatus: "closed" | "open" | "half-open";  // Groq circuit breaker (shared by /query and /query/stream)
+  tier2CircuitStatus: "closed" | "open" | "partially_open";  // Model Pool breakers (one per member, shared by /query and /query/stream): all closed, all open, or mixed
   tier2CachedQueries: number;
 }
 
@@ -160,12 +162,13 @@ interface EvalQueryResult {
   contextPrecision: number | null;   // Retrieved context vs what the reference answer needs
   answerRelevance: number | null;    // Answer vs the query
   answerCorrectness: number | null;  // Answer vs the Gold Set reference answer
-  // Set when the query failed; it is then not judged. provider_degraded: the answer still came
-  // from a non-primary provider after one retry
+  // Set when the query failed; it is then not judged. provider_degraded: no Model Pool member
+  // answered, even after one retry
   error: "pipeline_error" | "judge_error" | "provider_degraded" | null;
   // Provider that generated the answer; null when nothing was generated
   // (pipeline error, chitchat, cache hit)
   provider: "groq" | "gemini" | "redis_faq" | "offline" | null;
+  model: string | null;              // Model Pool member's model; null for the FAQ or no generation
   chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error
   routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)
   graphRecall: number | null;        // Graph Recall; null when the query lists no expected entities or the pipeline failed

@@ -43,8 +43,7 @@ from lattice_rag.config import get_config, load_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.generation.chitchat import ChitchatHandler
-from lattice_rag.generation.gemini_fallback import GeminiFallback
-from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+from lattice_rag.generation.model_pool import build_model_pool
 from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -126,17 +125,8 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     if fallback_file.exists():
         await fallback_cache.seed_from_file(fallback_file)
 
-    # 5. Generative synthesizers & chitchat
-    groq = GroqSynthesizer(
-        api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-        model=config.groq_model,
-        max_tokens=config.llm_max_tokens,
-    )
-    gemini = GeminiFallback(
-        api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-        model=config.gemini_model,
-        max_output_tokens=config.llm_max_tokens,
-    )
+    # 5. Model Pool (LLM_POOL, ADR-0004) & chitchat
+    pool = build_model_pool(config)
     chitchat = ChitchatHandler()
 
     # 6. 3-Stage Hybrid Retrieval Pipeline
@@ -152,8 +142,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         semantic_cache=semantic_cache,
         fallback_cache=fallback_cache,
         retrieval_pipeline=retrieval_pipeline,
-        groq=groq,
-        gemini=gemini,
+        pool=pool,
         chitchat=chitchat,
         embedding_service=embedding_service,
         answer_max_tokens=config.llm_max_tokens,

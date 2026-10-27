@@ -50,13 +50,18 @@ interface EvalMatrixProps {
   onTestQueryInStudio: (query: string) => void;
 }
 
-// Seed rows were answered by the primary provider on a verified route (unknown here),
-// with no Graph Recall measured, unless they say otherwise
-type SeedDefaults = 'provider' | 'chosenRoute' | 'routeVerified' | 'graphRecall';
+// Seed rows were answered by a Groq pool member (model unknown here) on a verified route
+// (unknown here), with no Graph Recall measured, unless they say otherwise
+type SeedDefaults = 'provider' | 'model' | 'chosenRoute' | 'routeVerified' | 'graphRecall';
 type SeedRow = Omit<EvalQueryResult, SeedDefaults> & Partial<Pick<EvalQueryResult, SeedDefaults>>;
+
+// 'provider:model' for a Model Pool answer, the provider alone for the FAQ / offline message
+const answeredBy = (r: EvalQueryResult): string | null =>
+  r.provider === null ? null : r.model ? `${r.provider}:${r.model}` : r.provider;
 
 const seedRow = (row: SeedRow): EvalQueryResult => ({
   provider: 'groq',
+  model: null,
   chosenRoute: null,
   routeVerified: true,
   graphRecall: null,
@@ -297,6 +302,16 @@ const RouteAccuracyPanel: React.FC<{ report: EvalRunResponse }> = ({ report }) =
           {Object.entries(report.graphRecallBySlice)
             .map(([name, rec]) => `${name} ${pct(rec)}`)
             .join(' · ')}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="font-semibold">Model Mix</span>
+        <span className="font-mono text-[11px] text-gray-400">
+          {Object.entries(report.answersByModel ?? {}).length === 0
+            ? 'none generated'
+            : Object.entries(report.answersByModel)
+                .map(([who, n]) => `${who} ${n}`)
+                .join(' · ')}
         </span>
       </div>
     </div>
@@ -708,6 +723,11 @@ export const EvalMatrix: React.FC<EvalMatrixProps> = ({ onTestQueryInStudio }) =
                             <ChevronRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
                           )}
                           <span className="font-medium">{item.query}</span>
+                          {answeredBy(item) && (
+                            <span className="font-mono text-[10px] text-gray-500" title="Model that answered">
+                              {answeredBy(item)}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center font-mono text-cyan-400">

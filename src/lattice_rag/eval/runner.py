@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -129,7 +130,8 @@ class EvalRunner:
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
                         if pipeline_state.degraded:
-                            # One retry after a pause; a still non-primary answer fails the query.
+                            # No pool member answered: one retry after a pause; a still
+                            # degraded answer fails the query.
                             # The pause keeps the semaphore slot on purpose: releasing it would
                             # let the next query call Groq inside the same rate-limit window
                             # the pause is waiting out.
@@ -147,6 +149,7 @@ class EvalRunner:
                     chosen_route = cast("Route", pipeline_state.route)
                     route_verified = pipeline_state.route_verified
                     provider = pipeline_state.provider
+                    model = pipeline_state.model
                     graph_recall = graph_recall_of(
                         item.expected_entities, pipeline_state.graph_context
                     )
@@ -155,6 +158,7 @@ class EvalRunner:
                             "eval_query_provider_degraded",
                             **query_fingerprint(query),
                             provider=provider,
+                            model=model,
                         )
                         return EvalQueryResult(
                             query=query,
@@ -163,6 +167,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            model=model,
                             graph_recall=graph_recall,
                         )
 
@@ -182,6 +187,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            model=model,
                             graph_recall=graph_recall,
                         )
                     except Exception as e:
@@ -198,6 +204,7 @@ class EvalRunner:
                             chosen_route=chosen_route,
                             route_verified=route_verified,
                             provider=provider,
+                            model=model,
                             graph_recall=graph_recall,
                         )
 
@@ -231,19 +238,20 @@ class EvalRunner:
             f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
             *_route_accuracy_lines(report),
             *_graph_recall_lines(report),
+            *_model_mix_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
             "## Query Breakdown",
             "",
-            "| Query | Provider | Faithfulness | Precision | Relevance | Correctness | Passed |",
+            "| Query | Model | Faithfulness | Precision | Relevance | Correctness | Passed |",
             "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for res in report.results:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
             status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {res.provider or '-'} "
+                f"| {q_short} | {answered_by(res) or '-'} "
                 f"| {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
                 f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
@@ -318,6 +326,7 @@ def _apply_gate(
         route_accuracy_floor=rules.route_accuracy_floor,
         **_route_accuracy(queries, results),
         **_graph_recall(queries, results),
+        answers_by_model=model_mix(results),
     )
 
 
@@ -386,6 +395,27 @@ def _graph_recall(queries: list[GoldQuery], results: list[EvalQueryResult]) -> d
         "graph_recall_by_slice": {s: round(sum(v) / len(v), 4) for s, v in by_slice.items()},
         "graph_recall_scored": len(scored),
     }
+
+
+def answered_by(result: EvalQueryResult) -> str | None:
+    """``provider:model`` for a Model Pool answer, the provider alone for the FAQ/offline."""
+    if result.provider is None:
+        return None
+    return f"{result.provider}:{result.model}" if result.model else str(result.provider)
+
+
+def model_mix(results: list[EvalQueryResult]) -> dict[str, int]:
+    """Answers per model (see :func:`answered_by`), most answers first."""
+    counts = Counter(who for r in results if (who := answered_by(r)) is not None)
+    return dict(counts.most_common())
+
+
+def _model_mix_lines(report: EvalRunResponse) -> list[str]:
+    if not report.answers_by_model:
+        return ["- **Model Mix** (answers per model): none generated"]
+    return ["- **Model Mix** (answers per model):"] + [
+        f"  - {who}: {n}" for who, n in report.answers_by_model.items()
+    ]
 
 
 def _plural(n: int, noun: str, plural: str | None = None) -> str:

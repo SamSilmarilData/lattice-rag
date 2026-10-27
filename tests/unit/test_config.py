@@ -93,6 +93,26 @@ def test_eval_degraded_retry_delay_reads_the_environment(monkeypatch: pytest.Mon
     assert load_config().eval_degraded_retry_delay == 12.5
 
 
+def test_llm_timeout_defaults_to_thirty_seconds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+
+    assert load_config().llm_timeout_seconds == 30.0
+
+
+def test_llm_timeout_reads_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "7.5")
+
+    assert load_config().llm_timeout_seconds == 7.5
+
+
+@pytest.mark.parametrize("value", ["0", "-3"])
+def test_llm_timeout_rejects_non_positive(monkeypatch: pytest.MonkeyPatch, value: str):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(ValueError, match="LLM_TIMEOUT_SECONDS"):
+        load_config()
+
+
 def test_eval_degraded_retry_delay_rejects_negative(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("EVAL_DEGRADED_RETRY_DELAY", "-1")
 

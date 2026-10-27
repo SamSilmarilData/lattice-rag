@@ -19,6 +19,7 @@ from lattice_rag.api.controllers import (
     IngestController,
     QueryController,
 )
+from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.config import AppConfig
 from lattice_rag.ingestion.ingester import DocumentIngester
@@ -211,6 +212,50 @@ async def test_api_query_reports_unverified_answer(mock_controllers_app):
     async with AsyncTestClient(app=app) as client:
         resp = await client.post("/api/v1/query", json={"query": "What is LatticeDB?"})
         assert resp.json()["unverified"] is True
+
+
+@pytest.mark.asyncio
+async def test_api_query_attributes_the_answer_to_its_pool_member(mock_controllers_app):
+    app, mocks = mock_controllers_app
+    mocks["orchestrator"].run = AsyncMock(
+        return_value=PipelineState(
+            query="q",
+            route="hybrid",
+            answer="A.",
+            provider=GenerationProvider.GROQ,
+            model="openai/gpt-oss-120b",
+        )
+    )
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query", json={"query": "What is LatticeDB?"})
+        data = resp.json()
+        assert (data["provider"], data["model"]) == ("groq", "openai/gpt-oss-120b")
+        assert data["degraded"] is False
+
+
+@pytest.mark.asyncio
+async def test_api_query_stream_done_attributes_the_answer(mock_controllers_app):
+    app, mocks = mock_controllers_app
+
+    async def stream(q):
+        yield {
+            "event": "done",
+            "data": {
+                "answer": "A.",
+                "route": "hybrid",
+                "cached": False,
+                "latency_ms": 1.0,
+                "provider": GenerationProvider.GEMINI,
+                "model": "gemini-3.5-flash-lite",
+            },
+        }
+
+    mocks["orchestrator"].stream_query = stream
+    async with AsyncTestClient(app=app) as client:
+        resp = await client.post("/api/v1/query/stream", json={"query": "What is LatticeDB?"})
+        done_line = resp.text.split("event: done", 1)[1].split("data: ", 1)[1].splitlines()[0]
+        done = json.loads(done_line)
+        assert (done["provider"], done["model"]) == ("gemini", "gemini-3.5-flash-lite")
 
 
 @pytest.mark.asyncio

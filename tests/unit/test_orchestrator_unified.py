@@ -160,32 +160,53 @@ async def test_unified_orchestrator_standard_query_parity(mock_orchestrator_comp
     assert done_evt["data"]["route"] == state.route
 
 
+async def _fail_stream(q, ch, g, **_kw):
+    raise RuntimeError("503")
+    yield "never"  # pragma: no cover
+
+
 @pytest.mark.asyncio
-async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestrator_components):
-    """When Groq is down, both paths report degraded=True and neither caches the answer."""
+async def test_a_later_pool_members_answer_is_normal_attributed_and_cached_on_both_paths(
+    mock_orchestrator_components,
+):
+    """When the first member is down, the next member's answer is a normal answer."""
     c = mock_orchestrator_components
     c["groq"].synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
-
-    async def _groq_stream_fail(q, ch, g, **_kw):
-        raise RuntimeError("Groq 503")
-        yield "never"  # pragma: no cover
 
     async def _gemini_stream(q, ch, g, **_kw):
         yield "Gemini answer."
 
-    c["groq"].stream = _groq_stream_fail
+    c["groq"].stream = _fail_stream
+    c["gemini"].model = "gemini-3.5-flash-lite"
     c["gemini"].stream = _gemini_stream
 
-    orchestrator = RAGOrchestrator(
-        router=c["router"],
-        semantic_cache=c["semantic_cache"],
-        fallback_cache=c["fallback_cache"],
-        retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
-        chitchat=c["chitchat"],
-        embedding_service=c["embed_svc"],
+    orchestrator = _orchestrator(c)
+
+    state = await orchestrator.run("Explain LatticeDB")
+    stream_events = [evt async for evt in orchestrator.stream_query("Explain LatticeDB")]
+    done_evt = [e for e in stream_events if e["event"] == "done"][0]
+
+    assert state.degraded is False
+    assert done_evt["data"]["degraded"] is False
+    assert done_evt["data"]["answer"] == state.answer == "Gemini answer."
+    assert (state.provider, state.model) == ("gemini", "gemini-3.5-flash-lite")
+    assert (done_evt["data"]["provider"], done_evt["data"]["model"]) == (
+        "gemini",
+        "gemini-3.5-flash-lite",
     )
+    assert c["semantic_cache"].put.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_faq_answer_is_degraded_and_not_cached_on_both_paths(mock_orchestrator_components):
+    """When no pool member answers, both paths serve the degraded FAQ answer, uncached."""
+    c = mock_orchestrator_components
+    c["groq"].synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
+    c["gemini"].synthesize = AsyncMock(side_effect=RuntimeError("Gemini 503"))
+    c["groq"].stream = _fail_stream
+    c["gemini"].stream = _fail_stream
+
+    orchestrator = _orchestrator(c)
 
     state = await orchestrator.run("Explain LatticeDB")
     stream_events = [evt async for evt in orchestrator.stream_query("Explain LatticeDB")]
@@ -193,7 +214,9 @@ async def test_unified_orchestrator_degraded_parity_and_no_caching(mock_orchestr
 
     assert state.degraded is True
     assert done_evt["data"]["degraded"] is True
-    assert done_evt["data"]["answer"] == state.answer == "Gemini answer."
+    assert done_evt["data"]["answer"] == state.answer == "Cached FAQ"
+    assert (state.provider, state.model) == ("redis_faq", None)
+    assert (done_evt["data"]["provider"], done_evt["data"]["model"]) == ("redis_faq", None)
     c["semantic_cache"].put.assert_not_called()
 
 
@@ -391,25 +414,29 @@ def _scenario_components(scenario: str) -> dict:
 
     groq = MagicMock()
     gemini = MagicMock()
-    if scenario == "degraded":
+    if scenario in ("next_pool_member", "faq"):
         groq.synthesize = AsyncMock(side_effect=RuntimeError("Groq 503"))
-
-        async def _groq_stream(q, ch, g, **_kw):
-            raise RuntimeError("Groq 503")
-            yield "never"  # pragma: no cover
-
+        _groq_stream = _fail_stream
     else:
-        groq.synthesize = AsyncMock(return_value="Grounded answer from Groq.")
+        groq_tokens = (
+            ["Summary."]
+            if scenario == "massive_context"
+            else ["Grounded", " answer", " from", " Groq."]
+        )
+        groq.synthesize = AsyncMock(return_value="".join(groq_tokens))
 
         async def _groq_stream(q, ch, g, **_kw):
-            for tok in ["Grounded", " answer", " from", " Groq."]:
+            for tok in groq_tokens:
                 yield tok
 
-    gemini_answer = "Summary." if scenario == "massive_context" else "Gemini answer."
-    gemini.synthesize = AsyncMock(return_value=gemini_answer)
+    if scenario == "faq":
+        gemini.synthesize = AsyncMock(side_effect=RuntimeError("Gemini 503"))
+        _gemini_stream = _fail_stream
+    else:
+        gemini.synthesize = AsyncMock(return_value="Gemini answer.")
 
-    async def _gemini_stream(q, ch, g, **_kw):
-        yield gemini_answer
+        async def _gemini_stream(q, ch, g, **_kw):
+            yield "Gemini answer."
 
     groq.stream = _groq_stream
     gemini.stream = _gemini_stream
@@ -492,7 +519,10 @@ _SCENARIOS = {
     "hybrid": ("Grounded answer from Groq.", True),
     "massive_context": ("Summary.", True),
     "chitchat": ("Hello! I am lattice-rag.", False),
-    "degraded": ("Gemini answer.", False),
+    # The first pool member is down: the next member's answer is a normal answer
+    "next_pool_member": ("Gemini answer.", True),
+    # No pool member answers: the FAQ answer is degraded
+    "faq": ("Cached FAQ", False),
     "low_grounding": ("Grounded answer from Groq.", False),
     "guardrail_unavailable": ("Grounded answer from Groq.", False),
     "routing_fallback": ("Grounded answer from Groq.", False),
@@ -513,7 +543,7 @@ async def test_run_and_stream_query_agree_on_every_scenario(scenario):
 @pytest.mark.parametrize("scenario", list(_SCENARIOS))
 @pytest.mark.parametrize("entry_point", ["run", "stream_query"])
 async def test_cache_effects_follow_the_tier1_write_rule(scenario, entry_point):
-    """Only non-degraded, grounded, verified answers are stored and served on repeat."""
+    """Only complete pool answers that are grounded and verified are stored and served."""
     expected_answer, cacheable = _SCENARIOS[scenario]
 
     outcome = await _play(scenario, entry_point)
@@ -612,7 +642,7 @@ async def test_failed_cache_verification_answer_is_unverified_and_not_cached(
     assert c["pipeline"].execute.await_count == 3
 
 
-def _massive_context(c, *, gemini_fails: bool, groq_fails: bool = False):
+def _massive_context(c, *, groq_fails: bool, gemini_fails: bool = False):
     c["router"].route_query = AsyncMock(
         return_value=RouteDecision(route="massive_context", confidence=0.9)
     )
@@ -651,26 +681,39 @@ async def _answer(orchestrator: RAGOrchestrator, entry_point: str) -> tuple[str,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry_point", ["run", "stream_query"])
-async def test_massive_context_gemini_failure_falls_back_to_degraded_groq_uncached(
+async def test_massive_context_tries_groq_first_like_every_route(
     mock_orchestrator_components, entry_point
 ):
     c = mock_orchestrator_components
-    _massive_context(c, gemini_fails=True)
+    _massive_context(c, groq_fails=False)
 
     answer, degraded = await _answer(_orchestrator(c), entry_point)
 
-    assert answer == "Groq summary."
-    assert degraded is True
-    c["semantic_cache"].put.assert_not_called()
+    assert (answer, degraded) == ("Groq summary.", False)
+    c["semantic_cache"].put.assert_called_once()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry_point", ["run", "stream_query"])
-async def test_massive_context_both_providers_failing_falls_to_faq(
+async def test_massive_context_groq_failure_falls_through_to_a_cached_gemini_answer(
     mock_orchestrator_components, entry_point
 ):
     c = mock_orchestrator_components
-    _massive_context(c, gemini_fails=True, groq_fails=True)
+    _massive_context(c, groq_fails=True)
+
+    answer, degraded = await _answer(_orchestrator(c), entry_point)
+
+    assert (answer, degraded) == ("Summary.", False)
+    c["semantic_cache"].put.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry_point", ["run", "stream_query"])
+async def test_massive_context_no_member_answering_falls_to_faq(
+    mock_orchestrator_components, entry_point
+):
+    c = mock_orchestrator_components
+    _massive_context(c, groq_fails=True, gemini_fails=True)
 
     answer, degraded = await _answer(_orchestrator(c), entry_point)
 

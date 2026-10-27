@@ -105,18 +105,20 @@ async def test_orchestrator_standard_groq_generation(mock_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_failover_to_gemini(mock_dependencies):
+async def test_orchestrator_falls_through_to_gemini_as_a_normal_cached_answer(mock_dependencies):
     deps = mock_dependencies
-    # Groq fails under breaker
+    # The first pool member is rate limited
     deps["groq"].synthesize.side_effect = RuntimeError("Groq 429 Rate Limit")
-    deps["gemini"].synthesize.return_value = "Gemini fallback answer."
+    deps["gemini"].synthesize.return_value = "Gemini answer."
 
     orchestrator = RAGOrchestrator(**deps)
     result = await orchestrator.run("Explain LatticeDB")
 
-    assert result.answer == "Gemini fallback answer."
-    assert result.degraded is True
+    assert result.answer == "Gemini answer."
+    assert result.degraded is False
+    assert result.provider == "gemini"
     deps["gemini"].synthesize.assert_awaited_once()
+    deps["semantic_cache"].put.assert_called_once()
 
 
 @pytest.mark.asyncio
