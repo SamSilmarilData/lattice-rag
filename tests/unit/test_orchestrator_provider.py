@@ -13,6 +13,7 @@ from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, GenerationProv
 from lattice_rag.eval.runner import EvalRunner
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
+from tests.unit.pool_helpers import pool_of
 
 
 class RateLimitError(Exception):
@@ -69,8 +70,7 @@ def _orchestrator(
         semantic_cache=cache,
         fallback_cache=faq,
         retrieval_pipeline=retrieval,
-        groq=FakeGroq(fail=groq_fails),
-        gemini=FakeGemini(fail=gemini_fails),
+        pool=pool_of(groq=FakeGroq(fail=groq_fails), gemini=FakeGemini(fail=gemini_fails)),
         chitchat=chitchat,
         embedding_service=embed,
     )

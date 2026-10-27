@@ -10,11 +10,12 @@ import numpy as np
 import pytest
 from structlog.testing import capture_logs
 
-from lattice_rag.generation.gemini_fallback import GeminiFallback
+from lattice_rag.generation.gemini_synthesizer import GeminiSynthesizer
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
+from tests.unit.pool_helpers import pool_of
 
 
 def _groq_client(finish_reason: str = "stop"):
@@ -54,7 +55,7 @@ def _gemini_client(finish_reason: str = "STOP"):
     return client
 
 
-def _orchestrator(route: str, groq: GroqSynthesizer, gemini: GeminiFallback, **kwargs):
+def _orchestrator(route: str, groq: GroqSynthesizer, gemini: GeminiSynthesizer, **kwargs):
     router = MagicMock()
     router.route_query = AsyncMock(return_value=RouteDecision(route=route, confidence=0.9))
     cache = MagicMock()
@@ -77,8 +78,7 @@ def _orchestrator(route: str, groq: GroqSynthesizer, gemini: GeminiFallback, **k
         semantic_cache=cache,
         fallback_cache=MagicMock(),
         retrieval_pipeline=pipeline,
-        groq=groq,
-        gemini=gemini,
+        pool=pool_of(groq=groq, gemini=gemini),
         chitchat=MagicMock(),
         embedding_service=embed,
         **kwargs,
@@ -108,7 +108,7 @@ async def test_massive_context_answer_budget_exceeds_default(entry_point):
     # Same pool order on every Route (ADR-0004): Groq answers massive_context first
     groq = _groq_client()
     orch = _orchestrator(
-        "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=_gemini_client())
+        "massive_context", GroqSynthesizer(client=groq), GeminiSynthesizer(client=_gemini_client())
     )
     await _ask(orch, entry_point)
     assert _groq_budget(groq) == 1536
@@ -120,7 +120,7 @@ async def test_massive_context_budget_never_falls_below_a_larger_default(entry_p
     orch = _orchestrator(
         "massive_context",
         GroqSynthesizer(client=groq, max_tokens=2000),
-        GeminiFallback(client=_gemini_client(), max_output_tokens=2000),
+        GeminiSynthesizer(client=_gemini_client(), max_output_tokens=2000),
         answer_max_tokens=2000,
     )
     await _ask(orch, entry_point)
@@ -133,7 +133,7 @@ async def test_massive_context_next_member_keeps_the_larger_budget(entry_point):
     broken = MagicMock()
     broken.chat.completions.create = AsyncMock(side_effect=RuntimeError("down"))
     orch = _orchestrator(
-        "massive_context", GroqSynthesizer(client=broken), GeminiFallback(client=gem)
+        "massive_context", GroqSynthesizer(client=broken), GeminiSynthesizer(client=gem)
     )
     await _ask(orch, entry_point)
     assert _gemini_budget(gem) == 1536
@@ -143,7 +143,7 @@ async def test_massive_context_next_member_keeps_the_larger_budget(entry_point):
 async def test_default_answer_budget_is_768(entry_point):
     groq = _groq_client()
     orch = _orchestrator(
-        "hybrid", GroqSynthesizer(client=groq), GeminiFallback(client=_gemini_client())
+        "hybrid", GroqSynthesizer(client=groq), GeminiSynthesizer(client=_gemini_client())
     )
     await _ask(orch, entry_point)
     assert _groq_budget(groq) == 768
@@ -155,7 +155,7 @@ async def test_explicit_max_tokens_overrides_default(entry_point):
     orch = _orchestrator(
         "hybrid",
         GroqSynthesizer(client=groq, max_tokens=300),
-        GeminiFallback(client=_gemini_client()),
+        GeminiSynthesizer(client=_gemini_client()),
     )
     await _ask(orch, entry_point)
     assert _groq_budget(groq) == 300
@@ -166,7 +166,7 @@ async def test_gemini_default_cap_is_explicit(entry_point):
     gem = _gemini_client()
     broken = MagicMock()
     broken.chat.completions.create = AsyncMock(side_effect=RuntimeError("down"))
-    orch = _orchestrator("hybrid", GroqSynthesizer(client=broken), GeminiFallback(client=gem))
+    orch = _orchestrator("hybrid", GroqSynthesizer(client=broken), GeminiSynthesizer(client=gem))
     await _ask(orch, entry_point)
     assert _gemini_budget(gem) == 768
 
@@ -182,7 +182,7 @@ async def test_length_stop_is_logged_once_by_the_synthesizer(entry_point, provid
         orch = _orchestrator(
             "hybrid",
             GroqSynthesizer(client=_groq_client("length")),
-            GeminiFallback(client=_gemini_client()),
+            GeminiSynthesizer(client=_gemini_client()),
         )
     else:
         broken = MagicMock()
@@ -190,7 +190,7 @@ async def test_length_stop_is_logged_once_by_the_synthesizer(entry_point, provid
         orch = _orchestrator(
             "massive_context",
             GroqSynthesizer(client=broken),
-            GeminiFallback(client=_gemini_client("MAX_TOKENS")),
+            GeminiSynthesizer(client=_gemini_client("MAX_TOKENS")),
         )
     caplog.set_level(logging.WARNING)
     with capture_logs() as adapter_logs:
@@ -205,7 +205,7 @@ async def test_length_stop_is_logged_once_by_the_synthesizer(entry_point, provid
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
 async def test_normal_stop_is_not_logged(entry_point, caplog):
     orch = _orchestrator(
-        "hybrid", GroqSynthesizer(client=_groq_client()), GeminiFallback(client=_gemini_client())
+        "hybrid", GroqSynthesizer(client=_groq_client()), GeminiSynthesizer(client=_gemini_client())
     )
     caplog.set_level(logging.WARNING)
     await _ask(orch, entry_point)
@@ -226,7 +226,7 @@ async def test_groq_failing_after_first_token_on_massive_context_ends_with_error
     groq.chat.completions.create = AsyncMock(side_effect=create)
     gem = _gemini_client()
     orch = _orchestrator(
-        "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=gem)
+        "massive_context", GroqSynthesizer(client=groq), GeminiSynthesizer(client=gem)
     )
 
     events = [e async for e in orch.stream_query("q")]
@@ -248,7 +248,7 @@ async def test_adapter_honours_an_explicit_zero_budget(provider):
         assert _groq_budget(groq) == 0
     else:
         gem = _gemini_client()
-        await GeminiFallback(client=gem).synthesize("q", [], max_tokens=0)
+        await GeminiSynthesizer(client=gem).synthesize("q", [], max_tokens=0)
         assert _gemini_budget(gem) == 0
 
 

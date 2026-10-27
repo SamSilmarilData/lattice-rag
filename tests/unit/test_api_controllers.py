@@ -19,7 +19,6 @@ from lattice_rag.api.controllers import (
     IngestController,
     QueryController,
 )
-from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.api.guards import ADMIN_KEY_HEADER
 from lattice_rag.config import AppConfig
 from lattice_rag.ingestion.ingester import DocumentIngester
@@ -30,6 +29,7 @@ from lattice_rag.storage.db import (
     IngestStats,
     UnresolvedChunkReferenceError,
 )
+from lattice_rag.vocabulary import GenerationProvider
 
 
 @pytest.fixture

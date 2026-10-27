@@ -9,7 +9,6 @@ from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.generation.prompt import graph_for_prompt
@@ -31,8 +30,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_TOP_K = 5
-# Cross-document synthesis goes to Gemini's large context window, so give it more evidence
-# (bounded because every retrieved candidate passes through the CPU cross-encoder)
+# Cross-document synthesis gets more evidence (bounded because every retrieved candidate
+# passes through the CPU cross-encoder)
 MASSIVE_CONTEXT_TOP_K = 12
 
 
@@ -47,22 +46,6 @@ def subgraph_as_dict(graph_context: Any) -> dict[str, Any] | None:
     if isinstance(graph_context, dict):
         return graph_context
     return {"nodes": graph_context.nodes, "edges": graph_context.edges}
-
-
-def pool_of(*, groq: Any = None, gemini: Any = None) -> tuple[PoolMember, ...]:
-    """A Model Pool of one Groq adapter then one Gemini adapter, skipping absent ones.
-
-    Each member's model is the adapter's ``model`` attribute when it is a string.
-    """
-    members = []
-    for provider, client in ((GenerationProvider.GROQ, groq), (GenerationProvider.GEMINI, gemini)):
-        if client is None:
-            continue
-        model = getattr(client, "model", None)
-        members.append(
-            PoolMember(provider, model if isinstance(model, str) else str(provider), client)
-        )
-    return tuple(members)
 
 
 @dataclass
@@ -100,29 +83,26 @@ class RAGOrchestrator:
         retrieval_pipeline: RetrievalPipeline,
         chitchat: ChitchatHandler,
         embedding_service: Any,
-        pool: Sequence[PoolMember] | None = None,
-        groq: Any = None,
-        gemini: Any = None,
+        pool: Sequence[PoolMember],
         answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         graph_context_in_prompt: GraphContextMode = GraphContextMode.OFF,
+        synthesizer: ResilientSynthesizer | None = None,
     ) -> None:
         """``pool`` is the Model Pool in cascade order (built by ``build_model_pool``).
 
-        ``groq``/``gemini`` are a shorthand for a two-member pool of those adapters, in
-        that order; they are ignored when ``pool`` is given.
+        ``synthesizer`` reuses an existing :class:`ResilientSynthesizer` over that pool (and
+        its breakers); by default a new one is built.
         """
         self.router = router
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
-        self.pool: tuple[PoolMember, ...] = (
-            tuple(pool) if pool is not None else pool_of(groq=groq, gemini=gemini)
-        )
+        self.pool: tuple[PoolMember, ...] = tuple(pool)
         self.chitchat = chitchat
         self.embedding_service = embedding_service
         self.answer_max_tokens = answer_max_tokens
         self.graph_context_in_prompt = graph_context_in_prompt
-        self.synthesizer = ResilientSynthesizer(
+        self.synthesizer = synthesizer or ResilientSynthesizer(
             pool=self.pool,
             fallback_cache=self.fallback_cache,
             default_max_tokens=answer_max_tokens,
@@ -134,7 +114,7 @@ class RAGOrchestrator:
         Every setting carries over, so a Live Tier arm measures the configuration it names.
         The synthesizer is shared, so a pool member whose breaker opened stays skipped.
         """
-        clone = RAGOrchestrator(
+        return RAGOrchestrator(
             router=self.router,
             semantic_cache=self.semantic_cache,
             fallback_cache=self.fallback_cache,
@@ -144,9 +124,8 @@ class RAGOrchestrator:
             pool=self.pool,
             answer_max_tokens=self.answer_max_tokens,
             graph_context_in_prompt=self.graph_context_in_prompt,
+            synthesizer=self.synthesizer,
         )
-        clone.synthesizer = self.synthesizer
-        return clone
 
     # ── Public Interfaces ────────────────────────────────────────────────
 

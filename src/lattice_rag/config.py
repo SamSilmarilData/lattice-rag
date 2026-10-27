@@ -7,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from lattice_rag.security import SecretStr
-from lattice_rag.vocabulary import GraphContextMode
+from lattice_rag.vocabulary import GenerationProvider, GraphContextMode, model_label
 
 # Load environment variables from .env file at import time
 load_dotenv()
@@ -31,7 +31,6 @@ DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD = 0.35
 DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
 DEFAULT_SECOND_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
-POOL_PROVIDERS = ("groq", "gemini")
 # Gemini thinking value meaning "send no thinking config; use the model's own default"
 THINKING_NONE = "none"
 _THINKING_LEVELS = frozenset({"minimal", "low", "medium", "high"})
@@ -46,13 +45,13 @@ class ModelSpec:
     ``none`` in LLM_POOL and GEMINI_THINKING).
     """
 
-    provider: str
+    provider: GenerationProvider
     model: str
     thinking: str | None = None
 
     @property
     def label(self) -> str:
-        return f"{self.provider}:{self.model}"
+        return model_label(self.provider, self.model)
 
 
 def default_gemini_thinking(model: str) -> str | None:
@@ -91,22 +90,25 @@ def _parse_pool(raw: str) -> tuple[ModelSpec, ...]:
     """Parse ``provider:model[@thinking]`` members, comma separated, in cascade order."""
     members: list[ModelSpec] = []
     for part in _split_csv(raw):
-        provider, sep, rest = part.partition(":")
-        provider = provider.strip().lower()
+        provider_raw, sep, rest = part.partition(":")
+        provider_raw = provider_raw.strip().lower()
         model, at, thinking_raw = rest.strip().partition("@")
         model = model.strip()
         if not sep or not model:
             raise ValueError(f"Invalid LLM_POOL member {part!r}: use provider:model.")
-        if provider not in POOL_PROVIDERS:
+        pool_providers = GenerationProvider.pool_providers()
+        provider = next((p for p in pool_providers if p == provider_raw), None)
+        if provider is None:
             raise ValueError(
-                f"Invalid LLM_POOL provider {provider!r}: use {' | '.join(POOL_PROVIDERS)}."
+                f"Invalid LLM_POOL provider {provider_raw!r}: use {' | '.join(pool_providers)}."
             )
-        if at and provider != "gemini":
+        is_gemini = provider is GenerationProvider.GEMINI
+        if at and not is_gemini:
             raise ValueError(f"Invalid LLM_POOL member {part!r}: thinking is Gemini-only.")
         thinking = (
             _thinking(thinking_raw, model=model, source="LLM_POOL")
             if at
-            else (default_gemini_thinking(model) if provider == "gemini" else None)
+            else (default_gemini_thinking(model) if is_gemini else None)
         )
         spec = ModelSpec(provider, model, thinking)
         if any(m.label == spec.label for m in members):
@@ -126,9 +128,9 @@ def _default_pool(
         else default_gemini_thinking(gemini_model)
     )
     candidates = (
-        ModelSpec("groq", groq_model),
-        ModelSpec("groq", DEFAULT_SECOND_GROQ_MODEL),
-        ModelSpec("gemini", gemini_model, thinking),
+        ModelSpec(GenerationProvider.GROQ, groq_model),
+        ModelSpec(GenerationProvider.GROQ, DEFAULT_SECOND_GROQ_MODEL),
+        ModelSpec(GenerationProvider.GEMINI, gemini_model, thinking),
     )
     pool: list[ModelSpec] = []
     for spec in candidates:
@@ -172,9 +174,9 @@ class AppConfig:
     # Model Pool (ADR-0004): every Route tries these members in order. LLM_POOL sets it;
     # without it the pool is GROQ_MODEL, openai/gpt-oss-120b, then GEMINI_MODEL.
     llm_pool: tuple[ModelSpec, ...] = (
-        ModelSpec("groq", DEFAULT_GROQ_MODEL),
-        ModelSpec("groq", DEFAULT_SECOND_GROQ_MODEL),
-        ModelSpec("gemini", DEFAULT_GEMINI_MODEL),
+        ModelSpec(GenerationProvider.GROQ, DEFAULT_GROQ_MODEL),
+        ModelSpec(GenerationProvider.GROQ, DEFAULT_SECOND_GROQ_MODEL),
+        ModelSpec(GenerationProvider.GEMINI, DEFAULT_GEMINI_MODEL),
     )
     llm_max_tokens: int = DEFAULT_LLM_MAX_TOKENS
     llm_timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS

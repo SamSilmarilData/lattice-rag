@@ -255,7 +255,7 @@ def offline_services(monkeypatch):
         "lattice_rag.routing.router.QueryRouter",
         "lattice_rag.caching.semantic_cache.SemanticCache",
         "lattice_rag.generation.groq_synthesizer.GroqSynthesizer",
-        "lattice_rag.generation.gemini_fallback.GeminiFallback",
+        "lattice_rag.generation.gemini_synthesizer.GeminiSynthesizer",
     ):
         monkeypatch.setattr(target, MagicMock())
     fallback = MagicMock()
@@ -284,7 +284,7 @@ async def test_harness_applies_the_arm_and_the_phase5_config(offline_services, m
 async def test_harness_builds_the_configured_pool_with_the_llm_timeout(
     offline_services, monkeypatch
 ):
-    from lattice_rag.generation import gemini_fallback, groq_synthesizer
+    from lattice_rag.generation import gemini_synthesizer, groq_synthesizer
 
     monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "11")
     monkeypatch.setenv("LLM_POOL", "groq:a,gemini:g@low")
@@ -293,7 +293,7 @@ async def test_harness_builds_the_configured_pool_with_the_llm_timeout(
 
     assert [m.label for m in h["orchestrator"].pool] == ["groq:a", "gemini:g"]
     groq_kwargs = groq_synthesizer.GroqSynthesizer.call_args.kwargs
-    gemini_kwargs = gemini_fallback.GeminiFallback.call_args.kwargs
+    gemini_kwargs = gemini_synthesizer.GeminiSynthesizer.call_args.kwargs
     assert (groq_kwargs["model"], groq_kwargs["timeout_seconds"]) == ("a", 11.0)
     assert (gemini_kwargs["model"], gemini_kwargs["timeout_seconds"]) == ("g", 11.0)
     assert gemini_kwargs["thinking"] == "low"

@@ -15,6 +15,7 @@ from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
+from tests.unit.pool_helpers import pool_of
 
 pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
@@ -87,8 +88,7 @@ async def test_prompt_and_judge_number_chunks_from_one_identically(tmp_path: Pat
         semantic_cache=MagicMock(get=AsyncMock(return_value=None), put=MagicMock()),
         fallback_cache=MagicMock(find_closest_fallback=AsyncMock(return_value=None)),
         retrieval_pipeline=pipeline,
-        groq=GroqSynthesizer(client=groq_client, model="m"),
-        gemini=MagicMock(),
+        pool=pool_of(groq=GroqSynthesizer(client=groq_client, model="m"), gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed_svc,
     )

@@ -130,6 +130,8 @@ interface CacheStatsResponse {
   tier2CircuitStatus: "closed" | "open" | "partially_open";  // Model Pool breakers (one per member, shared by /query and /query/stream): all closed, all open, or mixed
   tier2CachedQueries: number;
 }
+// tier2CircuitStatus is "partially_open" when some Model Pool members' breakers are open and
+// others are not: requests skip the open members and are answered by the rest of the pool.
 
 interface HealthResponse {
   status: "healthy" | "degraded" | "unhealthy";

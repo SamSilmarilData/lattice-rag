@@ -42,8 +42,7 @@ Traditional GraphRAG architectures suffer from heavy JVM database footprints (Ne
 | **Cross-Encoder** | **bge-reranker-v2-m3** | High-precision INT8 ONNX reranker with 8,192 token context window. |
 | **System 1 Routing** | **TypeSafe AI Jev** | 70–500ms `Choice` primitive routing + batched `Noul` boolean context noise pruning. |
 | **Multi-Tier Cache** | **Vector + Redis Hash** | Tier 1 in-process exact + semantic cache (fuzzy hits verified by Jev Noul); Tier 2 Redis hash of pre-computed FAQ answers used when every LLM provider fails. |
-| **Primary Synthesis** | **GroqCloud** | Ultra-fast token streaming (200+ tok/s) via `qwen/qwen3.8-27b` with structured citation grounding. |
-| **Context Fallback** | **Gemini 3.8 Flash** | Large-context model for cross-document synthesis and for failover when the Groq circuit breaker opens. |
+| **Model Pool** | **GroqCloud + Gemini** | Ordered free-tier members (`LLM_POOL`; default `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `gemini-3.5-flash-lite`), the same order for every Route, each behind its own circuit breaker (ADR-0004). |
 | **CI/CD Quality Gate** | **Hermetic Tier + Live Tier (Jev Score + Noul)** | Key-free retrieval gate (recall/MRR per Slice) on every PR; advisory nightly Live Tier judging four metrics against a measured baseline (tolerance = 2 sd of judge noise), a 0.50 floor, and contradiction veto. |
 | **Secret Hygiene** | **Defense in Depth** | Admin-key guard on write/cost endpoints, rate limits and input bounds, `SecretStr` masking, log redaction, RFC 9457 error shielding, prompt-injection delimiting, and `apikeys.md` migration. |
 
@@ -105,7 +104,7 @@ lattice-rag/
 │   │   ├── model_pool.py        # Builds the Model Pool from LLM_POOL (ADR-0004)
 │   │   ├── prompt.py            # Shared grounded prompt with delimited, untrusted evidence
 │   │   ├── groq_synthesizer.py  # Groq pool-member adapter (qwen/qwen3.8-27b, openai/gpt-oss-120b)
-│   │   ├── gemini_fallback.py   # Gemini pool-member adapter (gemini-3.5-flash-lite)
+│   │   ├── gemini_synthesizer.py   # Gemini pool-member adapter (gemini-3.5-flash-lite)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
 │   ├── orchestration/
 │   │   ├── state.py             # PipelineState (buffered run() result)
@@ -157,10 +156,10 @@ Edit `.env` and set your credentials:
 # TypeSafe AI Jev (Required in production)
 TYPESAFE_API_KEY=your_typesafe_key_here
 
-# GroqCloud (Primary generation at 200+ tok/s)
+# GroqCloud (Groq Model Pool members)
 GROQ_API_KEY=your_groq_key_here
 
-# Google AI Studio (Massive context fallback)
+# Google AI Studio (Gemini Model Pool members)
 GEMINI_API_KEY=your_gemini_key_here
 
 # Redis (Tier 2 fallback cache)

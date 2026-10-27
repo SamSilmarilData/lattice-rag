@@ -10,6 +10,7 @@ import pytest
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
 from lattice_rag.eval.runner import EvalRunner
+from tests.unit.pool_helpers import pool_of
 
 pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
@@ -255,8 +256,7 @@ async def test_orchestrator_run_without_cache_skips_lookup_and_store():
         semantic_cache=sem_cache,
         fallback_cache=MagicMock(),
         retrieval_pipeline=pipeline,
-        groq=groq,
-        gemini=MagicMock(),
+        pool=pool_of(groq=groq, gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed,
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from lattice_rag.api.dtos import GenerationProvider
+from lattice_rag.vocabulary import GenerationProvider
 
 
 @dataclass

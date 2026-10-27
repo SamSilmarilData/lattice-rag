@@ -138,6 +138,8 @@ def query(text: str, stream: bool) -> None:
     """Run a single query through the GraphRAG pipeline."""
     import asyncio
 
+    from lattice_rag.vocabulary import answered_by
+
     async def _run() -> None:
         h = await _build_harness()
         try:
@@ -162,9 +164,9 @@ def query(text: str, stream: bool) -> None:
             state = await orchestrator.run(text)
             click.echo(f"Route: {state.route}")
             click.echo(f"Answer: {state.answer}")
-            if state.provider is not None:
-                answered_by = f"{state.provider}:{state.model}" if state.model else state.provider
-                click.echo(f"Answered by: {answered_by}")
+            who = answered_by(state.provider, state.model)
+            if who is not None:
+                click.echo(f"Answered by: {who}")
             click.echo(
                 f"Latency: {state.total_latency_ms:.1f}ms (Cached: {state.cache_hit}, Degraded: {state.degraded})"
             )

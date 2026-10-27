@@ -207,7 +207,7 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 | | Hermetic Tier | Live Tier |
 | :--- | :--- | :--- |
 | Workflow | `eval-gate.yml`, every push and PR | `live-tier.yml`, nightly (03:17 UTC) and `workflow_dispatch` |
-| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the fallback) |
+| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the Gemini pool member) |
 | Measures | Gold Set validity, retrieval recall and MRR per Slice (gated for Slices of at least 10 queries) and per Case (reported) | Jev-judged faithfulness, context precision, answer relevance, answer correctness; Route Accuracy and Graph Recall (advisory) |
 | Blocks merges | Yes | No: it never runs on PRs |
 | Missing secret | n/a | The run fails with an error annotation naming the secret; it is never skipped |

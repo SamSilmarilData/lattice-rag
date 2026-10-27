@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import structlog
@@ -16,13 +16,13 @@ from lattice_rag.config import (
     DEFAULT_LLM_TIMEOUT_SECONDS,
 )
 from lattice_rag.generation.prompt import build_messages
+from lattice_rag.generation.provider_call import describe_failure, timed_chunks
 from lattice_rag.generation.resilient_synthesizer import ProviderOutcome
-from lattice_rag.security import sanitize_error_detail
 
 logger = structlog.get_logger(__name__)
 
 
-class GeminiFallback:
+class GeminiSynthesizer:
     """Gemini provider adapter for one Model Pool member."""
 
     def __init__(
@@ -68,11 +68,6 @@ class GeminiFallback:
         if self.client is None:
             raise RuntimeError("Gemini synthesis unavailable: GEMINI_API_KEY is not configured")
         return self.client
-
-    def _describe_failure(self, error: Exception) -> str:
-        if isinstance(error, TimeoutError):
-            return f"timed out after {self.timeout_seconds:g}s"
-        return sanitize_error_detail(str(error))
 
     def _request_config(
         self, system: str, max_tokens: int | None
@@ -123,9 +118,9 @@ class GeminiFallback:
                 outcome.truncated = True
             return response.text or ""
         except Exception as e:
-            sanitized_error = self._describe_failure(e)
-            logger.error("gemini_fallback_synthesis_failed", error=sanitized_error)
-            raise RuntimeError(f"Gemini fallback synthesis failed: {sanitized_error}") from e
+            sanitized_error = describe_failure(e, self.timeout_seconds)
+            logger.error("gemini_synthesis_failed", error=sanitized_error)
+            raise RuntimeError(f"Gemini synthesis failed: {sanitized_error}") from e
 
     async def stream(
         self,
@@ -149,17 +144,13 @@ class GeminiFallback:
             )
             if inspect.isawaitable(stream_result):
                 stream_result = await asyncio.wait_for(stream_result, timeout=self.timeout_seconds)
-            chunks: AsyncIterator[types.GenerateContentResponse] = aiter(stream_result)
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(anext(chunks), timeout=self.timeout_seconds)
-                except StopAsyncIteration:
-                    break
+            chunk: types.GenerateContentResponse
+            async for chunk in timed_chunks(stream_result, self.timeout_seconds):
                 if chunk.text:
                     yield chunk.text
                 if outcome is not None and self._hit_token_cap(chunk):
                     outcome.truncated = True
         except Exception as e:
-            sanitized_error = self._describe_failure(e)
-            logger.error("gemini_fallback_stream_failed", error=sanitized_error)
-            raise RuntimeError(f"Gemini fallback stream synthesis failed: {sanitized_error}") from e
+            sanitized_error = describe_failure(e, self.timeout_seconds)
+            logger.error("gemini_stream_synthesis_failed", error=sanitized_error)
+            raise RuntimeError(f"Gemini stream synthesis failed: {sanitized_error}") from e

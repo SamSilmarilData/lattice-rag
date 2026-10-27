@@ -13,12 +13,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.generation.resilient_synthesizer import (
     PoolMember,
     ResilientSynthesizer,
     StreamOutcome,
 )
+from lattice_rag.vocabulary import GenerationProvider
 
 GROQ = GenerationProvider.GROQ
 GEMINI = GenerationProvider.GEMINI
@@ -213,7 +213,7 @@ async def test_cancellation_is_not_counted_as_a_member_failure():
 
 async def test_a_hung_first_member_times_out_and_falls_through_on_both_paths():
     """Real provider adapters over fake SDK clients: Groq never answers, Gemini does."""
-    from lattice_rag.generation.gemini_fallback import GeminiFallback
+    from lattice_rag.generation.gemini_synthesizer import GeminiSynthesizer
     from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 
     async def hang(*_a, **_kw):
@@ -233,7 +233,7 @@ async def test_a_hung_first_member_times_out_and_falls_through_on_both_paths():
         side_effect=lambda **_kw: gemini_chunks()
     )
     groq = GroqSynthesizer(client=groq_client, model="a", timeout_seconds=0.05)
-    gemini = GeminiFallback(client=gemini_client, model="g", timeout_seconds=0.05)
+    gemini = GeminiSynthesizer(client=gemini_client, model="g", timeout_seconds=0.05)
     synth = ResilientSynthesizer(pool=_pool((GROQ, "a", groq), (GEMINI, "g", gemini)))
 
     res = await asyncio.wait_for(synth.synthesize("q", []), timeout=2)

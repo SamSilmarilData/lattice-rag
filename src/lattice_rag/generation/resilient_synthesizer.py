@@ -10,9 +10,9 @@ from typing import Any
 
 import pybreaker
 
-from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.security import sanitize_error_detail
+from lattice_rag.vocabulary import GenerationProvider, model_label
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class PoolMember:
 
     @property
     def label(self) -> str:
-        return f"{self.provider}:{self.model}"
+        return model_label(self.provider, self.model)
 
 
 class ResilientSynthesizer:
