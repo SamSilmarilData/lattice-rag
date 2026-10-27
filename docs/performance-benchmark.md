@@ -40,7 +40,7 @@ The following metrics were captured with `lattice-rag benchmark --iterations 5 -
 | Tier 1 Cache: exact hit                                   |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  51590.5 |
 | Tier 1 Cache: similarity scan (excl. Noul call)           |    0.0ms |    0.0ms |    0.0ms |    0.0ms |    0.0ms |  33845.7 |
 | Stage 1: Hybrid Retrieval (HNSW+BM25)                     |    6.8ms |    7.2ms |    7.2ms |    7.2ms |    6.9ms |    145.8 |
-| Stage 2: Graph Traversal (2-hop)                          |    1.5ms |    1.6ms |    1.7ms |    1.7ms |    1.6ms |    638.7 |
+| Stage 2: Graph Traversal (measured at 2 hops)             |    1.5ms |    1.6ms |    1.7ms |    1.7ms |    1.6ms |    638.7 |
 | Stage 3: Cross-Encoder Rerank (bge-reranker-v2-m3)        |  278.3ms |  291.2ms |  293.7ms |  295.8ms |  281.4ms |      3.6 |
 | End-to-End: retrieval only (no routing, guardrail or LLM) |  801.9ms |  811.4ms |  812.6ms |  813.5ms |  798.7ms |      1.3 |
 +-----------------------------------------------------------+----------+----------+----------+----------+----------+----------+
@@ -57,7 +57,8 @@ The following metrics were captured with `lattice-rag benchmark --iterations 5 -
    - LatticeDB HNSW search and BM25 full-text search, merged with Reciprocal Rank Fusion ($k=60$) into `top_k + 3` candidates.
 
 3. **Stage 2: Graph Traversal ($p95 = 1.7$ms)**:
-   - Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges up to 2 hops (budget 25 nodes), through LatticeDB's in-process transaction API.
+   - Walks `:CONTAINS` edges from the Stage 1 chunks to their entities, then `:RELATION` edges (budget 25 nodes), through LatticeDB's in-process transaction API.
+   - The published figure was measured at 2 hops, before ADR-0003 settled queries on a 1-hop walk. The benchmark now times the production 1-hop walk (row `Stage 2: Graph Traversal (1-hop)`), so treat the 2-hop figure as an upper bound until it is re-measured.
    - Earlier versions of this benchmark passed entity ids where chunk ids were expected, so the traversal found no anchors and timed a no-op (about 0.3 ms). The figure above measures a real traversal.
 
 4. **Stage 3: Cross-Encoder Reranking ($p95 = 293.7$ms for 3 chunks)**:

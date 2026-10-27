@@ -282,7 +282,7 @@ lattice-rag benchmark --iterations 5 --warmup 1 --sla-check
 |---|---|---|---|---|
 | **Tier 1 Cache: exact hit** | 0.02ms | **0.03ms** (<25ms SLA) | 0.02ms | 51,591 QPS |
 | **Stage 1: Hybrid Retrieval (HNSW+BM25)** | 6.8ms | 7.2ms | 6.9ms | 145.8 QPS |
-| **Stage 2: Graph Traversal (2-hop)** | 1.5ms | 1.7ms | 1.6ms | 638.7 QPS |
+| **Stage 2: Graph Traversal (measured at 2 hops; upper bound for the 1-hop walk)** | 1.5ms | 1.7ms | 1.6ms | 638.7 QPS |
 | **Stage 3: Cross-Encoder Rerank (3 chunks)** | 278.3ms | 293.7ms | 281.4ms | 3.6 QPS |
 | **End-to-End: retrieval only (8 reranked)** | 801.9ms | **812.6ms** (<1000ms SLA) | 798.7ms | 1.3 QPS |
 
