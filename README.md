@@ -97,7 +97,7 @@ lattice-rag/
 │   │   ├── retriever.py         # Backward-compat re-export of HybridRetriever
 │   │   ├── embeddings.py        # FastEmbed dense/sparse ONNX models
 │   │   ├── vector_search.py     # Stage 1: HNSW vector + BM25 RRF recall
-│   │   ├── graph_traversal.py   # Stage 2: 1-to-2 hop graph traversal from chunk entities
+│   │   ├── graph_traversal.py   # Stage 2: 1-hop graph traversal from chunk entities
 │   │   ├── reranker.py          # Stage 3: Cross-encoder precision reranking
 │   │   └── pipeline.py          # RetrievalPipeline (alias HybridRetriever): 3 stages + guardrail
 │   ├── generation/

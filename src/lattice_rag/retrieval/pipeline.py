@@ -93,7 +93,7 @@ class RetrievalPipeline:
            fusion (top_k + RERANK_HEADROOM candidates).
         2. ``rerank``: Stage 3, cross-encoder reranking of every candidate down to top_k.
         3. ``guardrail_filter``: optional TypeSafe Jev Noul context guardrail pruning.
-        4. ``graph_traverse``: Stage 2, 1-to-2 hop graph traversal from the entities of
+        4. ``graph_traverse``: Stage 2, 1-hop graph traversal from the entities of
            the final chunks only.
 
         Stage numbers are the spec's names; graph traversal runs last so it only expands

@@ -20,14 +20,16 @@ Case = Literal[
     "conflicting_sources",
     "unanswerable_near_miss",
 ]
-Route = Literal["vector_exact", "graph_relational", "hybrid", "chitchat", "massive_context"]
+# ADR-0003 collapsed vector_exact, graph_relational and hybrid into the one retrieval
+# Route, ``hybrid``: they ran the same retrieval and differed only in graph hop count.
+Route = Literal["hybrid", "massive_context", "chitchat"]
 
 
 class GraphContextMode(StrEnum):
     """``GRAPH_CONTEXT_IN_PROMPT``: which graph context reaches the generation prompt (#47).
 
-    ``on`` sends the whole traversed subgraph on every retrieval Route, ``off`` sends none,
-    and ``relational`` sends it only on ``graph_relational`` and ``hybrid``, capped at ten
+    ``on`` sends the whole traversed subgraph on ``hybrid`` and ``massive_context``, ``off`` none,
+    and ``relational`` sends it only on the retrieval Route (``hybrid``), capped at ten
     edges (``generation.prompt.graph_for_prompt``).
     """
 

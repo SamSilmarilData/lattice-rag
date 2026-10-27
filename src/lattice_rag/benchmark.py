@@ -195,8 +195,11 @@ class BenchmarkEngine:
         iterations: int = 10,
         warmup: int = 2,
     ) -> LatencyStats:
-        """Measure Stage 2 multi-hop graph traversal from Stage 1 chunk anchors."""
-        traverser = GraphTraverser(self.store)
+        """Measure Stage 2 graph traversal from Stage 1 chunk anchors at its worst case.
+
+        Queries walk 1 hop (ADR-0003); this times the 2 hops the Route ablation can force.
+        """
+        traverser = GraphTraverser(self.store, forced_hops=2)
         if not anchor_ids:
             # Traversal starts from *chunk* ids (Stage 1 output), not entity ids
             hits = await HybridSearcher(self.store, self.embed_svc).search(
@@ -205,7 +208,7 @@ class BenchmarkEngine:
             anchor_ids = [h.node_id for h in hits]
 
         async def _traverse() -> Any:
-            return await traverser.traverse(anchor_ids, route="graph_relational", budget=25)
+            return await traverser.traverse(anchor_ids, route="hybrid", budget=25)
 
         return await self.benchmark_callable(
             name="Stage 2: Graph Traversal (2-hop)",

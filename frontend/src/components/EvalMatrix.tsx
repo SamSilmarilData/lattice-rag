@@ -161,7 +161,7 @@ const INITIAL_EVAL_DATA: EvalQueryResult[] = [
     error: null,
   }),
   seedRow({
-    query: 'Explain the end-to-end flow of a multi-hop graph_relational query through the pipeline.',
+    query: 'Explain the end-to-end flow of a multi-hop relational query through the pipeline.',
     faithfulness: 0.93,
     contextPrecision: 0.92,
     answerRelevance: 0.94,

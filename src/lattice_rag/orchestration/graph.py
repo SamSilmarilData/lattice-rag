@@ -208,9 +208,7 @@ class RAGOrchestrator:
         if triage.cached is not None:
             # A Tier 1 entry was verified, grounded and non-degraded when it was stored
             cached = triage.cached
-            route = cached.get("route") or (
-                triage.decision.route if triage.decision else "vector_exact"
-            )
+            route = cached.get("route") or (triage.decision.route if triage.decision else "hybrid")
             answer = cached.get("answer", "")
             logger.info("Tier 1 cache HIT (route=%s)", route)
             yield {"event": "stage", "data": {"stage": "cache_hit", "route": route}}

@@ -22,7 +22,7 @@ from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SearchResult, SubgraphResult
 from lattice_rag.vocabulary import GraphContextMode
 
-ROUTES = ["vector_exact", "hybrid", "graph_relational", "massive_context"]
+ROUTES = ["hybrid", "massive_context"]
 
 
 def _subgraph(edge_count: int) -> SubgraphResult:
@@ -168,9 +168,9 @@ async def test_graph_context_off_sends_no_graph_but_still_reports_the_traversal(
 
 @pytest.mark.parametrize(
     ("route", "edges_sent"),
-    [("graph_relational", 10), ("hybrid", 10), ("vector_exact", None), ("massive_context", None)],
+    [("hybrid", 10), ("massive_context", None)],
 )
-async def test_graph_context_relational_sends_at_most_ten_edges_on_relational_routes(
+async def test_graph_context_relational_sends_at_most_ten_edges_on_the_retrieval_route(
     route, edges_sent
 ):
     groq = _Groq()
@@ -196,21 +196,19 @@ async def test_graph_context_relational_sends_at_most_ten_edges_on_relational_ro
 
 
 @pytest.mark.parametrize("route", ROUTES)
-async def test_without_forced_hops_only_graph_relational_walks_two_hops(route):
+async def test_without_forced_hops_every_route_walks_one_hop(route):
+    """ADR-0003: the probe found a second hop adds nothing on this graph."""
     store = _Store(_subgraph(1))
     orchestrator, _ = _orchestrator(route, store=store)
 
     await _both(orchestrator)
 
-    expected = 2 if route == "graph_relational" else 1
-    assert store.hops_walked() == [expected, expected]
+    assert store.hops_walked() == [1, 1]
 
 
 @pytest.mark.parametrize("hops", [1, 2])
-@pytest.mark.parametrize("route", ["vector_exact", "hybrid", "graph_relational"])
-async def test_forced_hops_override_the_three_retrieval_routes_and_keep_the_routers_pick(
-    route, hops
-):
+async def test_forced_hops_override_the_retrieval_route_and_keep_the_routers_pick(hops):
+    route = "hybrid"
     store = _Store(_subgraph(1))
     orchestrator, _ = _orchestrator(route, store=store, pipeline_kwargs={"forced_hops": hops})
 
@@ -224,7 +222,7 @@ async def test_forced_hops_override_the_three_retrieval_routes_and_keep_the_rout
 
 @pytest.mark.parametrize("hops", [1, 2])
 async def test_forced_hops_leave_massive_context_on_its_own_hop_count(hops):
-    """ADR-0003 ablates only the three retrieval Routes; massive_context keeps one hop."""
+    """ADR-0003 ablates only the retrieval Route; massive_context keeps one hop."""
     store = _Store(_subgraph(1))
     orchestrator, _ = _orchestrator(
         "massive_context", store=store, pipeline_kwargs={"forced_hops": hops}
@@ -245,7 +243,7 @@ async def test_switches_survive_rebuilding_on_the_ephemeral_eval_store():
     """The Live Tier reruns the pipeline on a temp DB; the arm's switches must come along."""
     groq = _Groq()
     orchestrator, _ = _orchestrator(
-        "vector_exact",
+        "hybrid",
         groq=groq,
         pipeline_kwargs={"forced_hops": 2},
         graph_context_in_prompt=GraphContextMode.OFF,
@@ -329,9 +327,8 @@ async def test_skipping_noul_on_massive_context_leaves_the_answer_unverified_and
     cache.put.assert_not_called()
 
 
-@pytest.mark.parametrize("route", ["vector_exact", "hybrid", "graph_relational"])
-async def test_skipping_noul_on_massive_context_keeps_it_on_other_routes(route):
-    orchestrator, cache, make = _guarded(route, skip_massive_context=True)
+async def test_skipping_noul_on_massive_context_keeps_it_on_the_retrieval_route():
+    orchestrator, cache, make = _guarded("hybrid", skip_massive_context=True)
 
     state, done = await _both(orchestrator)
 

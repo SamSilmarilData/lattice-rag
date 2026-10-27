@@ -64,7 +64,7 @@ def mock_dataset_and_baseline(tmp_path: Path):
                 "query": "Test query 2",
                 "slice": "unanswerable",
                 "case": "direct",
-                "expected_route": "vector_exact",
+                "expected_route": "hybrid",
                 "reference_answer": "Expected 2",
                 "gold_passages": [],
             },

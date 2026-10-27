@@ -39,7 +39,7 @@ async def test_semantic_cache_hit_with_noul_verification():
     emb = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     stored_response = {
         "answer": "LatticeDB is an embedded graph database.",
-        "route": "vector_exact",
+        "route": "hybrid",
     }
 
     cache.put("What is LatticeDB?", emb, stored_response)

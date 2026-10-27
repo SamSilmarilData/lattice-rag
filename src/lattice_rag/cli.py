@@ -494,8 +494,8 @@ def benchmark(
     "--force-hops",
     type=click.IntRange(1, 2),
     default=None,
-    help="Route ablation (#46): queries routed to vector_exact, hybrid or graph_relational "
-    "walk this many graph hops; massive_context keeps its own. Route Accuracy still scores "
+    help="Route ablation (#46): queries routed to the retrieval Route (hybrid) walk this "
+    "many graph hops instead of 1; massive_context keeps its own. Route Accuracy still scores "
     "the router's own pick.",
 )
 @click.option(
