@@ -178,6 +178,21 @@ def test_v1_dataset_is_rejected(tmp_path: Path) -> None:
         load_gold_set(_write(tmp_path, data))
 
 
+@pytest.mark.parametrize("old_route", ["vector_exact", "graph_relational"])
+def test_routes_collapsed_by_adr_0003_are_rejected(tmp_path: Path, old_route: str) -> None:
+    data = _raw()
+    data["queries"][0]["expected_route"] = old_route
+
+    with pytest.raises(GoldSetError, match=r"queries\[0\]\.expected_route"):
+        load_gold_set(_write(tmp_path, data))
+
+
+def test_shipped_gold_set_uses_only_the_three_routes() -> None:
+    gold = load_gold_set(SHIPPED)
+
+    assert {q.expected_route for q in gold.queries} == {"hybrid", "massive_context", "chitchat"}
+
+
 def test_unknown_case_is_rejected(tmp_path: Path) -> None:
     data = _raw()
     data["queries"][0]["case"] = "trick_question"

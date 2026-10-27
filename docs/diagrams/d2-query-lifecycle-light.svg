@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 430" role="img" aria-labelledby="d2-light-title d2-light-desc" id="d2-query-lifecycle-light-root">
         <title id="d2-light-title">Lattice RAG Query Execution Lifecycle Sequence (Light Mode)</title>
-        <desc id="d2-light-desc">Time-ordered sequence showing Client, Litestar API, TypeSafe AI Jev, LatticeDB Engine, and Groq Synthesizer across concurrent triage, Cypher traversal, reranking, guardrail, and SSE streaming in light mode.</desc>
+        <desc id="d2-light-desc">Time-ordered sequence showing Client, Litestar API, TypeSafe AI Jev, LatticeDB Engine, and Groq Synthesizer across concurrent triage, hybrid recall with a 1-hop graph walk, reranking, guardrail, and SSE streaming in light mode.</desc>
         <defs>
       <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;family=Noto+Serif:ital@0;1&amp;family=Noto+Sans+KR:wght@400;500;600&amp;family=Noto+Serif+KR:wght@400&amp;family=Noto+Sans+TC:wght@400;500;600&amp;family=Noto+Serif+TC:wght@400&amp;display=swap');
       #d2-query-lifecycle-light-root { --color-paper:        #f8fafc;
@@ -79,8 +79,8 @@
 
         <!-- Stage 2 Band -->
         <rect x="40" y="190" width="960" height="2" fill="#0e7490" fill-opacity="0.15" />
-        <rect x="46" y="183" width="154" height="15" rx="2" fill="#ffffff" />
-        <text x="50" y="194" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490" letter-spacing="0.12em">02 // 2-HOP CYPHER &amp; RECALL</text>
+        <rect x="46" y="183" width="190" height="15" rx="2" fill="#ffffff" />
+        <text x="50" y="194" font-family="'Geist Mono', monospace" font-size="7.5" fill="#0e7490" letter-spacing="0.12em">02 // HYBRID RECALL &amp; 1-HOP WALK</text>
 
         <!-- Stage 3 Band -->
         <rect x="40" y="254" width="960" height="2" fill="#047857" fill-opacity="0.15" />
@@ -114,7 +114,7 @@
         <!-- M4: Litestar -> LatticeDB (Vector + Cypher Traversal) -->
         <line x1="306" y1="210" x2="724" y2="210" stroke="#0e7490" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
         <rect x="466" y="202" width="116" height="14" fill="#ffffff" />
-        <text x="524" y="213" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">HNSW + Cypher (2-Hop)</text>
+        <text x="524" y="213" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="8" fill="#0e7490">HNSW + BM25, 1-Hop Walk</text>
 
         <!-- M5: LatticeDB -> Litestar (Subgraph Triples + Chunks) -->
         <line x1="724" y1="236" x2="306" y2="236" stroke="#0e7490" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-accent)" />
@@ -181,7 +181,7 @@
 
         <line x1="330" y1="408" x2="354" y2="408" stroke="#4338ca" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow-link)" />
         <text x="364" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#4338ca">PROTOCOL LINK</text>
-        <text x="444" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">System 1 Choice Route</text>
+        <text x="444" y="411" font-family="'Inter', sans-serif" font-size="8.5" fill="#475569">Choice: 3 Routes (ADR-0003)</text>
 
         <line x1="610" y1="408" x2="634" y2="408" stroke="#047857" stroke-width="1.2" marker-end="url(#d2-query-lifecycle-light-d2-l-arrow)" />
         <text x="644" y="411" font-family="'Geist Mono', monospace" font-size="8" fill="#047857">GUARDRAIL</text>

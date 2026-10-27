@@ -104,7 +104,7 @@ def _q(
     query: str,
     passages: list[tuple[str, str]],
     slice_: Any = "factoid",
-    route: Any = "vector_exact",
+    route: Any = "hybrid",
     reference: str = "reference",
     case: Any = "direct",
 ) -> GoldQuery:

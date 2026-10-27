@@ -77,17 +77,17 @@ _triage: exact-match cache (O(1)) ──hit──> done
    │  else (miss only) Jev router.route_query()
    └─> chitchat        → ChitchatHandler (deterministic, no LLM) → done
        massive_context → retrieve (top_k=12) → generate → done
-       vector_exact | graph_relational | hybrid → retrieve → generate → done
+       hybrid (the one retrieval Route, ADR-0003) → retrieve → generate → done
 ```
 
 The cache is consulted before routing, so a hit makes no Jev call. A failed embedding never starts a routing task.
 
-- **Routing** (`routing/router.py`): `is_pure_chitchat()` (in `generation/chitchat.py`) short-circuits only messages made *entirely* of small talk; anything else goes to a Jev `Choice` across 5 routes. Any failure or unknown route degrades to `hybrid` with confidence 0.5 and `RouteDecision(verified=False)`. These "System 1 fallbacks" are intentional, and every external call is expected to degrade like this rather than raise. A fallback marks the answer **Unverified** (see below).
+- **Routing** (`routing/router.py`): `is_pure_chitchat()` (in `generation/chitchat.py`) short-circuits only messages made *entirely* of small talk; anything else goes to a Jev `Choice` across 3 routes (`hybrid`, `massive_context`, `chitchat`; ADR-0003 collapsed `vector_exact` and `graph_relational` into `hybrid`, and those old names now count as unknown). Any failure or unknown route degrades to `hybrid` with confidence 0.5 and `RouteDecision(verified=False)`. These "System 1 fallbacks" are intentional, and every external call is expected to degrade like this rather than raise. A fallback marks the answer **Unverified** (see below).
 - **Retrieval** (`retrieval/pipeline.py`, `RetrievalPipeline`, also exported as `HybridRetriever`) runs in this order:
   1. `HybridSearcher`: HNSW + BM25 with RRF fusion into `top_k + RERANK_HEADROOM` candidates, reusing the triage `query_embedding`. Vector search over-fetches, so legacy DBs that still hold entity vectors return chunks. The BM25 any-word fallback is a single query, and its failures are logged.
   2. `PrecisionReranker`: cross-encoder reranking of *every* candidate on its chunk text. Each candidate costs ~100 ms on CPU, so raising the headroom or `top_k` moves the retrieval SLA (`lattice-rag benchmark`). Headroom stays at 3; lower values cost multihop recall in the Hermetic Tier.
   3. `ContextGuardrail` (Jev Noul) prunes irrelevant chunks and returns a per-call `GuardrailResult`. An optional `RerankScoreGate` (`GUARDRAIL_SKIP_RERANK_SCORE`, off by default) keeps high-scoring chunks without asking Noul. Enable it only after the Live Tier procedure in `docs/production-readiness.md` §6.
-  4. `GraphTraverser`: a 1–2 hop in-process walk (not Cypher), starting only from the entities of the *final* chunks. The `budget` caps nodes and edges and stops the whole traversal.
+  4. `GraphTraverser`: a 1-hop in-process walk (not Cypher; `lattice-rag eval --force-hops 2` forces 2 on `hybrid` for the Route ablation), starting only from the entities of the *final* chunks. The `budget` caps nodes and edges and stops the whole traversal.
 
   `retrieval/retriever.py` is only a backward-compat re-export.
 - **Generation** goes through `ResilientSynthesizer` (`generation/resilient_synthesizer.py`) on both entry points: Groq under its single `pybreaker` breaker (`fail_max=3`, `reset_timeout=30`, cancellation excluded) → Gemini → Redis FAQ; `massive_context` runs Gemini → Groq (breaker) → Redis FAQ. Non-primary answers are `degraded`. The answer budget is `LLM_MAX_TOKENS` (default 768); `massive_context` gets max(1536, that value). A length stop is logged once, as `generation_truncated`, by the synthesizer. Both providers share the prompt in `generation/prompt.py`. The two orchestrator entry points must stay behaviorally equivalent, and `test_orchestrator_unified.py` checks this:

@@ -14,17 +14,17 @@ from lattice_rag.eval.runner import EvalRunner
 pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
 ROWS = [
-    ("r1", "factoid", "vector_exact"),
-    ("r2", "factoid", "vector_exact"),
-    ("r3", "multihop", "graph_relational"),
-    ("r4", "multihop", "graph_relational"),
+    ("r1", "factoid", "hybrid"),
+    ("r2", "factoid", "hybrid"),
+    ("r3", "multihop", "massive_context"),
+    ("r4", "multihop", "massive_context"),
     ("c1", "chitchat", "chitchat"),
 ]
 ALL_CORRECT = {
-    "query r1": "vector_exact",
-    "query r2": "vector_exact",
-    "query r3": "graph_relational",
-    "query r4": "graph_relational",
+    "query r1": "hybrid",
+    "query r2": "hybrid",
+    "query r3": "massive_context",
+    "query r4": "massive_context",
     "query c1": "chitchat",
 }
 
@@ -112,20 +112,20 @@ async def _run(files: tuple[Path, Path], routes: dict[str, str]):
 
 
 async def test_reports_overall_and_per_slice_accuracy_and_misroutes(files):
-    resp = await _run(files, {**ALL_CORRECT, "query r2": "hybrid", "query r4": "massive_context"})
+    resp = await _run(files, {**ALL_CORRECT, "query r2": "massive_context", "query r4": "hybrid"})
 
     assert resp.route_accuracy == 0.5
     assert resp.route_accuracy_by_slice == {"factoid": 0.5, "multihop": 0.5}
     assert [(m.query_id, m.chosen_route, m.expected_route) for m in resp.misroutes] == [
-        ("r2", "hybrid", "vector_exact"),
-        ("r4", "massive_context", "graph_relational"),
+        ("r2", "massive_context", "hybrid"),
+        ("r4", "hybrid", "massive_context"),
     ]
     assert resp.route_accuracy_floor == 0.80
 
 
 async def test_chitchat_slice_is_outside_the_denominator(files):
     """Chitchat is routed deterministically, so it is not a router decision to score."""
-    resp = await _run(files, {**ALL_CORRECT, "query c1": "hybrid", "query r1": "hybrid"})
+    resp = await _run(files, {**ALL_CORRECT, "query c1": "hybrid", "query r1": "massive_context"})
 
     assert resp.route_accuracy_scored == 4
     assert resp.route_accuracy == 0.75
@@ -134,19 +134,19 @@ async def test_chitchat_slice_is_outside_the_denominator(files):
 
 
 async def test_each_result_records_its_chosen_route(files):
-    resp = await _run(files, {**ALL_CORRECT, "query r2": "hybrid", "query r3": "boom"})
+    resp = await _run(files, {**ALL_CORRECT, "query r2": "massive_context", "query r3": "boom"})
 
     assert [r.chosen_route for r in resp.results] == [
-        "vector_exact",
         "hybrid",
+        "massive_context",
         None,
-        "graph_relational",
+        "massive_context",
         "chitchat",
     ]
 
 
 async def test_missed_floor_is_advisory_and_never_fails_the_gate(files):
-    resp = await _run(files, dict.fromkeys(ALL_CORRECT, "massive_context"))
+    resp = await _run(files, dict.fromkeys(ALL_CORRECT, "chitchat"))
 
     assert resp.route_accuracy == 0.0
     assert resp.passed_gate is True

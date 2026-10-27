@@ -32,7 +32,7 @@ async def test_traverse_empty_anchors():
 
 @pytest.mark.asyncio
 async def test_traverse_hops_by_route():
-    """Verify graph_relational expands 2 hops while other routes expand 1 hop."""
+    """Every Route walks 1 hop; only a forced hop count (Route ablation) walks 2."""
     mock_store = MagicMock()
     # Chunk 1 contains Entity 100
     mock_store.get_entities_for_chunks.return_value = [100]
@@ -42,16 +42,18 @@ async def test_traverse_hops_by_route():
     )
     mock_store.traverse_from_entities.return_value = expected_subgraph
 
-    traverser = GraphTraverser(mock_store)
-
-    # 1. graph_relational -> max_hops=2
-    res_rel = await traverser.traverse([1], route="graph_relational")
-    mock_store.traverse_from_entities.assert_called_with([100], max_hops=2, budget=25)
-    assert res_rel == expected_subgraph
-
-    # 2. hybrid -> max_hops=1
-    await traverser.traverse([1], route="hybrid")
+    # 1. hybrid -> max_hops=1
+    res = await GraphTraverser(mock_store).traverse([1], route="hybrid")
     mock_store.traverse_from_entities.assert_called_with([100], max_hops=1, budget=25)
+    assert res == expected_subgraph
+
+    # 2. massive_context -> max_hops=1
+    await GraphTraverser(mock_store).traverse([1], route="massive_context")
+    mock_store.traverse_from_entities.assert_called_with([100], max_hops=1, budget=25)
+
+    # 3. hybrid with the ablation's forced 2 hops -> max_hops=2
+    await GraphTraverser(mock_store, forced_hops=2).traverse([1], route="hybrid")
+    mock_store.traverse_from_entities.assert_called_with([100], max_hops=2, budget=25)
 
 
 @pytest.mark.asyncio
@@ -110,14 +112,14 @@ def fan_out_store(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("route", ["hybrid", "graph_relational"])
+@pytest.mark.parametrize("hops", [1, 2])
 @pytest.mark.parametrize("budget", [1, 2, 3, 4, 5, 7, 9])
-async def test_traversal_never_exceeds_budget(fan_out_store, route: str, budget: int):
+async def test_traversal_never_exceeds_budget(fan_out_store, hops: int, budget: int):
     """Neither nodes nor edges exceed the budget at any hop count, and no edge dangles."""
     store, chunk_id = fan_out_store
-    traverser = GraphTraverser(store)
+    traverser = GraphTraverser(store, forced_hops=hops)
 
-    subgraph = await traverser.traverse([chunk_id], route=route, budget=budget)
+    subgraph = await traverser.traverse([chunk_id], route="hybrid", budget=budget)
 
     assert len(subgraph.nodes) <= budget
     assert len(subgraph.edges) <= budget
@@ -131,9 +133,9 @@ async def test_traversal_never_exceeds_budget(fan_out_store, route: str, budget:
 async def test_traversal_within_budget_returns_full_two_hop_graph(fan_out_store):
     """With a generous budget the 2-hop walk is not truncated."""
     store, chunk_id = fan_out_store
-    traverser = GraphTraverser(store)
+    traverser = GraphTraverser(store, forced_hops=2)
 
-    subgraph = await traverser.traverse([chunk_id], route="graph_relational", budget=50)
+    subgraph = await traverser.traverse([chunk_id], route="hybrid", budget=50)
 
     assert {n["name"] for n in subgraph.nodes} == {
         "A", "B", "C", "X1", "X2", "X3", "Y1", "Y2", "Z1", "Z2", "Z3"

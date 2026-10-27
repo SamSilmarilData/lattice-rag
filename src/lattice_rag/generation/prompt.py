@@ -67,7 +67,7 @@ def graph_triples(graph_context: dict[str, Any]) -> list[str]:
     return lines
 
 
-RELATIONAL_GRAPH_ROUTES: frozenset[Route] = frozenset({"graph_relational", "hybrid"})
+RELATIONAL_GRAPH_ROUTES: frozenset[Route] = frozenset({"hybrid"})
 RELATIONAL_MAX_EDGES = 10
 
 

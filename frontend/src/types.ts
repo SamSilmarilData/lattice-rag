@@ -97,7 +97,7 @@ export type EvalQueryError = 'pipeline_error' | 'judge_error' | 'provider_degrad
 export type GenerationProvider = 'groq' | 'gemini' | 'redis_faq' | 'offline';
 
 // Mirror the Route and Slice Literals in src/lattice_rag/vocabulary.py
-export type Route = 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context';
+export type Route = 'hybrid' | 'massive_context' | 'chitchat';
 export type Slice = 'factoid' | 'multihop' | 'unanswerable' | 'chitchat' | 'long_context';
 
 export interface EvalQueryResult {

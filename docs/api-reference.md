@@ -58,7 +58,7 @@ interface QueryRequest {
 ```typescript
 interface QueryResponse {
   answer: string;                  // Synthesized LLM response
-  route: string;                   // 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context'
+  route: string;                   // 'hybrid' | 'massive_context' | 'chitchat'
   cached: boolean;                 // Whether Tier 1 semantic cache was hit
   latencyMs: number;               // Total execution latency in milliseconds
   sources: SourceChunk[];          // Attributed source text chunks
@@ -171,7 +171,7 @@ interface EvalQueryResult {
   graphRecall: number | null;        // Graph Recall; null when the query lists no expected entities or the pipeline failed
 }
 
-type Route = "vector_exact" | "graph_relational" | "hybrid" | "chitchat" | "massive_context";
+type Route = "hybrid" | "massive_context" | "chitchat";  // ADR-0003: three Routes
 type Slice = "factoid" | "multihop" | "unanswerable" | "chitchat" | "long_context";
 
 // A scored query whose chosen Route differs from its Expected Route

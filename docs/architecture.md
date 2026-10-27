@@ -43,10 +43,8 @@ The following sequence diagram illustrates the lifecycle of a user query through
 ### 3.2 System 1 Decision Routing (TypeSafe AI Jev)
 Instead of invoking large generative models for intent recognition, `lattice-rag` uses **TypeSafe AI Jev**:
 - **Front-Door Router (`routing/router.py`):**
-  Uses the `Choice` primitive to classify queries into:
-  - `vector_exact`: Direct factual lookups and code definitions.
-  - `graph_relational`: Questions requiring multi-step relational hops across entities.
-  - `hybrid`: Broad semantic queries needing both text context and relational graph structure.
+  Uses the `Choice` primitive to classify queries into three Routes (ADR-0003 collapsed the former `vector_exact` and `graph_relational` into `hybrid`: all three ran the same retrieval, and a second graph hop added no evidence on this graph):
+  - `hybrid`: The one retrieval Route. Single facts, relationships between named entities, and focused questions about how two or three parts interact; Hybrid Retrieval with a 1-hop graph traversal. It is also the System 1 fallback.
   - `chitchat`: Greetings and pleasantries. Messages made up entirely of small talk ("hi!", "thanks a lot", "what can you do?") skip the Jev call through a deterministic fast path; a question that merely contains such a word ("How does HNSW help recall?") is always routed by Jev.
   - `massive_context`: Cross-corpus summarizations requiring 1M token analysis.
 - **Context Guardrail (`routing/guardrail.py`):**
@@ -61,7 +59,7 @@ Instead of invoking large generative models for intent recognition, `lattice-rag
 
 ### 3.4 3-Stage Hybrid Retrieval Pipeline
 1. **Stage 1 (Vector Candidate Recall):** The query embedding computed once during triage is reused; LatticeDB executes HNSW vector search and BM25 search, combining results via Reciprocal Rank Fusion (RRF) into `top_k + 3` candidates (`RERANK_HEADROOM`). Each candidate keeps its `doc_id` and `position` for citations.
-2. **Stage 2 (Relational Traversal):** Runs after Stage 3 and the context guardrail. It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates, and walks LatticeDB edges in-process for 1 hop (2 for `graph_relational`). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.
+2. **Stage 2 (Relational Traversal):** Runs after Stage 3 and the context guardrail. It takes entity anchors only from the final chunks (those that survived reranking and the guardrail), so the LLM never sees relations reachable only from rejected candidates, and walks LatticeDB edges in-process for 1 hop on every Route (ADR-0003; `lattice-rag eval --force-hops 2` forces 2 on `hybrid` for the Route ablation). The budget (25) caps nodes and edges separately; reaching either cap ends the whole traversal, and an edge is kept only with both endpoints. This is a pointer walk through the LatticeDB transaction API, not a Cypher query.
 3. **Stage 3 (Precision Reranking):** The INT8 ONNX cross-encoder (`bge-reranker-v2-m3`) scores **every** Stage 1 candidate on its own chunk text and keeps the top `top_k` (5, or 12 for `massive_context`). Graph triples are not appended to candidates: they are identical for every candidate, so they could not change the ordering. They go to the LLM prompt instead. Each candidate costs about 100 ms on CPU, which is why the headroom is small.
 
 ### 3.5 Multi-Tier Caching & Circuit Breaker

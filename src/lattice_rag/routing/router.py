@@ -33,38 +33,20 @@ class RouteGuide:
 
 
 ROUTE_GUIDES: Final[dict[Route, RouteGuide]] = {
-    "vector_exact": RouteGuide(
+    "hybrid": RouteGuide(
         description=(
-            "A question answered by a single fact, name, number, setting or short explanation "
-            "stated in one place, even when it is phrased as 'how' or 'why'. Not a request "
-            "to relate several things or to cover a whole process."
+            "A question the documents answer from a few specific passages: a single fact, "
+            "name, number or setting (even phrased as 'how' or 'why'), how named entities "
+            "or components are connected, or how two or three parts of one mechanism "
+            "interact. Not a full-system walkthrough."
         ),
         examples=(
             "What model is used for X?",
             "What threshold does Y use?",
             "Why was Z chosen over W?",
-            "What is the maximum number of Q?",
-        ),
-    ),
-    "graph_relational": RouteGuide(
-        description=(
-            "A question about how named entities, components or node types are connected: "
-            "which edges, links or relationships join them, or the path between them."
-        ),
-        examples=(
-            "What edges link A, B and C?",
             "How is X connected to Y?",
-            "What role does the relationship R play between A and B?",
-        ),
-    ),
-    "hybrid": RouteGuide(
-        description=(
-            "A focused question about one mechanism that needs specific facts plus how "
-            "two or three parts interact, but is not a full-system walkthrough."
-        ),
-        examples=(
+            "What edges link A, B and C?",
             "How do traversed results feed into the reranking step?",
-            "What does component X do and how does it hand off to component Y?",
             "How does design A compare with design B?",
         ),
     ),

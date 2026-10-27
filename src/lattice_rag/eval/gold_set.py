@@ -11,7 +11,7 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
         "slice": "factoid|multihop|unanswerable|chitchat|long_context",
         "case": "direct|paraphrase|negation|ambiguity|conflicting_sources|
                  unanswerable_near_miss",
-        "expected_route": "vector_exact|graph_relational|hybrid|chitchat|massive_context",
+        "expected_route": "hybrid|massive_context|chitchat",
         "reference_answer": "...",
         "gold_passages": [{"document_id": "...", "text": "<verbatim quote>"}],
         "expected_entities": ["..."]
@@ -19,9 +19,10 @@ The file format (``eval_dataset.json``, version 3.0.0) is::
     }
 
 ``load_gold_set`` rejects a file that is structurally wrong (missing field, unknown
-Slice, Case or Route) or whose content is inconsistent (a Gold Passage that is not verbatim
-in its Document, a passage for an unknown Document, duplicate ids, or a Slice whose
-passage count makes no sense), an expected entity the corpus never mentions, or a
+Slice, Case or Route, including the Routes ADR-0003 collapsed into ``hybrid``) or
+whose content is inconsistent (a Gold Passage that is not verbatim in its Document, a
+passage for an unknown Document, duplicate ids, or a Slice whose passage count makes no
+sense), an expected entity the corpus never mentions, or a
 non-chitchat Slice with fewer than ``MIN_SLICE_QUERIES`` queries.
 """
 
