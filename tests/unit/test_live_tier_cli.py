@@ -246,6 +246,17 @@ async def test_harness_applies_the_arm_and_the_phase5_config(offline_services, m
     assert guardrails.for_route("massive_context") is not guardrails.for_route("hybrid")
 
 
+async def test_harness_gives_both_providers_the_llm_timeout(offline_services, monkeypatch):
+    from lattice_rag.generation import gemini_fallback, groq_synthesizer
+
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "11")
+
+    await cli._build_harness()
+
+    assert groq_synthesizer.GroqSynthesizer.call_args.kwargs["timeout_seconds"] == 11.0
+    assert gemini_fallback.GeminiFallback.call_args.kwargs["timeout_seconds"] == 11.0
+
+
 async def test_harness_without_an_arm_follows_the_environment(offline_services, monkeypatch):
     from lattice_rag.vocabulary import GraphContextMode
 

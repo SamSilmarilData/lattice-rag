@@ -236,3 +236,52 @@ async def test_cancellation_is_not_counted_as_groq_failure():
     with pytest.raises(asyncio.CancelledError):
         await synthesizer.synthesize("q", context_chunks=[])
     assert synthesizer.circuit_status == "closed"
+
+
+def _hung_groq_and_answering_gemini(timeout: float):
+    """Real provider adapters over fake clients: Groq never answers, Gemini does."""
+    import asyncio
+
+    from lattice_rag.generation.gemini_fallback import GeminiFallback
+    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+
+    async def hang(*_a, **_kw):
+        await asyncio.sleep(3600)
+
+    groq_client = MagicMock()
+    groq_client.chat.completions.create = AsyncMock(side_effect=hang)
+
+    async def gemini_chunks():
+        yield MagicMock(text="Gemini answer.", candidates=[])
+
+    gemini_client = MagicMock()
+    gemini_client.aio.models.generate_content = AsyncMock(
+        return_value=MagicMock(text="Gemini answer.", candidates=[])
+    )
+    gemini_client.aio.models.generate_content_stream = MagicMock(
+        side_effect=lambda **_kw: gemini_chunks()
+    )
+    return (
+        GroqSynthesizer(client=groq_client, timeout_seconds=timeout),
+        GeminiFallback(client=gemini_client, timeout_seconds=timeout),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hung_primary_times_out_and_cascades_on_both_paths():
+    import asyncio
+
+    groq, gemini = _hung_groq_and_answering_gemini(timeout=0.05)
+    synthesizer = ResilientSynthesizer(groq=groq, gemini=gemini, fallback_cache=MagicMock())
+
+    res = await asyncio.wait_for(synthesizer.synthesize("q", context_chunks=[]), timeout=2)
+    assert (res.answer, res.provider, res.degraded) == ("Gemini answer.", "gemini", True)
+
+    outcome = StreamOutcome()
+
+    async def drain() -> list[str]:
+        return [t async for t in synthesizer.stream("q", context_chunks=[], outcome=outcome)]
+
+    tokens = await asyncio.wait_for(drain(), timeout=2)
+    assert "".join(tokens) == "Gemini answer."
+    assert (outcome.provider, outcome.degraded, outcome.error) == ("gemini", True, None)

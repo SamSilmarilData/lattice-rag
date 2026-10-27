@@ -131,11 +131,13 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
         model=config.groq_model,
         max_tokens=config.llm_max_tokens,
+        timeout_seconds=config.llm_timeout_seconds,
     )
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
         model=config.gemini_model,
         max_output_tokens=config.llm_max_tokens,
+        timeout_seconds=config.llm_timeout_seconds,
     )
     chitchat = ChitchatHandler()
 

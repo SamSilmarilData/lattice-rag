@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 from groq import AsyncGroq
 
-from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
+from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS, DEFAULT_LLM_TIMEOUT_SECONDS
 from lattice_rag.generation.prompt import build_messages
 from lattice_rag.generation.resilient_synthesizer import ProviderOutcome
 from lattice_rag.security import sanitize_error_detail
@@ -25,22 +25,32 @@ class GroqSynthesizer:
         model: str = "qwen/qwen3.8-27b",
         max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         client: AsyncGroq | None = None,
+        timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS,
     ) -> None:
         """Initializes the AsyncGroq client with configurable model and API key.
 
         Without a key (argument or GROQ_API_KEY) the client stays unset and every call
         raises, so the resilient cascade degrades to Gemini/FAQ instead of failing boot.
+
+        ``timeout_seconds`` bounds each attempt: the whole buffered request, and each chunk
+        (the first included) of a stream. A timeout raises like any provider failure.
         """
         self.model = model
         self.max_tokens = max_tokens
+        self.timeout_seconds = timeout_seconds
         resolved_key = api_key or os.environ.get("GROQ_API_KEY")
         self.client: AsyncGroq | None
         if client is not None:
             self.client = client
         elif resolved_key:
-            self.client = AsyncGroq(api_key=resolved_key, max_retries=2)
+            self.client = AsyncGroq(api_key=resolved_key, max_retries=2, timeout=timeout_seconds)
         else:
             self.client = None
+
+    def _describe_failure(self, error: Exception) -> str:
+        if isinstance(error, TimeoutError):
+            return f"timed out after {self.timeout_seconds:g}s"
+        return sanitize_error_detail(str(error))
 
     def _require_client(self) -> AsyncGroq:
         if self.client is None:
@@ -66,14 +76,17 @@ class GroqSynthesizer:
         max_attempts = 4
         for attempt in range(max_attempts):
             try:
-                response = await client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": prompt.system},
-                        {"role": "user", "content": prompt.user},
-                    ],
-                    max_tokens=self.max_tokens if max_tokens is None else max_tokens,
-                    stream=False,
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": prompt.system},
+                            {"role": "user", "content": prompt.user},
+                        ],
+                        max_tokens=self.max_tokens if max_tokens is None else max_tokens,
+                        stream=False,
+                    ),
+                    timeout=self.timeout_seconds,
                 )
                 if response.choices[0].finish_reason == "length" and outcome is not None:
                     outcome.truncated = True
@@ -87,7 +100,7 @@ class GroqSynthesizer:
                     logger.warning("groq_rate_limit_retry", attempt=attempt + 1, wait_sec=wait_sec)
                     await asyncio.sleep(wait_sec)
                     continue
-                sanitized_error = sanitize_error_detail(err_str)
+                sanitized_error = self._describe_failure(e)
                 logger.error("groq_synthesis_failed", error=sanitized_error)
                 raise RuntimeError(f"Groq synthesis failed: {sanitized_error}") from e
         return ""
@@ -112,16 +125,24 @@ class GroqSynthesizer:
         emitted = False
         for attempt in range(max_attempts):
             try:
-                response = await client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": prompt.system},
-                        {"role": "user", "content": prompt.user},
-                    ],
-                    max_tokens=self.max_tokens if max_tokens is None else max_tokens,
-                    stream=True,
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": prompt.system},
+                            {"role": "user", "content": prompt.user},
+                        ],
+                        max_tokens=self.max_tokens if max_tokens is None else max_tokens,
+                        stream=True,
+                    ),
+                    timeout=self.timeout_seconds,
                 )
-                async for chunk in response:
+                chunks = aiter(response)
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(anext(chunks), timeout=self.timeout_seconds)
+                    except StopAsyncIteration:
+                        break
                     if chunk.choices and chunk.choices[0].delta.content:
                         emitted = True
                         yield chunk.choices[0].delta.content
@@ -148,6 +169,6 @@ class GroqSynthesizer:
                     )
                     await asyncio.sleep(wait_sec)
                     continue
-                sanitized_error = sanitize_error_detail(err_str)
+                sanitized_error = self._describe_failure(e)
                 logger.error("groq_stream_synthesis_failed", error=sanitized_error)
                 raise RuntimeError(f"Groq stream synthesis failed: {sanitized_error}") from e

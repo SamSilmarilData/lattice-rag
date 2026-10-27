@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -113,3 +114,41 @@ async def test_groq_stream_does_not_replay_tokens_after_midstream_429(
 
     assert tokens == ["First "]
     assert mock_groq_client.chat.completions.create.call_count == 1
+
+
+async def _hang(*_args, **_kwargs):
+    await asyncio.sleep(3600)
+
+
+@pytest.mark.asyncio
+async def test_groq_synthesize_times_out_without_retrying(mock_groq_client):
+    """A hung completion fails like any provider error; a timeout is not a 429 to retry."""
+    synthesizer = GroqSynthesizer(client=mock_groq_client, timeout_seconds=0.05)
+    mock_groq_client.chat.completions.create.side_effect = _hang
+
+    with pytest.raises(RuntimeError, match="Groq synthesis failed: timed out"):
+        await asyncio.wait_for(synthesizer.synthesize("Query", []), timeout=2)
+    assert mock_groq_client.chat.completions.create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_groq_stream_times_out_waiting_for_first_chunk(mock_groq_client):
+    synthesizer = GroqSynthesizer(client=mock_groq_client, timeout_seconds=0.05)
+
+    async def stalled_stream():
+        await asyncio.sleep(3600)
+        yield MagicMock()
+
+    mock_groq_client.chat.completions.create.return_value = stalled_stream()
+
+    async def drain() -> list[str]:
+        return [t async for t in synthesizer.stream("Query", [])]
+
+    with pytest.raises(RuntimeError, match="Groq stream synthesis failed: timed out"):
+        await asyncio.wait_for(drain(), timeout=2)
+
+
+def test_groq_client_built_from_key_carries_the_timeout():
+    synthesizer = GroqSynthesizer(api_key="test-key", timeout_seconds=12.5)
+    assert synthesizer.client is not None
+    assert synthesizer.client.timeout == 12.5

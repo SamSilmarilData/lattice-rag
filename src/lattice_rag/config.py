@@ -13,6 +13,9 @@ load_dotenv()
 
 # Default answer budget (tokens) for Groq and Gemini; LLM_MAX_TOKENS overrides it.
 DEFAULT_LLM_MAX_TOKENS = 768
+# Per-call bound (seconds) on a Groq or Gemini request; LLM_TIMEOUT_SECONDS overrides it.
+# For streaming it bounds the wait for each chunk, including the first.
+DEFAULT_LLM_TIMEOUT_SECONDS = 30.0
 # onnx-community/bge-reranker-v2-m3-ONNX at its 2025-09-01 commit
 DEFAULT_RERANKER_ONNX_REVISION = "6f5ff65298512715a1e669753bc754d2bc8f367b"
 # Minimum Jev Noul probability for a chunk to pass the context guardrail
@@ -43,6 +46,7 @@ class AppConfig:
     groq_model: str = "qwen/qwen3.8-27b"
     gemini_model: str = "gemini-3.8-flash"
     llm_max_tokens: int = DEFAULT_LLM_MAX_TOKENS
+    llm_timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS
     cors_allow_origins: tuple[str, ...] = ()
     query_rate_limit_per_minute: int = 60
     # Reverse proxies in front of the app whose X-Forwarded-For entries are trusted.
@@ -78,6 +82,10 @@ class AppConfig:
             raise ValueError(
                 "Invalid GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD: "
                 f"{self.guardrail_massive_context_threshold}. Must be between 0 and 1."
+            )
+        if self.llm_timeout_seconds <= 0:
+            raise ValueError(
+                f"Invalid LLM_TIMEOUT_SECONDS: {self.llm_timeout_seconds}. Must be greater than 0."
             )
         if self.eval_degraded_retry_delay < 0:
             raise ValueError(
@@ -147,6 +155,9 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         groq_model=os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b"),
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
         llm_max_tokens=int(os.environ.get("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS))),
+        llm_timeout_seconds=float(
+            os.environ.get("LLM_TIMEOUT_SECONDS") or DEFAULT_LLM_TIMEOUT_SECONDS
+        ),
         cors_allow_origins=_split_csv(os.environ.get("CORS_ALLOW_ORIGINS", "")),
         query_rate_limit_per_minute=int(os.environ.get("QUERY_RATE_LIMIT_PER_MINUTE", "60")),
         trusted_proxy_hops=int(os.environ.get("TRUSTED_PROXY_HOPS", "0")),

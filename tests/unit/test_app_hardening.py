@@ -39,6 +39,15 @@ async def test_app_boots_without_llm_keys(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_lifespan_gives_both_providers_the_llm_timeout(tmp_path):
+    app = create_app(_config(tmp_path, llm_timeout_seconds=9.0))
+    async with AsyncTestClient(app):
+        orchestrator = app.state.orchestrator
+        assert orchestrator.groq.timeout_seconds == 9.0
+        assert orchestrator.gemini.timeout_seconds == 9.0
+
+
+@pytest.mark.asyncio
 async def test_query_endpoints_are_rate_limited(tmp_path):
     app = create_app(_config(tmp_path))
     async with AsyncTestClient(app) as client:
