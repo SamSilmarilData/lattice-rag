@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING, Any
 
 from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
-from lattice_rag.generation.prompt import GraphContextMode, graph_for_prompt
+from lattice_rag.generation.prompt import graph_for_prompt
 from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
 from lattice_rag.orchestration.state import PipelineState
+from lattice_rag.vocabulary import GraphContextMode
 
 if TYPE_CHECKING:
     from lattice_rag.caching.fallback_cache import FallbackCache

@@ -174,7 +174,7 @@ def test_eval_passes_configured_degraded_retry_delay(monkeypatch, mocked_live_ev
     assert captured["degraded_retry_delay"] == 9.0
 
 
-# --- Phase 5 experiment arms (#46 forced hops, #47 graph context) ----------------------
+# --- Experiment Arms (#46 forced hops, #47 graph context) ----------------------
 
 
 def test_eval_runs_the_configured_system_by_default(mocked_live_eval):

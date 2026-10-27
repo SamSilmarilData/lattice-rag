@@ -247,13 +247,13 @@ Recall is below 1.0 on every gated Slice, so the tier discriminates; the weakest
    - the Noul contradiction vetoes on `long_context` (baseline: 1, 1 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
 4. **Record and enable.** Put the three run means and the veto counts in the PR that sets the variable in the deployment environment (for example the Cloud Run service's env vars), and keep the reports. Re-run this procedure when the reranker model, `top_k`, the Gold Set or the threshold changes.
 
-### Phase 5 experiment arms (spec #22)
+### Experiment Arms (spec #22)
 
-Three switches let the phase 5 experiments run as Live Tier arms without code edits. Every default keeps the measured behaviour, so the baseline still describes the unconfigured system. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003, and outcomes are recorded there, not here. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
+Three switches let the phase 5 experiments run as Experiment Arms of the Live Tier without code edits. Every default keeps the measured behaviour, so the baseline still describes the unconfigured system. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003, and outcomes are recorded there, not here. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
 
 Common arguments: `ARGS="--dataset eval_dataset.json --baseline eval_baseline.json --no-fail-on-regression"`.
 
-**#46 Route ablation (ADR-0003): forced hop count.** `--force-hops 1|2` makes every non-`chitchat` query walk that many graph hops, whatever Route the router chose. It is an eval-only CLI option: the app, the API and `.env` have no equivalent. The router still runs, so Route Accuracy reports the router's real pick. There are two arms, because `vector_exact` and `hybrid` already run identically:
+**#46 Route ablation (ADR-0003): forced hop count.** `--force-hops 1|2` makes every query the router sends to `vector_exact`, `hybrid` or `graph_relational` walk that many graph hops, whichever of the three it chose. `massive_context` keeps its own hop count (1) in both arms, and `chitchat` never retrieves. It is an eval-only CLI option: the app, the API and `.env` have no equivalent. The router still runs, so Route Accuracy reports the router's real pick. There are two arms, because `vector_exact` and `hybrid` already run identically:
 
 ```bash
 lattice-rag eval $ARGS --force-hops 1 --output ablation-1hop.json
@@ -274,11 +274,9 @@ lattice-rag eval $ARGS --graph-context off --output graph-off.json
 lattice-rag eval $ARGS --graph-context relational --output graph-relational.json
 ```
 
-**#48 Noul on `massive_context`.**
+**#48 Noul on `massive_context`.** Compare the arms on the `long_context` Slice, and within it only the queries whose chosen Route (`chosen_route` in each report result) was `massive_context` in every arm being compared: the switches change nothing on the other Routes, so a `long_context` query routed elsewhere only adds judge noise.
 - `GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD` sets the Noul threshold used by `massive_context` retrieval only. It defaults to the global 0.50, and the other Routes always keep 0.50.
 - `GUARDRAIL_SKIP_MASSIVE_CONTEXT=true` sends no `massive_context` chunk to Noul. Those answers are Unverified (`unverified: true`) and never written to Tier 1. The skip wins over the threshold.
-
-Read the `long_context` Slice:
 
 ```bash
 lattice-rag eval $ARGS --output noul-050.json

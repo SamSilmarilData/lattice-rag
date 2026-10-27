@@ -6,14 +6,13 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from lattice_rag.vocabulary import GraphContextMode
+from lattice_rag.vocabulary import GraphContextMode, Route
 
 __all__ = [
     "NO_EVIDENCE",
     "RELATIONAL_GRAPH_ROUTES",
     "RELATIONAL_MAX_EDGES",
     "SYSTEM_PROMPT",
-    "GraphContextMode",
     "PromptMessages",
     "build_messages",
     "graph_for_prompt",
@@ -68,12 +67,12 @@ def graph_triples(graph_context: dict[str, Any]) -> list[str]:
     return lines
 
 
-RELATIONAL_GRAPH_ROUTES = frozenset({"graph_relational", "hybrid"})
+RELATIONAL_GRAPH_ROUTES: frozenset[Route] = frozenset({"graph_relational", "hybrid"})
 RELATIONAL_MAX_EDGES = 10
 
 
 def graph_for_prompt(
-    graph_context: dict[str, Any] | None, route: str, mode: GraphContextMode
+    graph_context: dict[str, Any] | None, route: Route, mode: GraphContextMode
 ) -> dict[str, Any] | None:
     """The part of ``graph_context`` the generator is given under ``mode``.
 

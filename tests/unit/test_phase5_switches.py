@@ -1,4 +1,4 @@
-"""Phase 5 experiment switches (spec #22: #46, #47, #48), tested through the orchestrator.
+"""Experiment Arm switches (spec #22: #46, #47, #48), tested through the orchestrator.
 
 Each test drives ``RAGOrchestrator.run()`` and ``stream_query()`` over a real
 ``RetrievalPipeline`` whose store, embeddings, router, guardrails and providers are fakes,
@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import numpy as np
 import pytest
 
-from lattice_rag.generation.prompt import GraphContextMode
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.retrieval.embeddings import EmbeddingService, RerankResult
@@ -21,6 +20,7 @@ from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.guardrail import GuardrailResult, build_route_guardrails
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SearchResult, SubgraphResult
+from lattice_rag.vocabulary import GraphContextMode
 
 ROUTES = ["vector_exact", "hybrid", "graph_relational", "massive_context"]
 
@@ -207,8 +207,10 @@ async def test_without_forced_hops_only_graph_relational_walks_two_hops(route):
 
 
 @pytest.mark.parametrize("hops", [1, 2])
-@pytest.mark.parametrize("route", ROUTES)
-async def test_forced_hops_override_every_retrieval_route_and_keep_the_routers_pick(route, hops):
+@pytest.mark.parametrize("route", ["vector_exact", "hybrid", "graph_relational"])
+async def test_forced_hops_override_the_three_retrieval_routes_and_keep_the_routers_pick(
+    route, hops
+):
     store = _Store(_subgraph(1))
     orchestrator, _ = _orchestrator(route, store=store, pipeline_kwargs={"forced_hops": hops})
 
@@ -218,6 +220,19 @@ async def test_forced_hops_override_every_retrieval_route_and_keep_the_routers_p
     # Route Accuracy scores the router's actual choice, not the forced behaviour
     assert state.route == route and done["route"] == route
     assert state.route_verified is True
+
+
+@pytest.mark.parametrize("hops", [1, 2])
+async def test_forced_hops_leave_massive_context_on_its_own_hop_count(hops):
+    """ADR-0003 ablates only the three retrieval Routes; massive_context keeps one hop."""
+    store = _Store(_subgraph(1))
+    orchestrator, _ = _orchestrator(
+        "massive_context", store=store, pipeline_kwargs={"forced_hops": hops}
+    )
+
+    await _both(orchestrator)
+
+    assert store.hops_walked() == [1, 1]
 
 
 @pytest.mark.parametrize("hops", [0, 3])
@@ -323,6 +338,18 @@ async def test_skipping_noul_on_massive_context_keeps_it_on_other_routes(route):
     assert make.ran == [0.5, 0.5]
     assert state.unverified is False and done["unverified"] is False
     assert cache.put.call_count == 2
+
+
+async def test_per_route_guardrails_survive_rebuilding_on_the_ephemeral_eval_store():
+    make = _ThresholdGuardrails()
+    orchestrator, _ = _orchestrator(
+        "massive_context", guardrail=build_route_guardrails(make, massive_context_threshold=0.35)
+    )
+
+    ephemeral = orchestrator.with_retrieval(orchestrator.retrieval.with_store(_Store(_subgraph(1))))
+    await _both(ephemeral)
+
+    assert make.ran == [0.35, 0.35]
 
 
 async def test_route_guardrails_close_every_guardrail_they_built():

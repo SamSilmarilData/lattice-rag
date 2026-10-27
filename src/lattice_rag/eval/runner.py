@@ -24,7 +24,7 @@ from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
-from lattice_rag.storage.db import LatticeStore, entity_key
+from lattice_rag.storage.db import LatticeStore, normalize_entity_name
 from lattice_rag.storage.extract import EntityExtractor
 from lattice_rag.vocabulary import Route
 
@@ -356,23 +356,20 @@ def _route_accuracy(queries: list[GoldQuery], results: list[EvalQueryResult]) ->
     }
 
 
-def _name_key(name: str) -> str:
-    """Entity name as ``entity_key()`` normalizes it: whitespace-collapsed and case-folded."""
-    return entity_key(name, "")[0]
-
-
 def graph_recall_of(expected: list[str], graph_context: object) -> float | None:
     """Share of ``expected`` entity names among the graph context's Entity names.
 
     ``None`` when the query lists no expected entities. A missing or malformed graph
     context surfaced no Entities, so its recall is 0.0.
     """
-    wanted = {_name_key(e) for e in expected}
+    wanted = {normalize_entity_name(e) for e in expected}
     if not wanted:
         return None
     nodes = graph_context.get("nodes") if isinstance(graph_context, dict) else None
     surfaced = {
-        _name_key(str(n["name"])) for n in nodes or [] if isinstance(n, dict) and n.get("name")
+        normalize_entity_name(str(n["name"]))
+        for n in nodes or []
+        if isinstance(n, dict) and n.get("name")
     }
     return round(len(wanted & surfaced) / len(wanted), 4)
 
@@ -391,15 +388,15 @@ def _graph_recall(queries: list[GoldQuery], results: list[EvalQueryResult]) -> d
     }
 
 
-def _plural(n: int, noun: str) -> str:
-    return f"{n} {noun}{'' if n == 1 else 's'}"
+def _plural(n: int, noun: str, plural: str | None = None) -> str:
+    return f"{n} {noun if n == 1 else plural or noun + 's'}"
 
 
 def _graph_recall_lines(report: EvalRunResponse) -> list[str]:
     scored = report.graph_recall_scored
     lines = [
         f"- **Graph Recall** (advisory, unjudged): {_fmt(report.graph_recall)} over "
-        f"{scored} {'query' if scored == 1 else 'queries'} with expected entities"
+        f"{_plural(scored, 'query', 'queries')} with expected entities"
     ]
     lines += [
         f"  - {name}: {_fmt(rec)}" for name, rec in sorted(report.graph_recall_by_slice.items())

@@ -52,7 +52,7 @@ class AppConfig:
     # Jev Noul guardrail. None (the default) sends every chunk to Noul. Enable only with
     # Live Tier results; see docs/production-readiness.md.
     guardrail_skip_rerank_score: float | None = None
-    # Phase 5 experiment switches (spec #22; docs/production-readiness.md §6). Defaults keep
+    # Experiment Arm switches (spec #22; docs/production-readiness.md §6). Defaults keep
     # the measured behaviour. Graph triples in the generation prompt: on | off | relational
     graph_context_in_prompt: GraphContextMode = GraphContextMode.ON
     # Noul threshold for massive_context retrieval only; the other Routes keep the global one
@@ -94,17 +94,18 @@ def _optional_float(raw: str | None) -> float | None:
     return float(raw) if raw and raw.strip() else None
 
 
-_TRUE = frozenset({"1", "true", "yes", "on"})
-_FALSE = frozenset({"", "0", "false", "no", "off"})
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+# Unset or empty counts as false
+_FALSY_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
 
 
-def _bool(name: str) -> bool:
-    raw = os.environ.get(name, "").strip().lower()
-    if raw in _TRUE:
+def _bool(raw: str | None, *, name: str) -> bool:
+    value = (raw or "").strip().lower()
+    if value in _TRUTHY_ENV_VALUES:
         return True
-    if raw in _FALSE:
+    if value in _FALSY_ENV_VALUES:
         return False
-    raise ValueError(f"Invalid {name}: {raw!r}. Use true or false.")
+    raise ValueError(f"Invalid {name}: {value!r}. Use true or false.")
 
 
 def _graph_context_mode(raw: str | None) -> GraphContextMode:
@@ -154,7 +155,9 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         guardrail_massive_context_threshold=float(
             os.environ.get("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD") or DEFAULT_GUARDRAIL_THRESHOLD
         ),
-        guardrail_skip_massive_context=_bool("GUARDRAIL_SKIP_MASSIVE_CONTEXT"),
+        guardrail_skip_massive_context=_bool(
+            os.environ.get("GUARDRAIL_SKIP_MASSIVE_CONTEXT"), name="GUARDRAIL_SKIP_MASSIVE_CONTEXT"
+        ),
         eval_degraded_retry_delay=float(os.environ.get("EVAL_DEGRADED_RETRY_DELAY") or "5"),
     )
 

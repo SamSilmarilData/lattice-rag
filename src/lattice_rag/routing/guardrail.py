@@ -9,6 +9,7 @@ import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
 
 from lattice_rag.config import DEFAULT_GUARDRAIL_THRESHOLD
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -210,12 +211,12 @@ class RouteGuardrails:
     def __init__(
         self,
         default: ChunkGuardrail | None,
-        overrides: Mapping[str, ChunkGuardrail | None] | None = None,
+        overrides: Mapping[Route, ChunkGuardrail | None] | None = None,
     ) -> None:
         self.default = default
         self.overrides = dict(overrides or {})
 
-    def for_route(self, route: str) -> ChunkGuardrail | None:
+    def for_route(self, route: Route) -> ChunkGuardrail | None:
         return self.overrides.get(route, self.default)
 
     async def aclose(self) -> None:
@@ -256,7 +257,7 @@ def build_route_guardrails(
         )
 
     default = build(DEFAULT_GUARDRAIL_THRESHOLD)
-    overrides: dict[str, ChunkGuardrail | None] = {}
+    overrides: dict[Route, ChunkGuardrail | None] = {}
     if skip_massive_context:
         overrides["massive_context"] = None
     elif massive_context_threshold != DEFAULT_GUARDRAIL_THRESHOLD:

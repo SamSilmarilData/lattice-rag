@@ -502,8 +502,9 @@ def benchmark(
     "--force-hops",
     type=click.IntRange(1, 2),
     default=None,
-    help="Route ablation (#46): every non-chitchat query walks this many graph hops. "
-    "Route Accuracy still scores the router's own pick.",
+    help="Route ablation (#46): queries routed to vector_exact, hybrid or graph_relational "
+    "walk this many graph hops; massive_context keeps its own. Route Accuracy still scores "
+    "the router's own pick.",
 )
 @click.option(
     "--graph-context",
@@ -546,7 +547,7 @@ def run_eval(
         )
 
     click.echo(f"Evaluating dataset: {dataset} against baseline: {baseline}\n")
-    graph_mode = GraphContextMode(graph_context.lower()) if graph_context else None
+    graph_mode = GraphContextMode(graph_context) if graph_context else None
     if force_hops is not None or graph_mode is not None:
         click.echo(
             f"Experiment arm: force_hops={force_hops or 'per-route'} "

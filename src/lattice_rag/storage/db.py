@@ -113,9 +113,14 @@ def _clean(text: str) -> str:
     return " ".join(text.split())
 
 
+def normalize_entity_name(name: str) -> str:
+    """An Entity name (or type) as identity compares it: whitespace-collapsed, case-folded."""
+    return _clean(name).casefold()
+
+
 def entity_key(name: str, entity_type: str) -> tuple[str, str]:
-    """Canonical Entity identity: name plus type, whitespace-collapsed and case-folded."""
-    return _clean(name).casefold(), _clean(entity_type).casefold()
+    """Canonical Entity identity: name plus type, each normalized by ``normalize_entity_name``."""
+    return normalize_entity_name(name), normalize_entity_name(entity_type)
 
 
 class IngestValidationError(ValueError):

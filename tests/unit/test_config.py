@@ -110,7 +110,7 @@ def test_reranker_revision_is_pinned_unless_overridden(monkeypatch: pytest.Monke
     assert load_config(require_typesafe=False).reranker_onnx_revision == "abc123"
 
 
-# --- Phase 5 experiment switches (#47, #48) --------------------------------------------
+# --- Experiment Arm switches (#47, #48) ------------------------------------------------
 
 _PHASE5_VARS = (
     "GRAPH_CONTEXT_IN_PROMPT",

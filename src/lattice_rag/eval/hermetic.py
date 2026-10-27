@@ -45,6 +45,7 @@ from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline, RetrievalResult
 from lattice_rag.security import sanitize_error_detail
 from lattice_rag.storage.db import EntityData, LatticeStore, RelationData
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -146,7 +147,7 @@ class Retriever(Protocol):
     async def retrieve(
         self,
         query: str,
-        route: str = ...,
+        route: Route = ...,
         apply_guardrail: bool = ...,
         top_k: int = ...,
     ) -> RetrievalResult: ...

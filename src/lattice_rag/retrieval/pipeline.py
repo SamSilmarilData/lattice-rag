@@ -12,6 +12,7 @@ from lattice_rag.retrieval.vector_search import HybridSearcher
 from lattice_rag.routing.guardrail import RouteGuardrails
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import SubgraphResult
+from lattice_rag.vocabulary import Route
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,11 @@ class RetrievalPipeline:
             embedding_service: Service to generate embeddings and rerank.
             router_guardrail: Optional guardrail to filter chunks (ContextGuardrail), or a
                 :class:`RouteGuardrails` choosing one per Route.
-            forced_hops: Eval-only Route ablation (#46): every Route walks this many hops.
+            forced_hops: Eval-only Route ablation (#46): the three retrieval Routes walk this
+                many hops; ``massive_context`` keeps its own count.
         """
         self.store = store
         self.embedding_service = embedding_service
-        self.guardrail = router_guardrail
         self.guardrails = (
             router_guardrail
             if isinstance(router_guardrail, RouteGuardrails)
@@ -67,18 +68,18 @@ class RetrievalPipeline:
         self.reranker = PrecisionReranker(self.embedding_service)
 
     def with_store(self, store: Any) -> RetrievalPipeline:
-        """The same pipeline (guardrail, forced hops) over another store, e.g. an eval temp DB."""
+        """The same pipeline (per-Route guardrails, forced hops) over another store, e.g. an eval temp DB."""
         return RetrievalPipeline(
             store,
             self.embedding_service,
-            router_guardrail=self.guardrail,
+            router_guardrail=self.guardrails,
             forced_hops=self.forced_hops,
         )
 
     async def retrieve(
         self,
         query: str,
-        route: str = "hybrid",
+        route: Route = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
         budget: int = 25,
@@ -174,7 +175,7 @@ class RetrievalPipeline:
     async def execute(
         self,
         query: str,
-        route: str = "hybrid",
+        route: Route = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
         budget: int = 25,

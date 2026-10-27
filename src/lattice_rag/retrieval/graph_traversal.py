@@ -5,8 +5,12 @@ import asyncio
 import structlog
 
 from lattice_rag.storage.db import LatticeStore, SubgraphResult
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
+
+# The Routes the Route ablation (#46, ADR-0003) forces a hop count on
+ABLATED_ROUTES: frozenset[Route] = frozenset({"vector_exact", "graph_relational", "hybrid"})
 
 
 class GraphTraverser:
@@ -17,17 +21,24 @@ class GraphTraverser:
 
         Args:
             store: The LatticeDB store instance.
-            forced_hops: Walk this many hops on every Route instead of the per-Route count.
-                Eval-only: the Route ablation (#46, ADR-0003) sets it through
-                ``lattice-rag eval --force-hops``; the app never does.
+            forced_hops: Walk this many hops on the three retrieval Routes (``vector_exact``,
+                ``graph_relational``, ``hybrid``) instead of the per-Route count;
+                ``massive_context`` keeps its own. Eval-only: the Route ablation (#46,
+                ADR-0003) sets it through ``lattice-rag eval --force-hops``; the app never does.
         """
         if forced_hops is not None and forced_hops not in (1, 2):
             raise ValueError(f"forced_hops must be 1 or 2 hops, got {forced_hops}")
         self.store = store
         self.forced_hops = forced_hops
 
+    def _hops_for(self, route: Route) -> int:
+        """Per-Route hop count; the Route ablation overrides it except on massive_context."""
+        if self.forced_hops is not None and route in ABLATED_ROUTES:
+            return self.forced_hops
+        return 2 if route == "graph_relational" else 1
+
     async def traverse(
-        self, anchor_node_ids: list[int], route: str, budget: int = 25
+        self, anchor_node_ids: list[int], route: Route, budget: int = 25
     ) -> SubgraphResult:
         """Traverse the graph starting from entity nodes connected to anchor chunks.
 
@@ -42,8 +53,7 @@ class GraphTraverser:
         if not anchor_node_ids:
             return SubgraphResult(nodes=[], edges=[])
 
-        # Determine max_hops based on route, unless the Route ablation forces it
-        max_hops = self.forced_hops or (2 if route == "graph_relational" else 1)
+        max_hops = self._hops_for(route)
 
         # Extract entity IDs from anchor chunks in rank order
         entity_ids = await asyncio.to_thread(

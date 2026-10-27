@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Choice
@@ -95,7 +95,7 @@ _ROUTER_CRITERIA: Final[dict[str, str]] = {
 
 @dataclass(frozen=True)
 class RouteDecision:
-    route: str
+    route: Route
     confidence: float
     # False when the route is a fallback because the Jev check could not run
     verified: bool = True
@@ -191,7 +191,7 @@ class QueryRouter:
 
             confidence = float(getattr(choice_result, "confidence", 1.0))
             decision = RouteDecision(
-                route=chosen_route,
+                route=cast("Route", chosen_route),  # checked against _ROUTER_CRITERIA above
                 confidence=confidence,
             )
             logger.info("Query routed", route=decision.route, confidence=decision.confidence)
