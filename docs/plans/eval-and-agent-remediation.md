@@ -9,7 +9,7 @@ The Live Tier run passed 23/30 queries and failed its own gate on per-query floo
 - **Generation:** Groq `max_tokens=256` truncates broad answers (eval_20, eval_29). `massive_context` has no Groq fallback when Gemini fails (eval_28, eval_30).
 - **Routing:** Route Accuracy is 17/27 (63%). Nothing measures it, and confidence is ignored.
 - **Eval validity:** the judge does not see the graph triples the generator saw. Correct refusals are penalised on relevance. Provider fallbacks are scored as answers.
-- **Gold Set:** 5 Documents and 10 Chunks, so Hermetic recall is 1.0 on every Slice. The unanswerable rerank ceiling separates nothing. `expected_entities` is never read. Some reference answers claim reranker behaviour the code does not have (eval_04, eval_21).
+- **Gold Set:** an arbitrarily assembled corpus of 5 hand-written Documents and 10 Chunks, chosen for convenience rather than drawn from a defined source, so Hermetic recall is 1.0 on every Slice. The unanswerable rerank ceiling separates nothing. `expected_entities` is never read. Some reference answers claim reranker behaviour the code does not have (eval_04, eval_21).
 
 ## Phases
 
