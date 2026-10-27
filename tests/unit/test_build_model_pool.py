@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.config import AppConfig, ModelSpec
-from lattice_rag.generation.gemini_fallback import GeminiFallback
+from lattice_rag.generation.gemini_synthesizer import GeminiSynthesizer
 from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.generation.model_pool import build_model_pool
 from lattice_rag.security import SecretStr
+from lattice_rag.vocabulary import GenerationProvider
 
 
 def _config(*pool: ModelSpec, **overrides) -> AppConfig:
@@ -32,9 +32,9 @@ def _config(*pool: ModelSpec, **overrides) -> AppConfig:
 def test_pool_members_follow_the_configured_order_with_their_adapters():
     pool = build_model_pool(
         _config(
-            ModelSpec("groq", "qwen/qwen3.8-27b"),
-            ModelSpec("groq", "openai/gpt-oss-120b"),
-            ModelSpec("gemini", "gemini-3.5-flash-lite"),
+            ModelSpec(GenerationProvider.GROQ, "qwen/qwen3.8-27b"),
+            ModelSpec(GenerationProvider.GROQ, "openai/gpt-oss-120b"),
+            ModelSpec(GenerationProvider.GEMINI, "gemini-3.5-flash-lite"),
         )
     )
 
@@ -44,7 +44,7 @@ def test_pool_members_follow_the_configured_order_with_their_adapters():
         (GenerationProvider.GEMINI, "gemini-3.5-flash-lite"),
     ]
     assert isinstance(pool[0].client, GroqSynthesizer)
-    assert isinstance(pool[2].client, GeminiFallback)
+    assert isinstance(pool[2].client, GeminiSynthesizer)
     for member in pool:
         assert member.client.model == member.model
         assert member.client.timeout_seconds == 7.0
@@ -75,7 +75,7 @@ def _gemini_client() -> MagicMock:
 )
 async def test_gemini_sends_its_thinking_setting_on_both_paths(thinking, expected):
     client = _gemini_client()
-    gemini = GeminiFallback(client=client, model="gemini-x", thinking=thinking)
+    gemini = GeminiSynthesizer(client=client, model="gemini-x", thinking=thinking)
 
     await gemini.synthesize("q", [])
     _ = [t async for t in gemini.stream("q", [])]

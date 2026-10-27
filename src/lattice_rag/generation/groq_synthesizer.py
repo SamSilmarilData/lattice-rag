@@ -15,8 +15,8 @@ from lattice_rag.config import (
     DEFAULT_LLM_TIMEOUT_SECONDS,
 )
 from lattice_rag.generation.prompt import build_messages
+from lattice_rag.generation.provider_call import describe_failure, timed_chunks
 from lattice_rag.generation.resilient_synthesizer import ProviderOutcome
-from lattice_rag.security import sanitize_error_detail
 
 logger = structlog.get_logger(__name__)
 
@@ -56,11 +56,6 @@ class GroqSynthesizer:
             self.client = AsyncGroq(api_key=resolved_key, max_retries=0, timeout=timeout_seconds)
         else:
             self.client = None
-
-    def _describe_failure(self, error: Exception) -> str:
-        if isinstance(error, TimeoutError):
-            return f"timed out after {self.timeout_seconds:g}s"
-        return sanitize_error_detail(str(error))
 
     def _require_client(self) -> AsyncGroq:
         if self.client is None:
@@ -106,7 +101,7 @@ class GroqSynthesizer:
                 timeout=self.timeout_seconds,
             )
         except Exception as e:
-            sanitized_error = self._describe_failure(e)
+            sanitized_error = describe_failure(e, self.timeout_seconds)
             logger.error("groq_synthesis_failed", model=self.model, error=sanitized_error)
             raise RuntimeError(f"Groq synthesis failed: {sanitized_error}") from e
         if response.choices[0].finish_reason == "length" and outcome is not None:
@@ -139,12 +134,7 @@ class GroqSynthesizer:
                 ),
                 timeout=self.timeout_seconds,
             )
-            chunks = aiter(response)
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(anext(chunks), timeout=self.timeout_seconds)
-                except StopAsyncIteration:
-                    break
+            async for chunk in timed_chunks(response, self.timeout_seconds):
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
                 if (
@@ -154,6 +144,6 @@ class GroqSynthesizer:
                 ):
                     outcome.truncated = True
         except Exception as e:
-            sanitized_error = self._describe_failure(e)
+            sanitized_error = describe_failure(e, self.timeout_seconds)
             logger.error("groq_stream_synthesis_failed", model=self.model, error=sanitized_error)
             raise RuntimeError(f"Groq stream synthesis failed: {sanitized_error}") from e

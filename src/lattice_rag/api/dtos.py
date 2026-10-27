@@ -6,6 +6,9 @@ from typing import Annotated, Any
 
 import msgspec
 
+# Lives in ``vocabulary`` so generation never imports the API layer; re-exported for the
+# wire DTOs that carry it.
+from lattice_rag.vocabulary import GenerationProvider as GenerationProvider
 from lattice_rag.vocabulary import (  # noqa: TC001  (msgspec resolves annotations at runtime)
     Route,
     Slice,
@@ -218,23 +221,19 @@ class IngestResponse(msgspec.Struct, rename="camel"):
 
 
 class CacheStatsResponse(msgspec.Struct, rename="camel"):
-    """Response DTO for cache statistics."""
+    """Response DTO for cache statistics.
+
+    ``tier2_circuit_status`` combines the Model Pool's per-member circuit breakers (shared
+    by /query and /query/stream): ``closed`` when every breaker is closed, ``open`` when
+    every one is open, and ``partially_open`` when they disagree (some members are being
+    skipped while others still answer).
+    """
 
     tier1_hits: int
     tier1_misses: int
     tier1_cached_queries: int
     tier2_circuit_status: str
     tier2_cached_queries: int
-
-
-class GenerationProvider(StrEnum):
-    """Who generated an answer: a Groq or Gemini Model Pool member, the Tier 2 FAQ, or the
-    offline message."""
-
-    GROQ = "groq"
-    GEMINI = "gemini"
-    REDIS_FAQ = "redis_faq"
-    OFFLINE = "offline"
 
 
 class EvalQueryError(StrEnum):

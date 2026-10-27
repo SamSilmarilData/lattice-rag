@@ -10,6 +10,7 @@ import pytest
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
+from tests.unit.pool_helpers import pool_of
 
 
 @pytest.fixture
@@ -77,8 +78,7 @@ async def test_unified_orchestrator_chitchat_parity(mock_orchestrator_components
         semantic_cache=c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )
@@ -115,8 +115,7 @@ async def test_unified_orchestrator_cache_hit_parity(mock_orchestrator_component
         semantic_cache=c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )
@@ -140,8 +139,7 @@ async def test_unified_orchestrator_standard_query_parity(mock_orchestrator_comp
         semantic_cache=c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )
@@ -241,8 +239,7 @@ async def test_unified_orchestrator_low_grounding_is_reported_and_not_cached(
         semantic_cache=c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )
@@ -275,8 +272,7 @@ async def test_massive_context_retrieves_more_evidence_in_both_paths(mock_orches
         semantic_cache=c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )
@@ -294,8 +290,7 @@ def _orchestrator(c, semantic_cache=None):
         semantic_cache=semantic_cache if semantic_cache is not None else c["semantic_cache"],
         fallback_cache=c["fallback_cache"],
         retrieval_pipeline=c["pipeline"],
-        groq=c["groq"],
-        gemini=c["gemini"],
+        pool=pool_of(groq=c["groq"], gemini=c["gemini"]),
         chitchat=c["chitchat"],
         embedding_service=c["embed_svc"],
     )

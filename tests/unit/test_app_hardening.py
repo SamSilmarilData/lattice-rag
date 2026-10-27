@@ -41,8 +41,9 @@ async def test_app_boots_without_llm_keys(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_lifespan_gives_every_pool_member_the_llm_timeout(tmp_path):
     from lattice_rag.config import ModelSpec
+    from lattice_rag.vocabulary import GenerationProvider
 
-    pool = (ModelSpec("groq", "a"), ModelSpec("gemini", "g", "0"))
+    pool = (ModelSpec(GenerationProvider.GROQ, "a"), ModelSpec(GenerationProvider.GEMINI, "g", "0"))
     app = create_app(_config(tmp_path, llm_timeout_seconds=9.0, llm_pool=pool))
     async with AsyncTestClient(app):
         members = app.state.orchestrator.pool

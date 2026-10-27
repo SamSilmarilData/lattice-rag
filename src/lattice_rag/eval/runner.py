@@ -27,7 +27,7 @@ from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore, normalize_entity_name
 from lattice_rag.storage.extract import EntityExtractor
-from lattice_rag.vocabulary import Route
+from lattice_rag.vocabulary import Route, answered_by
 
 logger = structlog.get_logger(__name__)
 
@@ -251,7 +251,7 @@ class EvalRunner:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
             status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {answered_by(res) or '-'} "
+                f"| {q_short} | {answered_by(res.provider, res.model) or '-'} "
                 f"| {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
                 f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
@@ -397,16 +397,9 @@ def _graph_recall(queries: list[GoldQuery], results: list[EvalQueryResult]) -> d
     }
 
 
-def answered_by(result: EvalQueryResult) -> str | None:
-    """``provider:model`` for a Model Pool answer, the provider alone for the FAQ/offline."""
-    if result.provider is None:
-        return None
-    return f"{result.provider}:{result.model}" if result.model else str(result.provider)
-
-
 def model_mix(results: list[EvalQueryResult]) -> dict[str, int]:
-    """Answers per model (see :func:`answered_by`), most answers first."""
-    counts = Counter(who for r in results if (who := answered_by(r)) is not None)
+    """Answers per model (see :func:`lattice_rag.vocabulary.answered_by`), most answers first."""
+    counts = Counter(who for r in results if (who := answered_by(r.provider, r.model)) is not None)
     return dict(counts.most_common())
 
 

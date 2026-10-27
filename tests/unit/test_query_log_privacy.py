@@ -34,6 +34,7 @@ from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog
+from tests.unit.pool_helpers import pool_of
 
 pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
@@ -89,8 +90,7 @@ def _build_app(
         semantic_cache=SemanticCache(),
         fallback_cache=fallback_cache,
         retrieval_pipeline=RetrievalPipeline(store, embed_svc),
-        groq=groq,
-        gemini=MagicMock(),
+        pool=pool_of(groq=groq, gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed_svc,
     )

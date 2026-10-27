@@ -21,6 +21,7 @@ from lattice_rag.routing.guardrail import GuardrailResult, build_route_guardrail
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SearchResult, SubgraphResult
 from lattice_rag.vocabulary import GraphContextMode
+from tests.unit.pool_helpers import pool_of
 
 ROUTES = ["hybrid", "massive_context"]
 
@@ -110,8 +111,7 @@ def _orchestrator(
         semantic_cache=cache,
         fallback_cache=MagicMock(),
         retrieval_pipeline=pipeline,
-        groq=groq or _Groq(),
-        gemini=groq or _Groq(),
+        pool=pool_of(groq=groq or _Groq(), gemini=groq or _Groq()),
         chitchat=MagicMock(),
         embedding_service=embed,
         **orchestrator_kwargs,

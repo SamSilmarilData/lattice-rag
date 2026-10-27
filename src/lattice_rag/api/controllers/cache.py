@@ -34,7 +34,8 @@ class CacheController(Controller):
         tier1_hits, tier1_misses = semantic_cache.stats
         tier1_count = len(semantic_cache)
 
-        # The Groq circuit breaker guarding generation (shared by /query and /query/stream)
+        # Combined status of the per-member Model Pool breakers (shared by /query and
+        # /query/stream): closed, open, or partially_open when members disagree
         circuit_status = orchestrator.synthesizer.circuit_status
         tier2_count = await fallback_cache.cached_query_count()
 

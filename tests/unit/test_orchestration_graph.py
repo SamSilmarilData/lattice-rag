@@ -9,6 +9,13 @@ import pytest
 
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
+from tests.unit.pool_helpers import pool_of
+
+
+def _orchestrator(deps):
+    """Wire the fixture's adapters as a Groq-then-Gemini Model Pool."""
+    others = {k: v for k, v in deps.items() if k not in ("groq", "gemini")}
+    return RAGOrchestrator(pool=pool_of(groq=deps["groq"], gemini=deps["gemini"]), **others)
 
 
 @pytest.fixture
@@ -66,7 +73,7 @@ async def test_orchestrator_cache_hit_short_circuit(mock_dependencies):
         "sources": [{"doc_id": "doc_cached"}],
     }
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     result = await orchestrator.run("What is LatticeDB?")
 
     assert result.cache_hit is True
@@ -80,7 +87,7 @@ async def test_orchestrator_chitchat_route(mock_dependencies):
     deps = mock_dependencies
     deps["router"].route_query.return_value = RouteDecision(route="chitchat", confidence=1.0)
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     result = await orchestrator.run("hello there")
 
     assert result.route == "chitchat"
@@ -93,7 +100,7 @@ async def test_orchestrator_chitchat_route(mock_dependencies):
 async def test_orchestrator_standard_groq_generation(mock_dependencies):
     deps = mock_dependencies
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     result = await orchestrator.run("Explain LatticeDB HNSW search")
 
     assert result.route == "hybrid"
@@ -111,7 +118,7 @@ async def test_orchestrator_falls_through_to_gemini_as_a_normal_cached_answer(mo
     deps["groq"].synthesize.side_effect = RuntimeError("Groq 429 Rate Limit")
     deps["gemini"].synthesize.return_value = "Gemini answer."
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     result = await orchestrator.run("Explain LatticeDB")
 
     assert result.answer == "Gemini answer."
@@ -129,7 +136,7 @@ async def test_orchestrator_double_failover_to_redis_faq(mock_dependencies):
     deps["gemini"].synthesize.side_effect = RuntimeError("Gemini Outage")
     deps["fallback_cache"].find_closest_fallback.return_value = "Redis FAQ Answer"
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     result = await orchestrator.run("What is LatticeDB?")
 
     assert result.answer == "Redis FAQ Answer"
@@ -147,7 +154,7 @@ async def test_orchestrator_stream_query_events(mock_dependencies):
 
     deps["groq"].stream = mock_groq_stream
 
-    orchestrator = RAGOrchestrator(**deps)
+    orchestrator = _orchestrator(deps)
     events = []
     async for event in orchestrator.stream_query("Stream test"):
         events.append(event)
