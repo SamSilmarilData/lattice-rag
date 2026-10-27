@@ -143,10 +143,15 @@ class QueryResponse(msgspec.Struct, rename="camel"):
     sources: list[SourceChunk] = []
     graph_path: SubgraphDTO | None = None
     timings: list[StageTiming] = []
+    # True only when no Model Pool member gave a complete answer (FAQ / offline message)
     degraded: bool = False
     low_grounding: bool = False
     # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
     unverified: bool = False
+    # Who answered: a Model Pool member (provider + model), the FAQ (model null), or
+    # nobody (null: chitchat, cache hit)
+    provider: GenerationProvider | None = None
+    model: str | None = None
 
 
 # ── Server-Sent Event payloads for POST /api/v1/query/stream ─────────────────
@@ -181,6 +186,8 @@ class StreamDone(msgspec.Struct, rename="camel"):
     low_grounding: bool = False
     # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
     unverified: bool = False
+    provider: GenerationProvider | None = None
+    model: str | None = None
 
 
 class StreamError(msgspec.Struct, rename="camel"):
@@ -221,7 +228,8 @@ class CacheStatsResponse(msgspec.Struct, rename="camel"):
 
 
 class GenerationProvider(StrEnum):
-    """Who generated an answer: Groq, Gemini, the Tier 2 FAQ, or the offline message."""
+    """Who generated an answer: a Groq or Gemini Model Pool member, the Tier 2 FAQ, or the
+    offline message."""
 
     GROQ = "groq"
     GEMINI = "gemini"
@@ -259,6 +267,8 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     # Provider that generated the answer; None when nothing was generated
     # (pipeline error, chitchat, cache hit)
     provider: GenerationProvider | None = None
+    # Model Pool member's model that answered; None for the FAQ or when nothing was generated
+    model: str | None = None
     # Graph Recall: share of the query's expected entities among the graph context's
     # Entities. None when the query lists none or the pipeline failed. Never judged.
     graph_recall: float | None = None
@@ -305,6 +315,9 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     graph_recall: float | None = None
     graph_recall_by_slice: dict[str, float] = {}
     graph_recall_scored: int = 0
+    # Model mix: answers per Model Pool member (``provider:model``), plus the FAQ /
+    # offline fallback under its provider name. Queries with no generation are not counted.
+    answers_by_model: dict[str, int] = {}
 
 
 class EvalJobStatus(StrEnum):

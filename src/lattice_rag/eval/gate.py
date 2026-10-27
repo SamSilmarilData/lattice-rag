@@ -15,7 +15,8 @@ every threshold the gate applies, so the gate's rules are visible in one place:
                          "answer_relevance": float, "answer_correctness": float}},
   "measurement": {                                   # optional; written by measure-baseline
      "runs": [{metric: mean}, ...], "means": {...}, "stdev": {...},
-     "tolerance": float, "tolerance_rule": str, "measured_at": str, "notes": str}}
+     "tolerance": float, "tolerance_rule": str, "measured_at": str,
+     "notes": str}}                                  # notes: the runs' Model Pool mix
 ```
 
 ``metrics`` and ``max_regression_delta`` come from ``measurement`` (``lattice-rag
@@ -28,6 +29,7 @@ from __future__ import annotations
 import json
 import math
 import statistics
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
@@ -127,8 +129,24 @@ def measure(reports: Sequence[EvalRunResponse], measured_at: str = "") -> Measur
     widest = TOLERANCE_SIGMAS * max(stdev.values(), default=0.0)
     tolerance = max(MIN_TOLERANCE, math.ceil(round(widest * 100, 6)) / 100)
     return Measurement(
-        runs=runs, means=means, stdev=stdev, tolerance=tolerance, measured_at=measured_at
+        runs=runs,
+        means=means,
+        stdev=stdev,
+        tolerance=tolerance,
+        measured_at=measured_at,
+        notes=_model_mix_note(reports),
     )
+
+
+def _model_mix_note(reports: Sequence[EvalRunResponse]) -> str:
+    """Which models answered across the runs, so a baseline says what it measured."""
+    mix: Counter[str] = Counter()
+    for report in reports:
+        mix.update(report.answers_by_model)
+    if not mix:
+        return ""
+    counts = ", ".join(f"{who} {n}" for who, n in mix.most_common())
+    return f"Model mix over {len(reports)} runs: {counts}"
 
 
 def load_baseline(path: str | Path) -> Baseline:

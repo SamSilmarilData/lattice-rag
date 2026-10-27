@@ -105,38 +105,38 @@ def _gemini_budget(client: MagicMock) -> int:
 
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
 async def test_massive_context_answer_budget_exceeds_default(entry_point):
-    gem = _gemini_client()
+    # Same pool order on every Route (ADR-0004): Groq answers massive_context first
+    groq = _groq_client()
     orch = _orchestrator(
-        "massive_context", GroqSynthesizer(client=_groq_client()), GeminiFallback(client=gem)
+        "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=_gemini_client())
     )
     await _ask(orch, entry_point)
-    assert _gemini_budget(gem) == 1536
+    assert _groq_budget(groq) == 1536
 
 
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
 async def test_massive_context_budget_never_falls_below_a_larger_default(entry_point):
-    gem = _gemini_client()
+    groq = _groq_client()
     orch = _orchestrator(
         "massive_context",
-        GroqSynthesizer(client=_groq_client(), max_tokens=2000),
-        GeminiFallback(client=gem, max_output_tokens=2000),
+        GroqSynthesizer(client=groq, max_tokens=2000),
+        GeminiFallback(client=_gemini_client(), max_output_tokens=2000),
         answer_max_tokens=2000,
     )
     await _ask(orch, entry_point)
-    assert _gemini_budget(gem) == 2000
+    assert _groq_budget(groq) == 2000
 
 
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
-async def test_massive_context_groq_fallback_keeps_the_larger_budget(entry_point):
-    groq = _groq_client()
+async def test_massive_context_next_member_keeps_the_larger_budget(entry_point):
+    gem = _gemini_client()
     broken = MagicMock()
-    broken.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("down"))
-    broken.aio.models.generate_content_stream = MagicMock(side_effect=RuntimeError("down"))
+    broken.chat.completions.create = AsyncMock(side_effect=RuntimeError("down"))
     orch = _orchestrator(
-        "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=broken)
+        "massive_context", GroqSynthesizer(client=broken), GeminiFallback(client=gem)
     )
     await _ask(orch, entry_point)
-    assert _groq_budget(groq) == 1536
+    assert _gemini_budget(gem) == 1536
 
 
 @pytest.mark.parametrize("entry_point", ["run", "stream"])
@@ -185,9 +185,11 @@ async def test_length_stop_is_logged_once_by_the_synthesizer(entry_point, provid
             GeminiFallback(client=_gemini_client()),
         )
     else:
+        broken = MagicMock()
+        broken.chat.completions.create = AsyncMock(side_effect=RuntimeError("down"))
         orch = _orchestrator(
             "massive_context",
-            GroqSynthesizer(client=_groq_client()),
+            GroqSynthesizer(client=broken),
             GeminiFallback(client=_gemini_client("MAX_TOKENS")),
         )
     caplog.set_level(logging.WARNING)
@@ -210,15 +212,19 @@ async def test_normal_stop_is_not_logged(entry_point, caplog):
     assert not _truncation_records(caplog)
 
 
-async def test_gemini_failing_after_first_token_on_massive_context_ends_with_error():
-    gem = MagicMock()
+async def test_groq_failing_after_first_token_on_massive_context_ends_with_error():
+    groq = MagicMock()
 
-    async def stream(**kwargs):
-        yield SimpleNamespace(text="Partial", candidates=[])
-        raise RuntimeError("gemini dropped")
+    async def create(**kwargs):
+        async def gen():
+            delta = SimpleNamespace(content="Partial")
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=None)])
+            raise RuntimeError("groq dropped")
 
-    gem.aio.models.generate_content_stream = MagicMock(side_effect=stream)
-    groq = _groq_client()
+        return gen()
+
+    groq.chat.completions.create = AsyncMock(side_effect=create)
+    gem = _gemini_client()
     orch = _orchestrator(
         "massive_context", GroqSynthesizer(client=groq), GeminiFallback(client=gem)
     )
@@ -229,7 +235,7 @@ async def test_gemini_failing_after_first_token_on_massive_context_ends_with_err
     assert "error" in kinds
     tokens = [e["data"]["delta"] for e in events if e["event"] == "token"]
     assert tokens == ["Partial"]
-    groq.chat.completions.create.assert_not_called()
+    gem.aio.models.generate_content_stream.assert_not_called()
     assert events[-1]["data"]["degraded"] is True
 
 

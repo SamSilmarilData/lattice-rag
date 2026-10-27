@@ -17,8 +17,7 @@ from lattice_rag.caching.semantic_cache import SemanticCache
 from lattice_rag.config import get_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.generation.chitchat import ChitchatHandler
-from lattice_rag.generation.gemini_fallback import GeminiFallback
-from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+from lattice_rag.generation.model_pool import build_model_pool
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
@@ -82,14 +81,6 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
     fb_cache = FallbackCache(redis_url="embedded")
     await fb_cache.connect()
 
-    groq = GroqSynthesizer(
-        api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-        model=config.groq_model,
-    )
-    gemini = GeminiFallback(
-        api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-        model=config.gemini_model,
-    )
     chitchat = ChitchatHandler()
     pipeline = RetrievalPipeline(store, embed_svc, guardrail)
     orchestrator = RAGOrchestrator(
@@ -97,8 +88,7 @@ async def test_live_phase5_eval_runner_flow(tmp_path: Path):
         semantic_cache=sem_cache,
         fallback_cache=fb_cache,
         retrieval_pipeline=pipeline,
-        groq=groq,
-        gemini=gemini,
+        pool=build_model_pool(config),
         chitchat=chitchat,
         embedding_service=embed_svc,
     )

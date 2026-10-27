@@ -10,7 +10,11 @@ import structlog
 from google import genai
 from google.genai import types
 
-from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS, DEFAULT_LLM_TIMEOUT_SECONDS
+from lattice_rag.config import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_LLM_TIMEOUT_SECONDS,
+)
 from lattice_rag.generation.prompt import build_messages
 from lattice_rag.generation.resilient_synthesizer import ProviderOutcome
 from lattice_rag.security import sanitize_error_detail
@@ -19,25 +23,31 @@ logger = structlog.get_logger(__name__)
 
 
 class GeminiFallback:
-    """Gemini Flash fallback for massive cross-document context and circuit breaker cascade."""
+    """Gemini provider adapter for one Model Pool member."""
 
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-3.8-flash",
+        model: str = DEFAULT_GEMINI_MODEL,
         max_output_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         client: genai.Client | None = None,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS,
+        thinking: str | None = None,
     ) -> None:
         """Initializes the Gemini genai client with configurable model and API key.
 
         Without a key (argument, GEMINI_API_KEY or GOOGLE_API_KEY) the client stays unset
-        and every call raises, so the cascade degrades instead of failing boot.
+        and every call raises, so the pool falls through instead of failing boot.
 
         ``timeout_seconds`` bounds each call: the whole buffered request, and each chunk
         (the first included) of a stream. A timeout raises like any provider failure.
+
+        ``thinking`` is sent as the request's thinking config so thinking does not eat the
+        answer budget: digits are a ``thinking_budget`` (``"0"`` turns thinking off), a
+        name is a ``thinking_level``. ``None`` sends none (see ``default_gemini_thinking``).
         """
         self.model = model
+        self.thinking = thinking
         self.max_output_tokens = max_output_tokens
         self.timeout_seconds = timeout_seconds
         resolved_key = (
@@ -63,6 +73,21 @@ class GeminiFallback:
         if isinstance(error, TimeoutError):
             return f"timed out after {self.timeout_seconds:g}s"
         return sanitize_error_detail(str(error))
+
+    def _request_config(
+        self, system: str, max_tokens: int | None
+    ) -> types.GenerateContentConfigDict:
+        config: types.GenerateContentConfigDict = {
+            "system_instruction": system,
+            "max_output_tokens": self.max_output_tokens if max_tokens is None else max_tokens,
+        }
+        if self.thinking is not None:
+            config["thinking_config"] = (
+                {"thinking_budget": int(self.thinking)}
+                if self.thinking.isdigit()
+                else {"thinking_level": types.ThinkingLevel(self.thinking.upper())}
+            )
+        return config
 
     @staticmethod
     def _hit_token_cap(response: Any) -> bool:
@@ -90,12 +115,7 @@ class GeminiFallback:
                 client.aio.models.generate_content(
                     model=self.model,
                     contents=prompt.user,
-                    config={
-                        "system_instruction": prompt.system,
-                        "max_output_tokens": (
-                            self.max_output_tokens if max_tokens is None else max_tokens
-                        ),
-                    },
+                    config=self._request_config(prompt.system, max_tokens),
                 ),
                 timeout=self.timeout_seconds,
             )
@@ -125,12 +145,7 @@ class GeminiFallback:
             stream_result: Any = client.aio.models.generate_content_stream(
                 model=self.model,
                 contents=prompt.user,
-                config={
-                    "system_instruction": prompt.system,
-                    "max_output_tokens": (
-                        self.max_output_tokens if max_tokens is None else max_tokens
-                    ),
-                },
+                config=self._request_config(prompt.system, max_tokens),
             )
             if inspect.isawaitable(stream_result):
                 stream_result = await asyncio.wait_for(stream_result, timeout=self.timeout_seconds)

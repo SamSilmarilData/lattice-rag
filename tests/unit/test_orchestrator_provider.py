@@ -30,11 +30,20 @@ class FakeGroq:
 
 
 class FakeGemini:
+    model = "gemini-3.5-flash-lite"
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+
     async def synthesize(self, query, chunks, graph, **kwargs):
+        if self.fail:
+            raise RateLimitError("503 high demand")
         return "Gemini answer."
 
 
-def _orchestrator(*, groq_fails: bool = False, route: str = "hybrid") -> RAGOrchestrator:
+def _orchestrator(
+    *, groq_fails: bool = False, gemini_fails: bool = False, route: str = "hybrid"
+) -> RAGOrchestrator:
     router = MagicMock()
     router.route_query = AsyncMock(return_value=RouteDecision(route=route, confidence=0.9))
     cache = MagicMock()
@@ -53,13 +62,15 @@ def _orchestrator(*, groq_fails: bool = False, route: str = "hybrid") -> RAGOrch
     chitchat.handle = AsyncMock(return_value="Hello!")
     embed = MagicMock()
     embed.embed_query = MagicMock(return_value=np.ones(384, dtype=np.float32))
+    faq = MagicMock()
+    faq.find_closest_fallback = AsyncMock(return_value="FAQ answer.")
     return RAGOrchestrator(
         router=router,
         semantic_cache=cache,
-        fallback_cache=MagicMock(),
+        fallback_cache=faq,
         retrieval_pipeline=retrieval,
-        groq=FakeGroq(fail=groq_fails),  # type: ignore[arg-type]
-        gemini=FakeGemini(),  # type: ignore[arg-type]
+        groq=FakeGroq(fail=groq_fails),
+        gemini=FakeGemini(fail=gemini_fails),
         chitchat=chitchat,
         embedding_service=embed,
     )
@@ -71,10 +82,10 @@ async def test_healthy_groq_answer_records_groq():
     assert state.degraded is False
 
 
-async def test_groq_rate_limit_cascades_to_degraded_gemini():
+async def test_groq_rate_limit_falls_through_to_an_attributed_gemini_answer():
     state = await _orchestrator(groq_fails=True).run("q", use_cache=False)
-    assert state.provider is GenerationProvider.GEMINI
-    assert state.degraded is True
+    assert (state.provider, state.model) == (GenerationProvider.GEMINI, "gemini-3.5-flash-lite")
+    assert state.degraded is False
     assert state.answer == "Gemini answer."
 
 
@@ -131,7 +142,24 @@ def files(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @pytest.mark.usefixtures("small_gold_sets")
-async def test_live_tier_fails_a_persistent_groq_rate_limit_as_provider_degraded(files):
+async def test_live_tier_fails_a_query_no_pool_member_answered_as_provider_degraded(files):
+    evaluator = AsyncMock()
+    evaluator.evaluate_query.return_value = EvalQueryResult(query="Q one", passed=True)
+    runner = EvalRunner(
+        _orchestrator(groq_fails=True, gemini_fails=True), evaluator, sleep=AsyncMock()
+    )
+
+    resp = await runner.run_evaluation(*files)
+
+    res = resp.results[0]
+    assert res.error is EvalQueryError.PROVIDER_DEGRADED
+    assert (res.provider, res.model) == (GenerationProvider.REDIS_FAQ, None)
+    assert res.passed is False
+    evaluator.evaluate_query.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("small_gold_sets")
+async def test_live_tier_judges_a_later_pool_members_answer_and_counts_its_model(files):
     evaluator = AsyncMock()
     evaluator.evaluate_query.return_value = EvalQueryResult(query="Q one", passed=True)
     runner = EvalRunner(_orchestrator(groq_fails=True), evaluator, sleep=AsyncMock())
@@ -139,7 +167,8 @@ async def test_live_tier_fails_a_persistent_groq_rate_limit_as_provider_degraded
     resp = await runner.run_evaluation(*files)
 
     res = resp.results[0]
-    assert res.error is EvalQueryError.PROVIDER_DEGRADED
-    assert res.provider is GenerationProvider.GEMINI
-    assert res.passed is False
-    evaluator.evaluate_query.assert_not_awaited()
+    assert res.error is None
+    assert (res.provider, res.model) == (GenerationProvider.GEMINI, "gemini-3.5-flash-lite")
+    evaluator.evaluate_query.assert_awaited_once()
+    assert resp.answers_by_model == {"gemini:gemini-3.5-flash-lite": 1}
+    assert "gemini:gemini-3.5-flash-lite" in EvalRunner.format_markdown_report(resp)

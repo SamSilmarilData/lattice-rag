@@ -101,10 +101,11 @@ lattice-rag/
 │   │   ├── reranker.py          # Stage 3: Cross-encoder precision reranking
 │   │   └── pipeline.py          # RetrievalPipeline (alias HybridRetriever): 3 stages + guardrail
 │   ├── generation/
-│   │   ├── resilient_synthesizer.py # Single generation path: Groq circuit breaker -> Gemini -> Redis FAQ
+│   │   ├── resilient_synthesizer.py # Single generation path: Model Pool (breaker per member) -> Redis FAQ
+│   │   ├── model_pool.py        # Builds the Model Pool from LLM_POOL (ADR-0004)
 │   │   ├── prompt.py            # Shared grounded prompt with delimited, untrusted evidence
-│   │   ├── groq_synthesizer.py  # Primary Groq streaming generator (qwen/qwen3.8-27b @ 200+ tok/s)
-│   │   ├── gemini_fallback.py   # Context fallback generator (gemini-3.8-flash)
+│   │   ├── groq_synthesizer.py  # Groq pool-member adapter (qwen/qwen3.8-27b, openai/gpt-oss-120b)
+│   │   ├── gemini_fallback.py   # Gemini pool-member adapter (gemini-3.5-flash-lite)
 │   │   └── chitchat.py          # Instant deterministic conversational handler
 │   ├── orchestration/
 │   │   ├── state.py             # PipelineState (buffered run() result)

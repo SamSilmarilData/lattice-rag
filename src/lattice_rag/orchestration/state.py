@@ -38,9 +38,13 @@ class PipelineState:
 
     # --- Generation ---
     answer: str = ""
+    # True only when no Model Pool member gave a complete answer (FAQ / offline message,
+    # or a stream cut off mid-answer)
     degraded: bool = False
     # Provider that generated the answer; None when nothing was generated (chitchat, cache hit)
     provider: GenerationProvider | None = None
+    # Model Pool member's model that answered; None for the FAQ, chitchat and cache hits
+    model: str | None = None
 
     # --- Telemetry ---
     timings: list[dict[str, Any]] = field(default_factory=list)

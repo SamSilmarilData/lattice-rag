@@ -34,6 +34,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
   const [degraded, setDegraded] = useState(false);
   const [lowGrounding, setLowGrounding] = useState(false);
   const [unverified, setUnverified] = useState(false);
+  const [answeredBy, setAnsweredBy] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
   // Dynamic Token Velocity Meter State
@@ -67,6 +68,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
     setDegraded(false);
     setLowGrounding(false);
     setUnverified(false);
+    setAnsweredBy(null);
     setStreamError(null);
     setTokenCount(0);
     setTokenVelocity(null);
@@ -139,6 +141,7 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
                 setDegraded(d.degraded);
                 setLowGrounding(d.lowGrounding);
                 setUnverified(d.unverified);
+                setAnsweredBy(d.model ? `${d.provider}:${d.model}` : d.provider);
                 if (d.graphPath) onGraphUpdate(d.graphPath);
               }
             } catch (parseErr) {
@@ -232,12 +235,22 @@ export const QueryStudio: React.FC<QueryStudioProps> = ({
               </div>
             )}
 
+            {/* Model Pool attribution: which provider and model answered */}
+            {answeredBy && (
+              <div
+                className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-gray-800/60 text-gray-300 border border-gray-700/40"
+                title="The Model Pool member that generated this answer"
+              >
+                {answeredBy}
+              </div>
+            )}
+
             {degraded && (
               <div
                 className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-950/60 text-amber-400 border border-amber-800/40"
-                title="The primary model was unavailable; this answer came from a fallback model or the closest pre-computed FAQ answer."
+                title="No model in the pool answered; this is the closest pre-computed FAQ answer (or the offline message), not an answer to your exact question."
               >
-                DEGRADED · FALLBACK ANSWER
+                DEGRADED · FAQ ANSWER
               </div>
             )}
 

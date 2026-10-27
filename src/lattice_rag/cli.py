@@ -64,8 +64,7 @@ async def _build_harness(
     from lattice_rag.caching.semantic_cache import SemanticCache
     from lattice_rag.config import get_config
     from lattice_rag.generation.chitchat import ChitchatHandler
-    from lattice_rag.generation.gemini_fallback import GeminiFallback
-    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+    from lattice_rag.generation.model_pool import build_model_pool
     from lattice_rag.orchestration.graph import RAGOrchestrator
     from lattice_rag.retrieval.embeddings import EmbeddingService
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
@@ -94,18 +93,7 @@ async def _build_harness(
     fb_cache = FallbackCache(config.redis_url)
     await fb_cache.connect()
 
-    groq = GroqSynthesizer(
-        api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-        model=config.groq_model,
-        max_tokens=config.llm_max_tokens,
-        timeout_seconds=config.llm_timeout_seconds,
-    )
-    gemini = GeminiFallback(
-        api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-        model=config.gemini_model,
-        max_output_tokens=config.llm_max_tokens,
-        timeout_seconds=config.llm_timeout_seconds,
-    )
+    pool = build_model_pool(config)
     cc = ChitchatHandler()
     pipeline = RetrievalPipeline(store, embed_svc, guardrail, forced_hops=force_hops)
     orchestrator = RAGOrchestrator(
@@ -113,8 +101,7 @@ async def _build_harness(
         semantic_cache=sem_cache,
         fallback_cache=fb_cache,
         retrieval_pipeline=pipeline,
-        groq=groq,
-        gemini=gemini,
+        pool=pool,
         chitchat=cc,
         embedding_service=embed_svc,
         answer_max_tokens=config.llm_max_tokens,
@@ -175,6 +162,9 @@ def query(text: str, stream: bool) -> None:
             state = await orchestrator.run(text)
             click.echo(f"Route: {state.route}")
             click.echo(f"Answer: {state.answer}")
+            if state.provider is not None:
+                answered_by = f"{state.provider}:{state.model}" if state.model else state.provider
+                click.echo(f"Answered by: {answered_by}")
             click.echo(
                 f"Latency: {state.total_latency_ms:.1f}ms (Cached: {state.cache_hit}, Degraded: {state.degraded})"
             )

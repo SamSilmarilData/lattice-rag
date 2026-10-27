@@ -1,4 +1,5 @@
-"""Live Tier: a degraded answer is retried once, then fails the query as provider_degraded."""
+"""Live Tier: an answer no Model Pool member gave (degraded) is retried once, then fails the
+query as provider_degraded."""
 
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ PASS = {
 }
 
 
-def _state(*, degraded: bool, provider: str) -> SimpleNamespace:
+def _state(*, degraded: bool, provider: str, model: str | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         answer="an answer",
         filtered_chunks=[],
@@ -32,6 +33,7 @@ def _state(*, degraded: bool, provider: str) -> SimpleNamespace:
         route="hybrid",
         route_verified=True,
         provider=provider,
+        model=model,
     )
 
 
@@ -79,7 +81,7 @@ def _evaluator() -> AsyncMock:
 
 async def test_degraded_twice_fails_query_without_judging(files):
     orch = AsyncMock()
-    orch.run.return_value = _state(degraded=True, provider="gemini")
+    orch.run.return_value = _state(degraded=True, provider="redis_faq")
     ev = _evaluator()
     sleeps: list[float] = []
 
@@ -95,7 +97,7 @@ async def test_degraded_twice_fails_query_without_judging(files):
     res = resp.results[0]
     assert res.error == "provider_degraded"
     assert res.passed is False
-    assert res.provider == "gemini"
+    assert (res.provider, res.model) == ("redis_faq", None)
     assert resp.passed_gate is False
     assert resp.failed_queries == 1
 
@@ -103,8 +105,8 @@ async def test_degraded_twice_fails_query_without_judging(files):
 async def test_healthy_retry_is_judged_normally(files):
     orch = AsyncMock()
     orch.run.side_effect = [
-        _state(degraded=True, provider="gemini"),
-        _state(degraded=False, provider="groq"),
+        _state(degraded=True, provider="redis_faq"),
+        _state(degraded=False, provider="groq", model="openai/gpt-oss-120b"),
     ]
     ev = _evaluator()
     runner = EvalRunner(orch, ev, degraded_retry_delay=0, sleep=AsyncMock())
@@ -114,7 +116,7 @@ async def test_healthy_retry_is_judged_normally(files):
     ev.evaluate_query.assert_awaited_once()
     res = resp.results[0]
     assert res.error is None
-    assert res.provider == "groq"
+    assert (res.provider, res.model) == ("groq", "openai/gpt-oss-120b")
 
 
 async def test_healthy_first_answer_is_not_retried_and_records_provider(files):
@@ -127,11 +129,14 @@ async def test_healthy_first_answer_is_not_retried_and_records_provider(files):
     assert resp.results[0].provider == "groq"
 
 
-async def test_report_json_lists_provider_per_query(files, tmp_path):
+async def test_report_json_lists_provider_and_model_per_query(files, tmp_path):
     orch = AsyncMock()
-    orch.run.return_value = _state(degraded=False, provider="groq")
+    orch.run.return_value = _state(degraded=False, provider="groq", model="qwen/qwen3.8-27b")
     runner = EvalRunner(orch, _evaluator(), sleep=AsyncMock())
     resp = await runner.run_evaluation(*files)
 
     out = EvalRunner.export_report_json(resp, tmp_path / "r.json")
-    assert json.loads(out.read_bytes())["results"][0]["provider"] == "groq"
+    report = json.loads(out.read_bytes())
+    assert report["results"][0]["provider"] == "groq"
+    assert report["results"][0]["model"] == "qwen/qwen3.8-27b"
+    assert report["answersByModel"] == {"groq:qwen/qwen3.8-27b": 1}

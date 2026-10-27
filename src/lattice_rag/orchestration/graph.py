@@ -5,14 +5,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from lattice_rag.api.dtos import GenerationProvider
 from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.generation.prompt import graph_for_prompt
-from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
+from lattice_rag.generation.resilient_synthesizer import (
+    PoolMember,
+    ResilientSynthesizer,
+    StreamOutcome,
+)
 from lattice_rag.orchestration.state import PipelineState
 from lattice_rag.vocabulary import GraphContextMode
 
@@ -20,8 +25,6 @@ if TYPE_CHECKING:
     from lattice_rag.caching.fallback_cache import FallbackCache
     from lattice_rag.caching.semantic_cache import SemanticCache
     from lattice_rag.generation.chitchat import ChitchatHandler
-    from lattice_rag.generation.gemini_fallback import GeminiFallback
-    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
     from lattice_rag.routing.router import QueryRouter, RouteDecision
 
@@ -44,6 +47,22 @@ def subgraph_as_dict(graph_context: Any) -> dict[str, Any] | None:
     if isinstance(graph_context, dict):
         return graph_context
     return {"nodes": graph_context.nodes, "edges": graph_context.edges}
+
+
+def pool_of(*, groq: Any = None, gemini: Any = None) -> tuple[PoolMember, ...]:
+    """A Model Pool of one Groq adapter then one Gemini adapter, skipping absent ones.
+
+    Each member's model is the adapter's ``model`` attribute when it is a string.
+    """
+    members = []
+    for provider, client in ((GenerationProvider.GROQ, groq), (GenerationProvider.GEMINI, gemini)):
+        if client is None:
+            continue
+        model = getattr(client, "model", None)
+        members.append(
+            PoolMember(provider, model if isinstance(model, str) else str(provider), client)
+        )
+    return tuple(members)
 
 
 @dataclass
@@ -79,26 +98,32 @@ class RAGOrchestrator:
         semantic_cache: SemanticCache,
         fallback_cache: FallbackCache,
         retrieval_pipeline: RetrievalPipeline,
-        groq: GroqSynthesizer,
-        gemini: GeminiFallback,
         chitchat: ChitchatHandler,
         embedding_service: Any,
+        pool: Sequence[PoolMember] | None = None,
+        groq: Any = None,
+        gemini: Any = None,
         answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         graph_context_in_prompt: GraphContextMode = GraphContextMode.ON,
     ) -> None:
+        """``pool`` is the Model Pool in cascade order (built by ``build_model_pool``).
+
+        ``groq``/``gemini`` are a shorthand for a two-member pool of those adapters, in
+        that order; they are ignored when ``pool`` is given.
+        """
         self.router = router
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
-        self.groq = groq
-        self.gemini = gemini
+        self.pool: tuple[PoolMember, ...] = (
+            tuple(pool) if pool is not None else pool_of(groq=groq, gemini=gemini)
+        )
         self.chitchat = chitchat
         self.embedding_service = embedding_service
         self.answer_max_tokens = answer_max_tokens
         self.graph_context_in_prompt = graph_context_in_prompt
         self.synthesizer = ResilientSynthesizer(
-            groq=self.groq,
-            gemini=self.gemini,
+            pool=self.pool,
             fallback_cache=self.fallback_cache,
             default_max_tokens=answer_max_tokens,
         )
@@ -107,19 +132,21 @@ class RAGOrchestrator:
         """The same orchestrator over another retrieval pipeline (the eval temp DB).
 
         Every setting carries over, so a Live Tier arm measures the configuration it names.
+        The synthesizer is shared, so a pool member whose breaker opened stays skipped.
         """
-        return RAGOrchestrator(
+        clone = RAGOrchestrator(
             router=self.router,
             semantic_cache=self.semantic_cache,
             fallback_cache=self.fallback_cache,
             retrieval_pipeline=retrieval_pipeline,
-            groq=self.groq,
-            gemini=self.gemini,
             chitchat=self.chitchat,
             embedding_service=self.embedding_service,
+            pool=self.pool,
             answer_max_tokens=self.answer_max_tokens,
             graph_context_in_prompt=self.graph_context_in_prompt,
         )
+        clone.synthesizer = self.synthesizer
+        return clone
 
     # ── Public Interfaces ────────────────────────────────────────────────
 
@@ -148,6 +175,7 @@ class RAGOrchestrator:
             answer=done["answer"],
             degraded=done["degraded"],
             provider=done["provider"],
+            model=done["model"],
             timings=done["timings"],
             total_latency_ms=done["latency_ms"],
         )
@@ -196,6 +224,7 @@ class RAGOrchestrator:
                 prompt_graph=cached.get("prompt_graph"),
                 degraded=False,
                 provider=None,
+                model=None,
                 low_grounding=False,
                 unverified=False,
                 route_verified=True,  # only verified answers are stored in Tier 1
@@ -224,6 +253,7 @@ class RAGOrchestrator:
                 prompt_graph=None,
                 degraded=False,
                 provider=None,
+                model=None,
                 low_grounding=False,
                 unverified=False,
                 route_verified=decision.verified,
@@ -261,7 +291,8 @@ class RAGOrchestrator:
         )
         answer = "".join(tokens)
 
-        # 4. Tier 1 write rule: primary-provider answers grounded in verified evidence only
+        # 4. Tier 1 write rule: complete Model Pool answers (any member; not the FAQ, not an
+        #    interrupted stream) grounded in verified evidence only
         unverified = not decision.verified or retrieved.unverified or triage.cache_unverified
         if (
             use_cache
@@ -291,6 +322,7 @@ class RAGOrchestrator:
             prompt_graph=prompt_graph,
             degraded=outcome.degraded,
             provider=outcome.provider,
+            model=outcome.model,
             low_grounding=retrieved.low_grounding,
             unverified=unverified,
             route_verified=decision.verified,
@@ -352,5 +384,6 @@ class RAGOrchestrator:
             query=query, context_chunks=chunks, graph_context=graph_context, route=route
         )
         outcome.provider = synth.provider
+        outcome.model = synth.model
         outcome.degraded = synth.degraded
         yield synth.answer
