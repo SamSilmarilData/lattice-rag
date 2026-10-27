@@ -8,7 +8,10 @@ from typing import Any, Protocol
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
 
-from lattice_rag.config import DEFAULT_GUARDRAIL_THRESHOLD
+from lattice_rag.config import (
+    DEFAULT_GUARDRAIL_THRESHOLD,
+    DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD,
+)
 from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
@@ -235,7 +238,7 @@ def build_route_guardrails(
     make: Callable[[float], ChunkGuardrail] | None,
     *,
     skip_rerank_score: float | None = None,
-    massive_context_threshold: float = DEFAULT_GUARDRAIL_THRESHOLD,
+    massive_context_threshold: float = DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD,
     skip_massive_context: bool = False,
 ) -> RouteGuardrails:
     """Build every Route's guardrail from config; both composition roots call this.
