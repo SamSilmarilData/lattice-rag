@@ -139,14 +139,15 @@ _PHASE5_VARS = (
 )
 
 
-def test_phase5_switches_default_to_current_behaviour(monkeypatch: pytest.MonkeyPatch):
+def test_phase5_switches_default_to_the_kept_configuration(monkeypatch: pytest.MonkeyPatch):
+    """#47 dropped graph context from the prompt; #48 kept 0.35 for massive_context."""
     for var in _PHASE5_VARS:
         monkeypatch.delenv(var, raising=False)
 
     cfg = load_config(require_typesafe=False)
 
-    assert cfg.graph_context_in_prompt == "on"
-    assert cfg.guardrail_massive_context_threshold == 0.5
+    assert cfg.graph_context_in_prompt == "off"
+    assert cfg.guardrail_massive_context_threshold == 0.35
     assert cfg.guardrail_skip_massive_context is False
 
 

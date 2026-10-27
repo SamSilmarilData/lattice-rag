@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lattice_rag.generation.prompt import NO_EVIDENCE, SYSTEM_PROMPT, build_messages
+from lattice_rag.generation.prompt import GRAPH_RULE, NO_EVIDENCE, SYSTEM_PROMPT, build_messages
 
 
 def test_prompt_delimits_evidence_and_question():
@@ -15,7 +15,8 @@ def test_prompt_delimits_evidence_and_question():
         },
     )
 
-    assert msgs.system == SYSTEM_PROMPT
+    assert msgs.system.startswith(SYSTEM_PROMPT)
+    assert msgs.system.endswith(GRAPH_RULE)
     assert '<chunk index="1" doc="doc1">\nLatticeDB supports HNSW indexing.\n</chunk>' in msgs.user
     assert "- LatticeDB --[USES_INDEX]--> HNSW" in msgs.user
     assert msgs.user.endswith("<question>\nHow does LatticeDB index?\n</question>")
@@ -43,3 +44,12 @@ def test_prompt_has_no_eval_specific_hints():
     """The prompt must not carry golden-dataset tokens that game the eval."""
     for token in ("<=>", "@@", "stage, token, done"):
         assert token not in SYSTEM_PROMPT
+
+
+def test_prompt_without_graph_context_promises_no_graph_evidence():
+    """#47 dropped graph context by default, so the prompt must not mention it."""
+    msgs = build_messages("q", [{"doc_id": "d", "text": "t"}], None)
+
+    assert msgs.system == SYSTEM_PROMPT
+    assert "graph" not in msgs.system.lower()
+    assert "<graph>" not in msgs.user

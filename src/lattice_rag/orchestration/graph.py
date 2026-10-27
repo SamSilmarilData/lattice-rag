@@ -104,7 +104,7 @@ class RAGOrchestrator:
         groq: Any = None,
         gemini: Any = None,
         answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
-        graph_context_in_prompt: GraphContextMode = GraphContextMode.ON,
+        graph_context_in_prompt: GraphContextMode = GraphContextMode.OFF,
     ) -> None:
         """``pool`` is the Model Pool in cascade order (built by ``build_model_pool``).
 

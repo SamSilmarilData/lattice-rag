@@ -30,7 +30,8 @@ class GraphContextMode(StrEnum):
 
     ``on`` sends the whole traversed subgraph on ``hybrid`` and ``massive_context``, ``off`` none,
     and ``relational`` sends it only on the retrieval Route (``hybrid``), capped at ten
-    edges (``generation.prompt.graph_for_prompt``).
+    edges (``generation.prompt.graph_for_prompt``). ``off`` is the default: #47 measured no
+    gain from graph context, and the traversal still feeds the API's graph path.
     """
 
     ON = "on"

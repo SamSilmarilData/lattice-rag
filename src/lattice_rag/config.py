@@ -21,6 +21,8 @@ DEFAULT_LLM_TIMEOUT_SECONDS = 30.0
 DEFAULT_RERANKER_ONNX_REVISION = "6f5ff65298512715a1e669753bc754d2bc8f367b"
 # Minimum Jev Noul probability for a chunk to pass the context guardrail
 DEFAULT_GUARDRAIL_THRESHOLD = 0.5
+# massive_context only (#48): a tie with 0.50 in the Live Tier keeps the per-route value
+DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD = 0.35
 
 # Model Pool defaults (ADR-0004). Free-tier quotas are per model, so the default pool
 # spreads load over two Groq models before Gemini. gemini-3.5-flash-lite rather than
@@ -185,11 +187,13 @@ class AppConfig:
     # Jev Noul guardrail. None (the default) sends every chunk to Noul. Enable only with
     # Live Tier results; see docs/production-readiness.md.
     guardrail_skip_rerank_score: float | None = None
-    # Experiment Arm switches (spec #22; docs/production-readiness.md §6). Defaults keep
-    # the measured behaviour. Graph triples in the generation prompt: on | off | relational
-    graph_context_in_prompt: GraphContextMode = GraphContextMode.ON
-    # Noul threshold for massive_context retrieval only; the other Routes keep the global one
-    guardrail_massive_context_threshold: float = DEFAULT_GUARDRAIL_THRESHOLD
+    # Experiment Arm switches (spec #22; docs/production-readiness.md §6). Defaults are the
+    # kept configurations. Graph triples in the generation prompt: on | off | relational;
+    # off since #47 found no gain (the traversal still runs for the graph path)
+    graph_context_in_prompt: GraphContextMode = GraphContextMode.OFF
+    # Noul threshold for massive_context retrieval only; the other Routes keep the global
+    # one. 0.35 since #48 (a tie with 0.50 keeps the per-route threshold)
+    guardrail_massive_context_threshold: float = DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD
     # Skip Noul on massive_context: its answers become Unverified and never reach Tier 1.
     # Wins over GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD.
     guardrail_skip_massive_context: bool = False
@@ -246,7 +250,7 @@ def _bool(raw: str | None, *, name: str) -> bool:
 
 
 def _graph_context_mode(raw: str | None) -> GraphContextMode:
-    value = (raw or GraphContextMode.ON).strip().lower()
+    value = (raw or GraphContextMode.OFF).strip().lower()
     try:
         return GraphContextMode(value)
     except ValueError:
@@ -292,7 +296,8 @@ def load_config(require_typesafe: bool = True) -> AppConfig:
         guardrail_skip_rerank_score=_optional_float(os.environ.get("GUARDRAIL_SKIP_RERANK_SCORE")),
         graph_context_in_prompt=_graph_context_mode(os.environ.get("GRAPH_CONTEXT_IN_PROMPT")),
         guardrail_massive_context_threshold=float(
-            os.environ.get("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD") or DEFAULT_GUARDRAIL_THRESHOLD
+            os.environ.get("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD")
+            or DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD
         ),
         guardrail_skip_massive_context=_bool(
             os.environ.get("GUARDRAIL_SKIP_MASSIVE_CONTEXT"), name="GUARDRAIL_SKIP_MASSIVE_CONTEXT"

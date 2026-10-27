@@ -252,7 +252,7 @@ Recall is below 1.0 on every gated Slice, so the tier discriminates; the weakest
 
 ### Experiment Arms (spec #22)
 
-Three switches let the phase 5 experiments run as Experiment Arms of the Live Tier without code edits. Every default keeps the measured behaviour, so the baseline still describes the unconfigured system. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003, and outcomes are recorded there, not here. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
+Three switches let the phase 5 experiments run as Experiment Arms of the Live Tier without code edits. Each default is the configuration the experiment kept (results below), so the baseline describes the unconfigured system once it is re-measured on these defaults. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003. #46's outcome is recorded in ADR-0003; #47 and #48 are summarised below. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
 
 Common arguments: `ARGS="--dataset eval_dataset.json --baseline eval_baseline.json --no-fail-on-regression"`.
 
@@ -263,7 +263,7 @@ lattice-rag eval $ARGS --force-hops 1 --output ablation-1hop.json
 lattice-rag eval $ARGS --force-hops 2 --output ablation-2hop.json
 ```
 
-**#47 Graph context in the prompt: `GRAPH_CONTEXT_IN_PROMPT=on|off|relational`** (default `on`, the current behaviour). The setting decides which part of the traversed subgraph reaches the generation prompt:
+**#47 Graph context in the prompt: `GRAPH_CONTEXT_IN_PROMPT=on|off|relational`** (default `off`, the kept configuration). The setting decides which part of the traversed subgraph reaches the generation prompt:
 - `on`: the whole subgraph, on `hybrid` and `massive_context`.
 - `off`: none.
 - `relational`: only on the retrieval Route (`hybrid`), capped at the first 10 edges and the Entities they connect.
@@ -277,16 +277,38 @@ lattice-rag eval $ARGS --graph-context off --output graph-off.json
 lattice-rag eval $ARGS --graph-context relational --output graph-relational.json
 ```
 
+Result (2026-10-27, Model Pool led by `openai/gpt-oss-120b`, 83 queries, 0 errors; faithfulness / context precision / answer relevance / answer correctness):
+
+| Slice | `on` | `off` |
+|---|---|---|
+| all | 0.774 / 0.728 / 0.850 / 0.759 | 0.793 / 0.746 / 0.854 / 0.750 |
+| factoid | 0.770 / 0.761 / 0.889 / 0.782 | 0.813 / 0.783 / 0.885 / 0.769 |
+| multihop | 0.738 / 0.726 / 0.809 / 0.698 | 0.754 / 0.732 / 0.821 / 0.710 |
+| long_context | 0.629 / 0.593 / 0.718 / 0.525 | 0.577 / 0.614 / 0.742 / 0.519 |
+| unanswerable (faith / corr) | 0.926 / 0.871 | 0.931 / 0.849 |
+
+`on` does not beat `off` by more than 0.06 on `multihop`, so under the tie rule graph context is **dropped**: the default is `off` in `AppConfig`, and so in both composition roots. With `off` the prompt carries no `<graph>` block and no graph rule (`generation/prompt.py` adds both only when graph context is sent), and the judge gets no triples. Traversal still runs for the API's graph path and Graph Recall. `on` and `relational` stay for future experiments.
+
 **#48 Noul on `massive_context`.** Compare the arms on the `long_context` Slice, and within it only the queries whose chosen Route (`chosen_route` in each report result) was `massive_context` in every arm being compared: the switches change nothing on the other Routes, so a `long_context` query routed elsewhere only adds judge noise.
-- `GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD` sets the Noul threshold used by `massive_context` retrieval only. It defaults to the global 0.50, and the other Routes always keep 0.50.
+- `GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD` sets the Noul threshold used by `massive_context` retrieval only. It defaults to 0.35 (the kept variant, below), and the other Routes always keep 0.50.
 - `GUARDRAIL_SKIP_MASSIVE_CONTEXT=true` sends no `massive_context` chunk to Noul. Those answers are Unverified (`unverified: true`) and never written to Tier 1. The skip wins over the threshold.
 
 ```bash
-lattice-rag eval $ARGS --output noul-050.json
+GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.50 lattice-rag eval $ARGS --output noul-050.json
 GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.35 lattice-rag eval $ARGS --output noul-035.json
 GUARDRAIL_SKIP_MASSIVE_CONTEXT=true      lattice-rag eval $ARGS --output noul-skip.json
 ```
 
-The kept configuration of #47 and #48 is applied through the environment, which `app.py` `lifespan()` and `cli.py` `_build_harness()` both read. Record it in `.env.example` and in the deployment's env vars.
+Result (2026-10-27, Model Pool, `long_context` Slice, 10 queries, 0 errors; faithfulness / context precision / answer relevance / answer correctness):
+
+| Arm | Scores |
+|---|---|
+| 0.50 | 0.577 / 0.598 / 0.726 / 0.536 |
+| 0.35 | 0.624 / 0.592 / 0.727 / 0.533 |
+| skip | 0.471 / 0.595 / 0.719 / 0.557 |
+
+0.50 and 0.35 are within the 0.06 tolerance, a tie, so the per-route threshold is kept: **`GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.35`** is the default. Skip does not beat the best threshold by more than 0.06 on any metric, so `GUARDRAIL_SKIP_MASSIVE_CONTEXT` stays `false` (a skipped guardrail would leave every `massive_context` answer Unverified and out of Tier 1; `test_phase5_switches.py` checks this). Caveat: the arms were answered by a mix of pool models, and only 2 of 10 queries had the same model in all three arms, so this comparison is noisier than #47's.
+
+The kept configuration of #47 and #48 is the `AppConfig` default, which `app.py` `lifespan()` and `cli.py` `_build_harness()` both read, and is recorded in `.env.example`. An arm overrides it through the environment.
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

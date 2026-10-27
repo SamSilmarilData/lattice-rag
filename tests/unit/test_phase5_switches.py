@@ -136,9 +136,27 @@ async def _both(orchestrator: RAGOrchestrator) -> tuple[PipelineState, dict[str,
 
 
 @pytest.mark.parametrize("route", ROUTES)
+async def test_by_default_the_generator_gets_no_graph_but_the_traversal_still_runs(route):
+    """#47 dropped graph context from the prompt; the studio's graph path stays."""
+    groq = _Groq()
+    orchestrator, _ = _orchestrator(route, store=_Store(_subgraph(3)), groq=groq)
+
+    state, done = await _both(orchestrator)
+
+    assert groq.graphs == [None, None]
+    assert state.prompt_graph_context is None and done["prompt_graph"] is None
+    assert len(done["graph_path"]["edges"]) == 3
+
+
+@pytest.mark.parametrize("route", ROUTES)
 async def test_graph_context_on_sends_the_whole_subgraph_to_the_generator(route):
     groq = _Groq()
-    orchestrator, _ = _orchestrator(route, store=_Store(_subgraph(12)), groq=groq)
+    orchestrator, _ = _orchestrator(
+        route,
+        store=_Store(_subgraph(12)),
+        groq=groq,
+        graph_context_in_prompt=GraphContextMode.ON,
+    )
 
     state, done = await _both(orchestrator)
 
@@ -293,13 +311,14 @@ def _guarded(route: str, **policy: Any) -> tuple[RAGOrchestrator, MagicMock, _Th
     return orchestrator, cache, make
 
 
-@pytest.mark.parametrize("route", ROUTES)
-async def test_by_default_every_route_uses_the_global_noul_threshold(route):
+@pytest.mark.parametrize(("route", "threshold"), [("massive_context", 0.35), ("hybrid", 0.5)])
+async def test_by_default_massive_context_uses_its_lower_noul_threshold(route, threshold):
+    """#48 kept 0.35 for massive_context; the retrieval Route keeps the global 0.50."""
     orchestrator, cache, make = _guarded(route)
 
     state, done = await _both(orchestrator)
 
-    assert make.ran == [0.5, 0.5]
+    assert make.ran == [threshold, threshold]
     assert state.unverified is False and done["unverified"] is False
     assert cache.put.call_count == 2
 
