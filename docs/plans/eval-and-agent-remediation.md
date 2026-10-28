@@ -9,7 +9,7 @@ The Live Tier run passed 23/30 queries and failed its own gate on per-query floo
 - **Generation:** Groq `max_tokens=256` truncates broad answers (eval_20, eval_29). `massive_context` has no Groq fallback when Gemini fails (eval_28, eval_30).
 - **Routing:** Route Accuracy is 17/27 (63%). Nothing measures it, and confidence is ignored.
 - **Eval validity:** the judge does not see the graph triples the generator saw. Correct refusals are penalised on relevance. Provider fallbacks are scored as answers.
-- **Gold Set:** 5 Documents and 10 Chunks, so Hermetic recall is 1.0 on every Slice. The unanswerable rerank ceiling separates nothing. `expected_entities` is never read. Some reference answers claim reranker behaviour the code does not have (eval_04, eval_21).
+- **Gold Set:** an arbitrarily assembled corpus of 5 hand-written Documents and 10 Chunks, chosen for convenience rather than drawn from a defined source, so Hermetic recall is 1.0 on every Slice. The unanswerable rerank ceiling separates nothing. `expected_entities` is never read. Some reference answers claim reranker behaviour the code does not have (eval_04, eval_21).
 
 ## Phases
 
@@ -61,18 +61,14 @@ One run per experiment arm; the full three-run set only for the final baseline.
 
 | Task | Detail | Decision rule |
 |---|---|---|
-| 5.1 Route ablation | Force each of `vector_exact`, `hybrid`, `graph_relational` onto every non-chitchat query in the Live Tier. | See ADR draft below, written before the numbers. |
+| 5.1 Route ablation | Two Live Tier arms on the three retrieval Routes (`vector_exact`, `hybrid`, `graph_relational`): force 1-hop, then force 2-hop (`lattice-rag eval --force-hops 1|2`). `vector_exact` and `hybrid` already run identically, so a per-Route arm would only measure judge noise (#46 Decision). `massive_context` keeps its own hop count. | See ADR-0003, written before the numbers. |
 | 5.2 Graph context ablation | `GRAPH_CONTEXT_IN_PROMPT` on/off, per Slice. | If it helps only `multihop`, send it only on `graph_relational` and `hybrid`, capped at 10 edges. Bidirectional traversal only if `multihop` gains. |
 | 5.3 Noul on broad queries | `long_context` Slice: Noul 0.50 (today), 0.35 for `massive_context`, guardrail skipped for `massive_context` (answer stays Unverified). | Keep the best on the `long_context` Slice. Prefer the per-route threshold on a tie. |
 | 5.4 Baseline | Three `lattice-rag eval --output` runs, then `lattice-rag measure-baseline`. Update `docs/production-readiness.md` section 6 if the procedure changed. | The Live Tier gate is green on the code it was measured on. |
 
-## ADR draft: Collapse retrieval Routes only on measured evidence
+## ADR
 
-`docs/adr/0003-collapse-routes-on-evidence.md`, status `proposed` until phase 5.1 reports.
-
-> `vector_exact`, `hybrid` and `graph_relational` run the same retrieval and differ only in graph hop count (1 versus 2). Each query still pays a Jev Choice call to pick among them. We keep all five Routes until the phase 5 ablation runs. If no retrieval Route beats the others by more than the baseline tolerance on any Slice, we collapse them into one retrieval Route (leaving retrieval, `massive_context` and `chitchat`), which drops one decision from the router's job and raises Route Accuracy by construction. We write the rule before the numbers arrive so the result cannot be argued after the fact.
->
-> Considered options: collapse now (a guess, no evidence the routes are redundant on a harder Gold Set); keep five Routes and differentiate retrieval per Route (more code, no evidence it would help).
+The route-collapse rule is recorded in `docs/adr/0003-collapse-routes-on-evidence.md`.
 
 ## Cross-cutting
 

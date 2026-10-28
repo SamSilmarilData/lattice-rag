@@ -58,15 +58,17 @@ interface QueryRequest {
 ```typescript
 interface QueryResponse {
   answer: string;                  // Synthesized LLM response
-  route: string;                   // 'vector_exact' | 'graph_relational' | 'hybrid' | 'chitchat' | 'massive_context'
+  route: string;                   // 'hybrid' | 'massive_context' | 'chitchat'
   cached: boolean;                 // Whether Tier 1 semantic cache was hit
   latencyMs: number;               // Total execution latency in milliseconds
   sources: SourceChunk[];          // Attributed source text chunks
   graphPath?: SubgraphDTO;         // Traversed entity graph nodes and edges
   timings: StageTiming[];          // Stage latency breakdown (triage, retrieval, generation)
-  degraded: boolean;               // True if the answer came from Gemini fallback or the FAQ cache
+  degraded: boolean;               // True only if no Model Pool member answered (FAQ / offline message); never cached
   lowGrounding: boolean;           // True if no retrieved chunk passed the relevance guardrail
   unverified: boolean;             // True if routing, the guardrail or cache verification could not run (Unverified Answer); never cached
+  provider: "groq" | "gemini" | "redis_faq" | "offline" | null;  // Who answered; null for chitchat and cache hits
+  model: string | null;            // Model Pool member's model (e.g. "openai/gpt-oss-120b"); null for the FAQ, chitchat, cache hits
 }
 ```
 
@@ -125,9 +127,11 @@ interface CacheStatsResponse {
   tier1Hits: number;
   tier1Misses: number;
   tier1CachedQueries: number;
-  tier2CircuitStatus: "closed" | "open" | "half-open";  // Groq circuit breaker (shared by /query and /query/stream)
+  tier2CircuitStatus: "closed" | "open" | "partially_open";  // Model Pool breakers (one per member, shared by /query and /query/stream): all closed, all open, or mixed
   tier2CachedQueries: number;
 }
+// tier2CircuitStatus is "partially_open" when some Model Pool members' breakers are open and
+// others are not: requests skip the open members and are answered by the rest of the pool.
 
 interface HealthResponse {
   status: "healthy" | "degraded" | "unhealthy";
@@ -139,7 +143,7 @@ interface HealthResponse {
 }
 ```
 
-### 3.6 `EvalJobResponse`, `EvalRunResponse` & `EvalQueryResult`
+### 3.6 `EvalJobResponse`, `EvalRunResponse`, `EvalQueryResult` & `Misroute`
 ```typescript
 interface EvalJobResponse {
   jobId: string;                           // Handle for GET /api/v1/eval/jobs/{jobId}
@@ -152,7 +156,7 @@ interface EvalJobResponse {
 
 // Each metric is a Jev Score normalized to [0.0, 1.0], or null when it was not judged:
 // it does not apply to the query's Slice (chitchat: relevance + correctness only;
-// unanswerable: no context precision), or the query failed and was never judged.
+// unanswerable: faithfulness + correctness only), or the query failed and was never judged.
 interface EvalQueryResult {
   query: string;                     // Evaluated benchmark query
   passed: boolean;                   // Judged, and every judged metric >= its pass threshold
@@ -160,7 +164,27 @@ interface EvalQueryResult {
   contextPrecision: number | null;   // Retrieved context vs what the reference answer needs
   answerRelevance: number | null;    // Answer vs the query
   answerCorrectness: number | null;  // Answer vs the Gold Set reference answer
-  error: "pipeline_error" | "judge_error" | null;  // Set when the query failed; it is then not judged
+  // Set when the query failed; it is then not judged. provider_degraded: no Model Pool member
+  // answered, even after one retry
+  error: "pipeline_error" | "judge_error" | "provider_degraded" | null;
+  // Provider that generated the answer; null when nothing was generated
+  // (pipeline error, chitchat, cache hit)
+  provider: "groq" | "gemini" | "redis_faq" | "offline" | null;
+  model: string | null;              // Model Pool member's model; null for the FAQ or no generation
+  chosenRoute: Route | null;         // Route the pipeline took; null on a pipeline error
+  routeVerified: boolean;            // false when chosenRoute is the System 1 fallback (Jev could not route)
+  graphRecall: number | null;        // Graph Recall; null when the query lists no expected entities or the pipeline failed
+}
+
+type Route = "hybrid" | "massive_context" | "chitchat";  // ADR-0003: three Routes
+type Slice = "factoid" | "multihop" | "unanswerable" | "chitchat" | "long_context";
+
+// A scored query whose chosen Route differs from its Expected Route
+interface Misroute {
+  queryId: string;                   // Gold Set query id
+  slice: Slice;
+  chosenRoute: Route;
+  expectedRoute: Route;
 }
 
 interface EvalRunResponse {
@@ -173,10 +197,33 @@ interface EvalRunResponse {
   meanAnswerCorrectness: number | null;
   failedQueries: number;               // Queries with an error (not judged, excluded from means)
   results: EvalQueryResult[];          // Granular query evaluation results
+  routeAccuracy: number | null;        // Share of scored queries on their Expected Route; null if none scored
+  routeAccuracyBySlice: Record<Slice, number>;  // Same, per Slice (only Slices with a scored query)
+  routeAccuracyFloor: number | null;   // Advisory floor from gate_thresholds; never fails the gate
+  routeAccuracyScored: number;         // The denominator of routeAccuracy
+  routeAccuracyUnverified: number;     // Not scored: Jev could not route, the fallback Route was used
+  routeAccuracyErrored: number;        // Not scored: the pipeline failed, no Route was chosen
+  misroutes: Misroute[];               // Scored queries off their Expected Route
+  graphRecall: number | null;          // Mean per-query Graph Recall; null if no query was scored
+  graphRecallBySlice: Record<Slice, number>;  // Same, per Slice (only Slices with a scored query)
+  graphRecallScored: number;           // Queries with expected entities whose pipeline ran
 }
 ```
 
-The gate rules live in `eval_baseline.json` under `gate_thresholds` and all are required:
+**Graph Recall** is the share of a query's `expected_entities` that appear among the
+Entities of its graph context (the nodes `GraphTraverser` surfaced), matched by name with
+whitespace collapsed and case folded, as `entity_key()` does. It is computed from the
+pipeline's output, not judged by Jev, and is advisory: it never affects `passedGate`.
+
+**Route Accuracy** scores only router decisions. A query is scored when it is outside the
+`chitchat` Slice (chitchat is routed deterministically, never by Jev; this matches the 17/27
+baseline definition), its pipeline ran, and Jev chose the Route. Unverified fallback routes
+and pipeline errors are counted in `routeAccuracyUnverified` and `routeAccuracyErrored`
+instead, so a Jev outage or a broken pipeline shows as `null` or a small denominator, never
+as accurate routing.
+
+The gate rules live in `eval_baseline.json` under `gate_thresholds`. All are required except
+`route_accuracy_floor`, which is optional and advisory (reported, never gates):
 `passedGate` is false when any query failed, when any judged metric of any query is below
 `min_query_floor`, or when a mean drops more than `max_regression_delta` below its value in
 `metrics`. A metric absent from `metrics` is reported but not regression-checked. `metrics`

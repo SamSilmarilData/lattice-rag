@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lattice_rag.config import AppConfig, load_config
+from lattice_rag.config import DEFAULT_RERANKER_ONNX_REVISION, AppConfig, load_config
 from lattice_rag.security import SecretStr
 
 
@@ -79,3 +79,100 @@ def test_guardrail_skip_rerank_score_empty_means_off(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("GUARDRAIL_SKIP_RERANK_SCORE", "")
 
     assert load_config().guardrail_skip_rerank_score is None
+
+
+def test_eval_degraded_retry_delay_defaults_to_five_seconds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("EVAL_DEGRADED_RETRY_DELAY", raising=False)
+
+    assert load_config().eval_degraded_retry_delay == 5.0
+
+
+def test_eval_degraded_retry_delay_reads_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("EVAL_DEGRADED_RETRY_DELAY", "12.5")
+
+    assert load_config().eval_degraded_retry_delay == 12.5
+
+
+def test_llm_timeout_defaults_to_thirty_seconds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+
+    assert load_config().llm_timeout_seconds == 30.0
+
+
+def test_llm_timeout_reads_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "7.5")
+
+    assert load_config().llm_timeout_seconds == 7.5
+
+
+@pytest.mark.parametrize("value", ["0", "-3"])
+def test_llm_timeout_rejects_non_positive(monkeypatch: pytest.MonkeyPatch, value: str):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(ValueError, match="LLM_TIMEOUT_SECONDS"):
+        load_config()
+
+
+def test_eval_degraded_retry_delay_rejects_negative(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("EVAL_DEGRADED_RETRY_DELAY", "-1")
+
+    with pytest.raises(ValueError, match="EVAL_DEGRADED_RETRY_DELAY"):
+        load_config()
+
+
+def test_reranker_revision_is_pinned_unless_overridden(monkeypatch: pytest.MonkeyPatch):
+    """An unset or empty RERANKER_ONNX_REVISION uses the pinned commit, never 'latest'."""
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == (
+        DEFAULT_RERANKER_ONNX_REVISION
+    )
+    monkeypatch.setenv("RERANKER_ONNX_REVISION", "abc123")
+    assert load_config(require_typesafe=False).reranker_onnx_revision == "abc123"
+
+
+# --- Experiment Arm switches (#47, #48) ------------------------------------------------
+
+_PHASE5_VARS = (
+    "GRAPH_CONTEXT_IN_PROMPT",
+    "GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD",
+    "GUARDRAIL_SKIP_MASSIVE_CONTEXT",
+)
+
+
+def test_phase5_switches_default_to_the_kept_configuration(monkeypatch: pytest.MonkeyPatch):
+    """#47 dropped graph context from the prompt; #48 kept 0.35 for massive_context."""
+    for var in _PHASE5_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    cfg = load_config(require_typesafe=False)
+
+    assert cfg.graph_context_in_prompt == "off"
+    assert cfg.guardrail_massive_context_threshold == 0.35
+    assert cfg.guardrail_skip_massive_context is False
+
+
+def test_phase5_switches_read_the_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "Relational")
+    monkeypatch.setenv("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "0.35")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "true")
+
+    cfg = load_config(require_typesafe=False)
+
+    assert cfg.graph_context_in_prompt == "relational"
+    assert cfg.guardrail_massive_context_threshold == 0.35
+    assert cfg.guardrail_skip_massive_context is True
+
+
+@pytest.mark.parametrize(
+    ("var", "value"),
+    [
+        ("GRAPH_CONTEXT_IN_PROMPT", "sometimes"),
+        ("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "1.5"),
+        ("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "maybe"),
+    ],
+)
+def test_phase5_switches_reject_invalid_values(monkeypatch: pytest.MonkeyPatch, var, value):
+    monkeypatch.setenv(var, value)
+
+    with pytest.raises(ValueError, match=var):
+        load_config(require_typesafe=False)

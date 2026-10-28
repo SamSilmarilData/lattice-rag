@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from lattice_rag.routing.router import QueryRouter, RouteDecision
+from lattice_rag.routing.router import ROUTE_GUIDES, QueryRouter, RouteDecision
 
 
 @pytest.mark.asyncio
@@ -22,15 +22,13 @@ async def test_router_missing_key_raises_runtime_error(monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     "route_name,confidence",
     [
-        ("vector_exact", 0.96),
-        ("graph_relational", 0.91),
         ("hybrid", 0.88),
         ("chitchat", 0.99),
         ("massive_context", 0.85),
     ],
 )
-async def test_router_all_five_routes(route_name: str, confidence: float):
-    """Verify QueryRouter correctly parses all 5 supported routing categories."""
+async def test_router_all_three_routes(route_name: str, confidence: float):
+    """Verify QueryRouter correctly parses all 3 supported Routes (ADR-0003)."""
     mock_client = AsyncMock()
     mock_response = SimpleNamespace(
         choices={"route": SimpleNamespace(choice=route_name, confidence=confidence)}
@@ -125,8 +123,19 @@ async def test_router_pure_chitchat_uses_fast_path(query: str):
         RuntimeError("503 Service Unavailable"),
         SimpleNamespace(choices={}),
         SimpleNamespace(choices={"route": SimpleNamespace(choice="poetry", confidence=0.9)}),
+        # Routes collapsed into hybrid by ADR-0003 are unknown now, not aliases
+        SimpleNamespace(choices={"route": SimpleNamespace(choice="vector_exact", confidence=0.9)}),
+        SimpleNamespace(
+            choices={"route": SimpleNamespace(choice="graph_relational", confidence=0.9)}
+        ),
     ],
-    ids=["jev_error", "missing_choice", "unknown_route"],
+    ids=[
+        "jev_error",
+        "missing_choice",
+        "unknown_route",
+        "old_vector_exact",
+        "old_graph_relational",
+    ],
 )
 async def test_router_fallbacks_are_unverified(jev_outcome):
     """Every System 1 fallback to hybrid is reported as unverified."""
@@ -147,7 +156,7 @@ async def test_router_fallbacks_are_unverified(jev_outcome):
 async def test_router_successful_jev_route_is_verified():
     mock_client = AsyncMock()
     mock_client.system_one.return_value = SimpleNamespace(
-        choices={"route": SimpleNamespace(choice="graph_relational", confidence=0.9)}
+        choices={"route": SimpleNamespace(choice="massive_context", confidence=0.9)}
     )
     router = QueryRouter(ts_client=mock_client)
 
@@ -185,3 +194,52 @@ async def test_offline_mode_needs_no_key_and_rejects_a_client(monkeypatch: pytes
     assert (decision.route, decision.verified) == ("hybrid", False)
     with pytest.raises(ValueError, match="offline"):
         QueryRouter(ts_client=AsyncMock(), offline=True)
+
+
+async def _criteria_sent_to_jev() -> dict[str, str]:
+    mock_client = AsyncMock()
+    mock_client.system_one.return_value = SimpleNamespace(
+        choices={"route": SimpleNamespace(choice="hybrid", confidence=0.9)}
+    )
+    await QueryRouter(ts_client=mock_client).route_query("How does retrieval work?")
+    choice = mock_client.system_one.await_args.kwargs["questions"]["route"]
+    return dict(choice.criteria)
+
+
+ALL_ROUTES = {"hybrid", "chitchat", "massive_context"}
+
+
+def test_every_route_has_at_least_two_worked_examples_and_none_is_shared():
+    assert set(ROUTE_GUIDES) == ALL_ROUTES
+    examples = [e for guide in ROUTE_GUIDES.values() for e in guide.examples]
+    assert all(len(guide.examples) >= 2 for guide in ROUTE_GUIDES.values())
+    assert len(examples) == len(set(examples)), "an example must teach exactly one Route"
+
+
+@pytest.mark.asyncio
+async def test_jev_criteria_carry_each_routes_description_and_quoted_examples():
+    criteria = await _criteria_sent_to_jev()
+
+    assert set(criteria) == ALL_ROUTES
+    for route, guide in ROUTE_GUIDES.items():
+        assert criteria[route].startswith(guide.description)
+        for example in guide.examples:
+            assert f"'{example}'" in criteria[route]
+
+
+@pytest.mark.parametrize(
+    ("example", "route"),
+    [
+        # single facts, relationships and focused mechanisms share the one retrieval Route
+        ("Why was Z chosen over W?", "hybrid"),
+        ("What threshold does Y use?", "hybrid"),
+        ("How is X connected to Y?", "hybrid"),
+        ("How do traversed results feed into the reranking step?", "hybrid"),
+        # multi-part walkthroughs of a whole process go to massive_context
+        ("Describe the full end-to-end flow of X", "massive_context"),
+        ("Walk through everything that happens to Y from start to finish", "massive_context"),
+        ("Summarize the whole stack: A, B, C and D", "massive_context"),
+    ],
+)
+def test_misroute_prone_phrasings_are_taught_under_their_expected_route(example, route):
+    assert example in ROUTE_GUIDES[route].examples

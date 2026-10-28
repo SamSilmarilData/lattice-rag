@@ -18,6 +18,7 @@ from lattice_rag.eval.gold_set import GoldDocument, GoldPassage, GoldQuery, Gold
 from lattice_rag.eval.hermetic import (
     HermeticThresholds,
     MetricFloor,
+    load_thresholds,
     run_hermetic_tier,
 )
 from lattice_rag.retrieval.embeddings import EmbeddingService
@@ -103,13 +104,15 @@ def _q(
     query: str,
     passages: list[tuple[str, str]],
     slice_: Any = "factoid",
-    route: Any = "vector_exact",
+    route: Any = "hybrid",
     reference: str = "reference",
+    case: Any = "direct",
 ) -> GoldQuery:
     return GoldQuery(
         id=qid,
         query=query,
         slice=slice_,
+        case=case,
         expected_route=route,
         reference_answer=reference,
         gold_passages=[GoldPassage(document_id=d, text=t) for d, t in passages],
@@ -118,7 +121,7 @@ def _q(
 
 def gold_set(*extra: GoldQuery) -> GoldSet:
     return GoldSet(
-        version="2.0.0",
+        version="3.0.0",
         domain="test",
         corpus=[
             GoldDocument(document_id="doc_astro", title="Astronomy", text=ASTRONOMY),
@@ -168,6 +171,38 @@ async def test_healthy_retriever_passes_with_full_recall_and_mrr() -> None:
     by_slice = {s.slice: s for s in report.slices}
     assert by_slice["factoid"].queries == 3
     assert by_slice["multihop"].queries == 1
+
+
+async def test_results_are_broken_down_per_case_without_a_floor_of_their_own() -> None:
+    report = await run_hermetic_tier(
+        gold_set(
+            _q(
+                "q_reworded",
+                "Which spinning collapsed stellar remnants beam out radiation?",
+                [("doc_astro", PULSAR)],
+                case="paraphrase",
+            ),
+            _q(
+                "q_not_arborio",
+                "Which rice is not arborio and holds its shape under long stirring?",
+                [("doc_cook", "Carnaroli rice holds its shape better than arborio")],
+                case="negation",
+            ),
+            _q("q_licence", "Who owns licence royalties?", [], "unanswerable"),
+        ),
+        thresholds(0.0, 0.0),
+        fake_embedding_service(),
+    )
+
+    by_case = {c.case: c for c in report.cases}
+    assert set(by_case) == {"direct", "paraphrase", "negation"}
+    assert by_case["direct"].queries == 4  # the passage-free query is not scored
+    assert by_case["paraphrase"].queries == 1
+    assert by_case["negation"].queries == 1
+    assert by_case["direct"].recall == 1.0
+    assert by_case["negation"].recall == 1.0
+    assert {o.id: o.case for o in report.queries}["q_reworded"] == "paraphrase"
+    assert report.passed, report.failures
 
 
 class ReversedRetriever:
@@ -229,11 +264,11 @@ SPANNING = "radiate across the spectrum. Relativistic jets launched"
     ("keywords", "recall", "rr"),
     [
         (["accretion"], 0.0, 1.0),  # the first Chunk holds only the start of the passage
-        (["sourdough", "relativistic"], 0.0, 0.5),  # the second Chunk holds only its end
+        (["sourdough", "relativistic"], 1.0, 0.5),  # the second Chunk carries the overlap sentence
         (["sourdough", "accretion", "relativistic"], 1.0, 0.5),  # together they cover it
     ],
 )
-async def test_passage_spanning_two_chunks_is_recalled_only_when_both_are_retrieved(
+async def test_passage_spanning_overlapping_chunks_is_recalled_from_either_side_of_the_overlap(
     keywords: list[str], recall: float, rr: float
 ) -> None:
     report = await run_hermetic_tier(
@@ -246,6 +281,28 @@ async def test_passage_spanning_two_chunks_is_recalled_only_when_both_are_retrie
     (outcome,) = report.queries
     assert outcome.recall == recall
     assert outcome.reciprocal_rank == rr
+
+
+async def test_a_chunk_that_starts_where_its_predecessor_starts_is_still_resolved() -> None:
+    # Two ~300-char sentences cannot share a Chunk, so Chunk 1 is sentence one alone and
+    # Chunk 2 carries sentence one as overlap: both start at offset 0 of the Document.
+    first = "Lorem " * 50 + "ends here."
+    second = "Ipsum " * 50 + "ends there."
+    base = gold_set()
+    long_doc = GoldDocument(document_id="doc_long", title="Long", text=f"{first} {second} Tail.")
+
+    report = await run_hermetic_tier(
+        GoldSet(
+            version=base.version,
+            domain=base.domain,
+            corpus=[*base.corpus, long_doc],
+            queries=base.queries,
+        ),
+        thresholds(0.0, 0.0),
+        fake_embedding_service(),
+    )
+
+    assert len(report.queries) == len(base.queries)
 
 
 GREETING_REPLY = (
@@ -264,7 +321,6 @@ async def test_passage_free_slices_are_excluded_from_recall_and_pass_their_own_c
             version="1",
             overall=MetricFloor(recall=0.9, mrr=0.9),
             slices={s: MetricFloor(recall=0.9, mrr=0.9) for s in ("factoid", "multihop")},
-            unanswerable_max_rerank_score=0.5,
         ),
         fake_embedding_service(),
     )
@@ -277,6 +333,37 @@ async def test_passage_free_slices_are_excluded_from_recall_and_pass_their_own_c
     assert by_id["q_licence"].recall is None
 
 
+class ShiftedReranker:
+    """The word-overlap reranker with every score moved by a constant, as another CPU would."""
+
+    def __init__(self, shift: float) -> None:
+        self.shift = shift
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        return [s + self.shift for s in WordOverlapReranker().rerank(query, documents)]
+
+
+# The INT8 reranker's logits differ by up to 0.90 between x86 AVX2 and AVX-512 VNNI
+# kernels (measured over the Gold Set on GitHub runners), with identical ranking quality.
+CROSS_CPU_RERANK_SPREAD = 0.9
+
+
+@pytest.mark.parametrize("shift", [-CROSS_CPU_RERANK_SPREAD, CROSS_CPU_RERANK_SPREAD])
+async def test_gate_verdict_does_not_depend_on_which_cpu_scored_the_chunks(shift: float) -> None:
+    gold = gold_set(_q("q_licence", "Who owns licence royalties?", [], "unanswerable"))
+    gate = load_thresholds("hermetic_thresholds.json")
+
+    here = await run_hermetic_tier(gold, gate, fake_embedding_service())
+    elsewhere = await run_hermetic_tier(
+        gold,
+        gate,
+        EmbeddingService(embedder=WordHashEmbedder(), reranker=ShiftedReranker(shift)),
+    )
+
+    assert here.passed, here.failures
+    assert elsewhere.passed == here.passed, elsewhere.failures
+
+
 @pytest.mark.parametrize(
     ("query", "expected_problem"),
     [
@@ -287,8 +374,6 @@ async def test_passage_free_slices_are_excluded_from_recall_and_pass_their_own_c
             _q("q_mixed", "hello, what is a pulsar?", [], "chitchat", "chitchat", GREETING_REPLY),
             "not taken down",
         ),
-        # An unanswerable query the corpus does answer
-        (_q("q_fake", "pulsars rotating neutron stars radiation", [], "unanswerable"), "ceiling"),
         # A real query that the router would short-circuit to chitchat
         (_q("q_thanks", "thanks", [("doc_astro", PULSAR)]), "short-circuited"),
     ],
@@ -302,7 +387,6 @@ async def test_a_query_breaking_its_slice_behavior_fails_the_gate(
             version="1",
             overall=MetricFloor(recall=0.0, mrr=0.0),
             slices={"factoid": MetricFloor(recall=0.0, mrr=0.0)},
-            unanswerable_max_rerank_score=0.5,
         ),
         fake_embedding_service(),
     )
@@ -311,6 +395,7 @@ async def test_a_query_breaking_its_slice_behavior_fails_the_gate(
     assert any(f.startswith(f"{query.id}:") and expected_problem in f for f in report.failures)
 
 
+@pytest.mark.usefixtures("small_gold_sets")
 async def test_a_slice_without_a_threshold_fails_the_gate() -> None:
     gate = HermeticThresholds(
         version="1",
@@ -322,6 +407,48 @@ async def test_a_slice_without_a_threshold_fails_the_gate() -> None:
 
     assert not report.passed
     assert any("'multihop' has no threshold" in f for f in report.failures)
+
+
+async def test_a_slice_below_ten_queries_is_reported_but_not_gated() -> None:
+    # gold_set() has 3 factoid and 1 multihop queries: neither meets the 10-query minimum
+    gate = HermeticThresholds(
+        version="1",
+        overall=MetricFloor(recall=0.0, mrr=0.0),
+        slices={"factoid": MetricFloor(recall=1.01, mrr=1.01)},
+    )
+
+    report = await run_hermetic_tier(gold_set(), gate, fake_embedding_service())
+
+    assert report.passed, report.failures
+    by_slice = {s.slice: s for s in report.slices}
+    assert by_slice["factoid"].queries == 3
+    assert by_slice["factoid"].recall == 1.0
+    assert not by_slice["factoid"].gated
+    assert by_slice["factoid"].floor is None
+    assert not by_slice["multihop"].gated
+
+
+async def test_a_slice_of_ten_queries_is_gated_on_its_floor() -> None:
+    factoids = [
+        _q(
+            f"q_pulsar_{i}",
+            "What are pulsars and their rotating neutron stars?",
+            [("doc_astro", PULSAR)],
+        )
+        for i in range(10)
+    ]
+    gate = HermeticThresholds(
+        version="1",
+        overall=MetricFloor(recall=0.0, mrr=0.0),
+        slices={"factoid": MetricFloor(recall=1.01, mrr=0.0)},
+    )
+
+    report = await run_hermetic_tier(_with_queries(*factoids), gate, fake_embedding_service())
+
+    assert not report.passed
+    (factoid,) = report.slices
+    assert factoid.gated
+    assert any(f.startswith("factoid:") and "below floor" in f for f in report.failures)
 
 
 class ExplodingRetriever:

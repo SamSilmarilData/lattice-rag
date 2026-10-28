@@ -15,13 +15,16 @@ from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.routing.router import RouteDecision
 from lattice_rag.storage.db import SubgraphResult
+from tests.unit.pool_helpers import pool_of
+
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
 METRIC_NAMES = ("faithfulness", "context_precision", "answer_relevance", "answer_correctness")
 
 
 def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
     dataset = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [],
         "queries": [
@@ -29,6 +32,7 @@ def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
                 "id": "q1",
                 "query": "What is first?",
                 "slice": "unanswerable",
+                "case": "direct",
                 "expected_route": "hybrid",
                 "reference_answer": "The first.",
                 "gold_passages": [],
@@ -36,7 +40,7 @@ def _write_gold_set(tmp_path: Path) -> tuple[Path, Path]:
         ],
     }
     baseline = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "metrics": {"faithfulness": 0.5, "context_precision": 0.5, "answer_relevance": 0.5},
         "gate_thresholds": {
             "max_regression_delta": 0.06,
@@ -84,8 +88,7 @@ async def test_prompt_and_judge_number_chunks_from_one_identically(tmp_path: Pat
         semantic_cache=MagicMock(get=AsyncMock(return_value=None), put=MagicMock()),
         fallback_cache=MagicMock(find_closest_fallback=AsyncMock(return_value=None)),
         retrieval_pipeline=pipeline,
-        groq=GroqSynthesizer(client=groq_client, model="m"),
-        gemini=MagicMock(),
+        pool=pool_of(groq=GroqSynthesizer(client=groq_client, model="m"), gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed_svc,
     )

@@ -51,10 +51,15 @@ export interface QueryResponse {
   sources: SourceChunk[];
   graphPath?: SubgraphDTO | null;
   timings: StageTiming[];
+  // True only when no Model Pool member gave a complete answer (FAQ / offline message)
   degraded: boolean;
   lowGrounding: boolean;
   // Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
   unverified: boolean;
+  // Who answered: a Model Pool member (provider + model), the FAQ (model null), or nobody
+  // (both null: chitchat, cache hit)
+  provider: GenerationProvider | null;
+  model: string | null;
 }
 
 export interface IngestRequest {
@@ -92,7 +97,13 @@ export interface HealthResponse {
 
 // A metric is null when it was not judged: it does not apply to the query's
 // Slice, or the query failed (error is set) and was never sent to the judge.
-export type EvalQueryError = 'pipeline_error' | 'judge_error';
+export type EvalQueryError = 'pipeline_error' | 'judge_error' | 'provider_degraded';
+
+export type GenerationProvider = 'groq' | 'gemini' | 'redis_faq' | 'offline';
+
+// Mirror the Route and Slice Literals in src/lattice_rag/vocabulary.py
+export type Route = 'hybrid' | 'massive_context' | 'chitchat';
+export type Slice = 'factoid' | 'multihop' | 'unanswerable' | 'chitchat' | 'long_context';
 
 export interface EvalQueryResult {
   query: string;
@@ -102,9 +113,35 @@ export interface EvalQueryResult {
   answerRelevance: number | null;
   answerCorrectness: number | null;
   error: EvalQueryError | null;
+  // null when the pipeline failed; routeVerified is false for the System 1 fallback route
+  chosenRoute: Route | null;
+  routeVerified: boolean;
+  // Provider that generated the answer; null when nothing was generated
+  // (pipeline error, chitchat, cache hit)
+  provider: GenerationProvider | null;
+  // Model Pool member's model that answered; null for the FAQ or when nothing was generated
+  model: string | null;
+  // Graph Recall: share of the query's expected entities among the graph context's Entities;
+  // null when the query lists none or the pipeline failed. Unjudged and advisory.
+  graphRecall: number | null;
+  // Gold Set query id; null only in reports written before ids were recorded
+  queryId: string | null;
 }
 
-// Means are over the queries where the metric was judged (null if none were)
+// A query whose chosen Route differs from its Expected Route
+export interface Misroute {
+  queryId: string;
+  slice: Slice;
+  chosenRoute: Route;
+  expectedRoute: Route;
+}
+
+// Means are over the queries where the metric was judged (null if none were).
+// routeAccuracy is over routeAccuracyScored queries: outside the chitchat Slice, pipeline ran,
+// and Jev chose the Route. Unverified fallbacks and pipeline errors are counted, not scored.
+// Its floor is advisory and never fails the gate.
+// graphRecall is the mean per-query Graph Recall over graphRecallScored queries (those with
+// expected entities whose pipeline ran). Unjudged and advisory: it never fails the gate.
 export interface EvalRunResponse {
   totalQueries: number;
   passedGate: boolean;
@@ -115,7 +152,29 @@ export interface EvalRunResponse {
   meanAnswerCorrectness: number | null;
   failedQueries: number;
   results: EvalQueryResult[];
+  routeAccuracy: number | null;
+  routeAccuracyBySlice: Record<string, number>;
+  routeAccuracyFloor: number | null;
+  routeAccuracyScored: number;
+  routeAccuracyUnverified: number;
+  routeAccuracyErrored: number;
+  misroutes: Misroute[];
+  graphRecall: number | null;
+  graphRecallBySlice: Record<string, number>;
+  graphRecallScored: number;
+  // Model mix: answers per Model Pool member ('provider:model'), plus the FAQ / offline
+  // fallback under its provider name
+  answersByModel: Record<string, number>;
+  // Per-query floor rule the gate applied: 'known_good' fails only Known-Good Queries
+  // below the floor (others are reported in knownWeak); 'any_query' is the legacy rule
+  floorRule: FloorRule;
+  // Gold Set ids whose floor miss failed the gate
+  floorFailures: string[];
+  // Gold Set ids below the floor that are not Known-Good Queries: reported, never gating
+  knownWeak: string[];
 }
+
+export type FloorRule = 'known_good' | 'any_query';
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';
 

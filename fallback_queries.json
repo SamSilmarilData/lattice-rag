@@ -177,7 +177,7 @@
   },
   {
     "query": "How is Jev Choice used in lattice-rag routing?",
-    "answer": "Jev Choice classifies incoming prompts into five routes: `vector_exact`, `graph_relational`, `hybrid`, `chitchat`, or `massive_context` in under 200ms."
+    "answer": "Jev Choice classifies incoming prompts into three routes: `hybrid` (retrieval), `massive_context`, or `chitchat` in under 200ms; pure small talk skips the call."
   },
   {
     "query": "How is Jev Noul used in the Context Guardrail?",

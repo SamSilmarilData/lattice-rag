@@ -64,11 +64,12 @@ def chunk_text(text: str, target_size: int = 512, overlap: int = 64) -> list[str
         else:
             if current_chunk:
                 chunks.append(" ".join(current_chunk))
-                # Keep tail sentences for overlap using slice
+                # Always carry the last sentence (a fact may span the boundary), plus
+                # earlier tail sentences while they fit the overlap budget
                 overlap_len = 0
                 keep_count = 0
                 for prev in reversed(current_chunk):
-                    if overlap_len + len(prev) <= overlap:
+                    if keep_count == 0 or overlap_len + len(prev) <= overlap:
                         keep_count += 1
                         overlap_len += len(prev) + 1
                     else:

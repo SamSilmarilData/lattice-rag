@@ -34,6 +34,9 @@ from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog
+from tests.unit.pool_helpers import pool_of
+
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
 SECRET_QUERY = "Explain the zebra-quantum-7731 indexing scheme in detail"
 ADMIN_HEADERS = {ADMIN_KEY_HEADER: "admin-secret"}
@@ -87,8 +90,7 @@ def _build_app(
         semantic_cache=SemanticCache(),
         fallback_cache=fallback_cache,
         retrieval_pipeline=RetrievalPipeline(store, embed_svc),
-        groq=groq,
-        gemini=MagicMock(),
+        pool=pool_of(groq=groq, gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed_svc,
     )
@@ -139,7 +141,7 @@ def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "ds.json").write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "domain": "test",
                 "corpus": [],
                 "queries": [
@@ -147,6 +149,7 @@ def _write_dataset(tmp_path: Path) -> None:
                         "id": "q1",
                         "query": SECRET_QUERY,
                         "slice": "unanswerable",
+                        "case": "direct",
                         "expected_route": "hybrid",
                         "reference_answer": "gt",
                         "gold_passages": [],
@@ -158,7 +161,7 @@ def _write_dataset(tmp_path: Path) -> None:
     (tmp_path / "base.json").write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "metrics": {},
                 "gate_thresholds": {
                     "max_regression_delta": 0.03,

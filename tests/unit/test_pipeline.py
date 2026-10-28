@@ -279,11 +279,15 @@ def two_topic_store(tmp_path):
 @pytest.mark.asyncio
 async def test_graph_context_excludes_relations_of_guardrail_rejected_chunks(two_topic_store):
     """A relation reachable only from a chunk the guardrail rejected is not in the graph."""
+    # Two hops (the ablation's forced count) would reach furthest from a rejected chunk
     pipeline = RetrievalPipeline(
-        two_topic_store, _passthrough_embedder(), router_guardrail=_RejectingGuardrail("Rejected")
+        two_topic_store,
+        _passthrough_embedder(),
+        router_guardrail=_RejectingGuardrail("Rejected"),
+        forced_hops=2,
     )
 
-    result = await pipeline.retrieve("FastEmbed Paris", route="graph_relational")
+    result = await pipeline.retrieve("FastEmbed Paris", route="hybrid")
 
     assert [c["text"] for c in result.final_chunks] == ["Kept: FastEmbed uses ONNX."]
     relations = {e["relation_type"] for e in result.graph_context.edges}

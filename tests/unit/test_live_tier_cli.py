@@ -14,7 +14,7 @@ import pytest
 from click.testing import CliRunner
 
 from lattice_rag import cli
-from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
 
 
 def _report(passed: bool = True) -> EvalRunResponse:
@@ -84,7 +84,7 @@ def test_eval_without_a_live_key_fails_and_names_it(mocked_live_eval, monkeypatc
 # --- Baseline measurement from repeated Live Tier runs ---------------------------------
 
 _BASELINE = {
-    "version": "2.0.0",
+    "version": "3.0.0",
     "updated_at": "2026-01-01T00:00:00Z",
     "total_queries": 3,
     "metrics": {"faithfulness": 0.5},
@@ -146,6 +146,73 @@ def test_measure_baseline_sets_means_and_two_sigma_tolerance(tmp_path: Path):
     assert "2" in loaded.measurement.tolerance_rule
 
 
+def test_measure_baseline_notes_record_the_model_mix(tmp_path: Path):
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    mixes = [
+        {"groq:qwen/qwen3.8-27b": 2, "groq:openai/gpt-oss-120b": 1},
+        {"groq:qwen/qwen3.8-27b": 3},
+    ]
+    runs = []
+    for i, mix in enumerate(mixes):
+        path = tmp_path / f"r{i}.json"
+        path.write_bytes(
+            msgspec.json.encode(
+                EvalRunResponse(
+                    total_queries=3,
+                    passed_gate=True,
+                    regression_delta=0.0,
+                    mean_faithfulness=0.8 + i / 100,
+                    answers_by_model=mix,
+                )
+            )
+        )
+        runs.append(str(path))
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    measurement = load_baseline(baseline).measurement
+    assert measurement is not None
+    assert measurement.notes == (
+        "Model mix over 2 runs: groq:qwen/qwen3.8-27b 5, groq:openai/gpt-oss-120b 1"
+    )
+
+
+def test_measure_baseline_records_route_accuracy_per_run_and_mean(tmp_path: Path):
+    """Route Accuracy is advisory, so it is recorded next to the means but sets no tolerance."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = []
+    for i, accuracy in enumerate([0.975, 0.9625, None]):
+        path = tmp_path / f"r{i}.json"
+        path.write_bytes(
+            msgspec.json.encode(
+                EvalRunResponse(
+                    total_queries=3,
+                    passed_gate=True,
+                    regression_delta=0.0,
+                    mean_faithfulness=0.8,
+                    route_accuracy=accuracy,
+                )
+            )
+        )
+        runs.append(str(path))
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    measurement = load_baseline(baseline).measurement
+    assert measurement is not None
+    assert measurement.route_accuracy_runs == [0.975, 0.9625]  # a run with none scored is skipped
+    assert measurement.route_accuracy == pytest.approx(0.9688)
+    assert measurement.tolerance == pytest.approx(0.01)  # Route Accuracy never widens it
+
+
 def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps(_BASELINE))
@@ -156,3 +223,193 @@ def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
     assert result.exit_code != 0
     assert "at least two" in result.output
     assert json.loads(baseline.read_text()) == _BASELINE
+
+
+def _scored(qid: str, faithfulness: float, error: EvalQueryError | None = None) -> EvalQueryResult:
+    if error is not None:
+        return EvalQueryResult(query=qid, passed=False, error=error, query_id=qid)
+    return EvalQueryResult(
+        query=qid, passed=True, faithfulness=faithfulness, answer_correctness=0.9, query_id=qid
+    )
+
+
+def _run_with_results(tmp_path: Path, name: str, results: list[EvalQueryResult]) -> str:
+    report = EvalRunResponse(
+        total_queries=len(results),
+        passed_gate=False,
+        regression_delta=0.0,
+        mean_faithfulness=0.8,
+        results=results,
+    )
+    path = tmp_path / name
+    path.write_bytes(msgspec.json.encode(report))
+    return str(path)
+
+
+def test_measure_baseline_records_queries_that_cleared_the_floor_in_every_run(tmp_path: Path):
+    """good clears 0.50 in both runs; flaky misses once; erred fails once; vetoed has a
+    Noul veto (faithfulness zeroed) once. Only good is a Known-Good Query."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = [
+        _run_with_results(
+            tmp_path,
+            "r1.json",
+            [
+                _scored("good", 0.9),
+                _scored("flaky", 0.9),
+                _scored("erred", 0.9),
+                _scored("vetoed", 0.0),
+            ],
+        ),
+        _run_with_results(
+            tmp_path,
+            "r2.json",
+            [
+                _scored("good", 0.5),
+                _scored("flaky", 0.49),
+                _scored("erred", 0, EvalQueryError.JUDGE_ERROR),
+                _scored("vetoed", 0.9),
+            ],
+        ),
+    ]
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    assert load_baseline(baseline).known_good == ["good"]
+    assert "known_good -> 1 of 4" in result.output
+
+
+def test_measure_baseline_without_query_ids_leaves_known_good_unset(tmp_path: Path):
+    """Reports written before ids were recorded cannot name Known-Good Queries."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = [_run_file(tmp_path, f"r{i}.json", 0.8 + i / 100, 0.7) for i in range(2)]
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    assert "known_good" not in json.loads(baseline.read_text())
+    assert "any query below the floor fails" in result.output
+
+
+def test_eval_passes_configured_degraded_retry_delay(monkeypatch, mocked_live_eval):
+    captured: dict = {}
+
+    def _runner(**kwargs):
+        captured.update(kwargs)
+        return mocked_live_eval
+
+    monkeypatch.setattr("lattice_rag.eval.EvalRunner", _runner)
+    cli._build_harness.return_value["config"].eval_degraded_retry_delay = 9.0
+
+    result = CliRunner().invoke(cli.main, ["eval"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["degraded_retry_delay"] == 9.0
+
+
+# --- Experiment Arms (#46 forced hops, #47 graph context) ----------------------
+
+
+def test_eval_runs_the_configured_system_by_default(mocked_live_eval):
+    result = CliRunner().invoke(cli.main, ["eval"])
+
+    assert result.exit_code == 0, result.output
+    cli._build_harness.assert_awaited_once_with(force_hops=None, graph_context=None)
+
+
+def test_eval_passes_the_experiment_arm_to_the_harness(mocked_live_eval):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    result = CliRunner().invoke(
+        cli.main, ["eval", "--force-hops", "2", "--graph-context", "relational"]
+    )
+
+    assert result.exit_code == 0, result.output
+    cli._build_harness.assert_awaited_once_with(
+        force_hops=2, graph_context=GraphContextMode.RELATIONAL
+    )
+
+
+@pytest.mark.parametrize("args", [["--force-hops", "3"], ["--graph-context", "sometimes"]])
+def test_eval_rejects_an_unknown_arm(mocked_live_eval, args):
+    result = CliRunner().invoke(cli.main, ["eval", *args])
+
+    assert result.exit_code == 2
+    mocked_live_eval.run_evaluation.assert_not_called()
+
+
+@pytest.fixture
+def offline_services(monkeypatch):
+    """Stub every service `_build_harness` constructs, so the real wiring runs offline."""
+    made_guardrails: list[float] = []
+
+    def guardrail(threshold: float = 0.5, **_kw):
+        made_guardrails.append(threshold)
+        return MagicMock()
+
+    for target in (
+        "lattice_rag.storage.db.LatticeStore",
+        "lattice_rag.retrieval.embeddings.EmbeddingService",
+        "lattice_rag.routing.router.QueryRouter",
+        "lattice_rag.caching.semantic_cache.SemanticCache",
+        "lattice_rag.generation.groq_synthesizer.GroqSynthesizer",
+        "lattice_rag.generation.gemini_synthesizer.GeminiSynthesizer",
+    ):
+        monkeypatch.setattr(target, MagicMock())
+    fallback = MagicMock()
+    fallback.return_value.connect = AsyncMock()
+    monkeypatch.setattr("lattice_rag.caching.fallback_cache.FallbackCache", fallback)
+    monkeypatch.setattr("lattice_rag.routing.guardrail.ContextGuardrail", guardrail)
+    return made_guardrails
+
+
+async def test_harness_applies_the_arm_and_the_phase5_config(offline_services, monkeypatch):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "on")
+    monkeypatch.setenv("GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD", "0.35")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "false")
+
+    h = await cli._build_harness(force_hops=1, graph_context=GraphContextMode.OFF)
+
+    assert h["pipeline"].forced_hops == 1
+    assert h["orchestrator"].graph_context_in_prompt is GraphContextMode.OFF
+    assert offline_services == [0.5, 0.35]
+    guardrails = h["pipeline"].guardrails
+    assert guardrails.for_route("massive_context") is not guardrails.for_route("hybrid")
+
+
+async def test_harness_builds_the_configured_pool_with_the_llm_timeout(
+    offline_services, monkeypatch
+):
+    from lattice_rag.generation import gemini_synthesizer, groq_synthesizer
+
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "11")
+    monkeypatch.setenv("LLM_POOL", "groq:a,gemini:g@low")
+
+    h = await cli._build_harness()
+
+    assert [m.label for m in h["orchestrator"].pool] == ["groq:a", "gemini:g"]
+    groq_kwargs = groq_synthesizer.GroqSynthesizer.call_args.kwargs
+    gemini_kwargs = gemini_synthesizer.GeminiSynthesizer.call_args.kwargs
+    assert (groq_kwargs["model"], groq_kwargs["timeout_seconds"]) == ("a", 11.0)
+    assert (gemini_kwargs["model"], gemini_kwargs["timeout_seconds"]) == ("g", 11.0)
+    assert gemini_kwargs["thinking"] == "low"
+
+
+async def test_harness_without_an_arm_follows_the_environment(offline_services, monkeypatch):
+    from lattice_rag.vocabulary import GraphContextMode
+
+    monkeypatch.setenv("GRAPH_CONTEXT_IN_PROMPT", "relational")
+    monkeypatch.setenv("GUARDRAIL_SKIP_MASSIVE_CONTEXT", "true")
+
+    h = await cli._build_harness()
+
+    assert h["pipeline"].forced_hops is None
+    assert h["orchestrator"].graph_context_in_prompt is GraphContextMode.RELATIONAL
+    assert h["pipeline"].guardrails.for_route("massive_context") is None

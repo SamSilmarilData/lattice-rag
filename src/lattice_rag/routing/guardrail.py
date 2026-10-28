@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Noul
+
+from lattice_rag.config import (
+    DEFAULT_GUARDRAIL_THRESHOLD,
+    DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD,
+)
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -25,7 +32,7 @@ class ContextGuardrail:
 
     def __init__(
         self,
-        threshold: float = 0.5,
+        threshold: float = DEFAULT_GUARDRAIL_THRESHOLD,
         ts_client: AsyncTypeSafeClient | None = None,
     ) -> None:
         """Initializes the ContextGuardrail.
@@ -195,3 +202,67 @@ def with_rerank_skip(
     if guardrail is None or min_score is None:
         return guardrail
     return RerankScoreGate(guardrail, min_score)
+
+
+class RouteGuardrails:
+    """The guardrail each Route's retrieval uses: ``default`` unless ``overrides`` names it.
+
+    An override of ``None`` skips Noul on that Route, so its answers are Unverified and
+    never written to Tier 1 (#48 ``GUARDRAIL_SKIP_MASSIVE_CONTEXT``).
+    """
+
+    def __init__(
+        self,
+        default: ChunkGuardrail | None,
+        overrides: Mapping[Route, ChunkGuardrail | None] | None = None,
+    ) -> None:
+        self.default = default
+        self.overrides = dict(overrides or {})
+
+    def for_route(self, route: Route) -> ChunkGuardrail | None:
+        return self.overrides.get(route, self.default)
+
+    async def aclose(self) -> None:
+        closed: list[ChunkGuardrail] = []
+        for guardrail in (self.default, *self.overrides.values()):
+            if guardrail is not None and not any(guardrail is c for c in closed):
+                closed.append(guardrail)
+                await guardrail.aclose()
+
+    async def close(self) -> None:
+        """Alias for aclose."""
+        await self.aclose()
+
+
+def build_route_guardrails(
+    make: Callable[[float], ChunkGuardrail] | None,
+    *,
+    skip_rerank_score: float | None = None,
+    massive_context_threshold: float = DEFAULT_MASSIVE_CONTEXT_GUARDRAIL_THRESHOLD,
+    skip_massive_context: bool = False,
+) -> RouteGuardrails:
+    """Build every Route's guardrail from config; both composition roots call this.
+
+    ``make(threshold)`` builds a Noul guardrail; ``None`` (degraded mode, no TypeSafe key)
+    leaves every Route unchecked. ``massive_context`` gets its own guardrail when its
+    threshold differs from the global one, and none when ``skip_massive_context`` is set
+    (the skip wins over the threshold). The rerank-score skip wraps each guardrail built.
+    """
+    if make is None:
+        return RouteGuardrails(None)
+
+    def build(threshold: float) -> ChunkGuardrail:
+        guardrail = make(threshold)
+        return (
+            guardrail
+            if skip_rerank_score is None
+            else RerankScoreGate(guardrail, skip_rerank_score)
+        )
+
+    default = build(DEFAULT_GUARDRAIL_THRESHOLD)
+    overrides: dict[Route, ChunkGuardrail | None] = {}
+    if skip_massive_context:
+        overrides["massive_context"] = None
+    elif massive_context_threshold != DEFAULT_GUARDRAIL_THRESHOLD:
+        overrides["massive_context"] = build(massive_context_threshold)
+    return RouteGuardrails(default, overrides)

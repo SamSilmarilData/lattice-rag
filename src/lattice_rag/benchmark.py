@@ -195,7 +195,10 @@ class BenchmarkEngine:
         iterations: int = 10,
         warmup: int = 2,
     ) -> LatencyStats:
-        """Measure Stage 2 multi-hop graph traversal from Stage 1 chunk anchors."""
+        """Measure Stage 2 graph traversal from Stage 1 chunk anchors.
+
+        Times the 1-hop walk queries run in production (ADR-0003).
+        """
         traverser = GraphTraverser(self.store)
         if not anchor_ids:
             # Traversal starts from *chunk* ids (Stage 1 output), not entity ids
@@ -205,10 +208,10 @@ class BenchmarkEngine:
             anchor_ids = [h.node_id for h in hits]
 
         async def _traverse() -> Any:
-            return await traverser.traverse(anchor_ids, route="graph_relational", budget=25)
+            return await traverser.traverse(anchor_ids, route="hybrid", budget=25)
 
         return await self.benchmark_callable(
-            name="Stage 2: Graph Traversal (2-hop)",
+            name="Stage 2: Graph Traversal (1-hop)",
             fn=_traverse,
             iterations=iterations,
             warmup=warmup,

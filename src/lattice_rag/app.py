@@ -43,13 +43,12 @@ from lattice_rag.config import get_config, load_config
 from lattice_rag.eval import EvalRunner, JevEvaluator
 from lattice_rag.eval.jobs import EvalJobManager
 from lattice_rag.generation.chitchat import ChitchatHandler
-from lattice_rag.generation.gemini_fallback import GeminiFallback
-from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
+from lattice_rag.generation.model_pool import build_model_pool
 from lattice_rag.ingestion import DocumentIngester
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.pipeline import RetrievalPipeline
-from lattice_rag.routing.guardrail import ContextGuardrail, with_rerank_skip
+from lattice_rag.routing.guardrail import ContextGuardrail, build_route_guardrails
 from lattice_rag.routing.router import QueryRouter
 from lattice_rag.security import SecretStr, configure_structlog, sanitize_error_detail
 from lattice_rag.storage.db import LatticeStore
@@ -105,10 +104,15 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     # 3. Decision routing & context guardrail. In mock-key mode neither is called, so no
     #    query pays for failing Jev calls; the resulting answers are flagged unverified.
     router = QueryRouter.offline() if config.using_mock_keys else QueryRouter(typesafe_client())
-    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set.
-    guardrail = with_rerank_skip(
-        None if config.using_mock_keys else ContextGuardrail(ts_client=typesafe_client()),
-        config.guardrail_skip_rerank_score,
+    #    The rerank-score Noul skip stays off unless GUARDRAIL_SKIP_RERANK_SCORE is set;
+    #    massive_context may get its own threshold or no Noul (phase 5, #48).
+    guardrail = build_route_guardrails(
+        None
+        if config.using_mock_keys
+        else lambda threshold: ContextGuardrail(threshold=threshold, ts_client=typesafe_client()),
+        skip_rerank_score=config.guardrail_skip_rerank_score,
+        massive_context_threshold=config.guardrail_massive_context_threshold,
+        skip_massive_context=config.guardrail_skip_massive_context,
     )
 
     # 4. Multi-tier caching (fuzzy hits need Noul verification, so none in mock mode)
@@ -121,17 +125,8 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     if fallback_file.exists():
         await fallback_cache.seed_from_file(fallback_file)
 
-    # 5. Generative synthesizers & chitchat
-    groq = GroqSynthesizer(
-        api_key=config.groq_api_key.get_secret_value() if config.groq_api_key else None,
-        model=config.groq_model,
-        max_tokens=config.llm_max_tokens,
-    )
-    gemini = GeminiFallback(
-        api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
-        model=config.gemini_model,
-        max_output_tokens=config.llm_max_tokens,
-    )
+    # 5. Model Pool (LLM_POOL, ADR-0004) & chitchat
+    pool = build_model_pool(config)
     chitchat = ChitchatHandler()
 
     # 6. 3-Stage Hybrid Retrieval Pipeline
@@ -147,11 +142,11 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         semantic_cache=semantic_cache,
         fallback_cache=fallback_cache,
         retrieval_pipeline=retrieval_pipeline,
-        groq=groq,
-        gemini=gemini,
+        pool=pool,
         chitchat=chitchat,
         embedding_service=embedding_service,
         answer_max_tokens=config.llm_max_tokens,
+        graph_context_in_prompt=config.graph_context_in_prompt,
     )
 
     # 8. Document Ingester (deep module)
@@ -169,6 +164,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         evaluator=evaluator,
         embedding_service=embedding_service,
         extractor=extractor,
+        degraded_retry_delay=config.eval_degraded_retry_delay,
     )
     # HTTP eval runs go through the job manager: one at a time, polled by handle
     eval_jobs = EvalJobManager(eval_runner)
@@ -195,8 +191,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         await fallback_cache.close()
         await semantic_cache.close()
         await router.close()
-        if guardrail is not None:
-            await guardrail.close()
+        await guardrail.close()
         store.close()
 
 

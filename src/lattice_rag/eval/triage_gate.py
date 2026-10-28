@@ -15,6 +15,7 @@ from lattice_rag.eval.gate import (
     PassThresholds,
     query_passes,
 )
+from lattice_rag.generation.prompt import graph_triples
 from lattice_rag.security import SecretStr, query_fingerprint
 
 logger = structlog.get_logger(__name__)
@@ -51,9 +52,14 @@ ANSWER_CORRECTNESS_CRITERIA = [
     "5: Fully correct; the `answer` states the same facts and conclusion as the `reference_answer`.",
 ]
 
+# The context can hold passages that disagree (the Gold Set's conflicting_sources and
+# ambiguity Cases); resolving that disagreement must not trip the faithfulness veto.
 CONTRADICTION_INSTRUCTIONS = (
     "Does the generated `answer` make any claim, fact, number, or assertion that "
-    "directly contradicts the facts stated in the source `context`?"
+    "directly contradicts the facts stated in the source `context`? When passages in "
+    "the `context` disagree with each other, an answer that follows one of them, or "
+    "reports the disagreement, is not a contradiction; only a claim that no passage "
+    "supports and that the `context` rules out is."
 )
 
 _METRIC_QUESTIONS: dict[str, Score] = {
@@ -132,8 +138,12 @@ class JevEvaluator:
         ground_truth: str,
         metrics: Sequence[str] = METRICS,
         thresholds: PassThresholds = DEFAULT_PASS_THRESHOLDS,
+        graph_context: dict[str, Any] | None = None,
     ) -> EvalQueryResult:
         """Judge one answer on ``metrics``; ``ground_truth`` is the Gold Set reference answer.
+
+        ``graph_context`` is the subgraph the generator was given; its triples are
+        judged as part of the context.
 
         Metrics not in ``metrics`` are left ``None``. Pass/fail applies ``thresholds``
         to every judged metric.
@@ -148,6 +158,10 @@ class JevEvaluator:
             text = c.get("text", "") if isinstance(c, dict) else str(c)
             if text:
                 context_parts.append(f"[Chunk {i + 1}] {text}")
+
+        triples = graph_triples(graph_context) if graph_context else []
+        if triples:
+            context_parts.append("Graph triples:\n" + "\n".join(triples))
 
         context_text = "\n\n".join(context_parts) if context_parts else "NO_CONTEXT_RETRIEVED"
 

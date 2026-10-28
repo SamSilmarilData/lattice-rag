@@ -208,3 +208,24 @@ async def test_document_ingester_rejects_duplicate_doc_id():
     with pytest.raises(DocumentExistsError):
         await ingester.ingest(doc_id="doc_1", title="T", text="LatticeDB is fast.")
     assert len(store.documents["doc_1"]["chunks"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_carries_last_sentence_of_each_chunk_into_the_next_regardless_of_length():
+    store = FakeStore()
+    ingester = DocumentIngester(
+        store=store,
+        embedding_service=FakeEmbeddingService(),
+        extractor=FakeExtractor(),
+        target_chunk_size=200,
+    )
+    # Each sentence is far longer than the 64-char overlap budget.
+    sentences = [f"Sentence number {i} " + "word " * 25 + "ends here." for i in range(6)]
+
+    await ingester.ingest(doc_id="doc_overlap", title="Overlap", text=" ".join(sentences))
+
+    chunks = [c.text for c in store.documents["doc_overlap"]["chunks"]]
+    assert len(chunks) > 2
+    for previous, following in zip(chunks, chunks[1:], strict=False):
+        last_sentence = previous[previous.rfind("Sentence number") :]
+        assert following.startswith(last_sentence)

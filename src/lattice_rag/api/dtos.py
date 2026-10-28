@@ -6,6 +6,14 @@ from typing import Annotated, Any
 
 import msgspec
 
+# Lives in ``vocabulary`` so generation never imports the API layer; re-exported for the
+# wire DTOs that carry it.
+from lattice_rag.vocabulary import GenerationProvider as GenerationProvider
+from lattice_rag.vocabulary import (  # noqa: TC001  (msgspec resolves annotations at runtime)
+    Route,
+    Slice,
+)
+
 # Request size bounds: keep user-supplied text small enough that embedding,
 # GLiNER extraction, and LLM prompts stay bounded per request.
 MAX_QUERY_CHARS = 2_000
@@ -138,10 +146,15 @@ class QueryResponse(msgspec.Struct, rename="camel"):
     sources: list[SourceChunk] = []
     graph_path: SubgraphDTO | None = None
     timings: list[StageTiming] = []
+    # True only when no Model Pool member gave a complete answer (FAQ / offline message)
     degraded: bool = False
     low_grounding: bool = False
     # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
     unverified: bool = False
+    # Who answered: a Model Pool member (provider + model), the FAQ (model null), or
+    # nobody (null: chitchat, cache hit)
+    provider: GenerationProvider | None = None
+    model: str | None = None
 
 
 # ── Server-Sent Event payloads for POST /api/v1/query/stream ─────────────────
@@ -176,6 +189,8 @@ class StreamDone(msgspec.Struct, rename="camel"):
     low_grounding: bool = False
     # Unverified Answer: a Jev check (routing or guardrail) could not run; never cached
     unverified: bool = False
+    provider: GenerationProvider | None = None
+    model: str | None = None
 
 
 class StreamError(msgspec.Struct, rename="camel"):
@@ -206,7 +221,13 @@ class IngestResponse(msgspec.Struct, rename="camel"):
 
 
 class CacheStatsResponse(msgspec.Struct, rename="camel"):
-    """Response DTO for cache statistics."""
+    """Response DTO for cache statistics.
+
+    ``tier2_circuit_status`` combines the Model Pool's per-member circuit breakers (shared
+    by /query and /query/stream): ``closed`` when every breaker is closed, ``open`` when
+    every one is open, and ``partially_open`` when they disagree (some members are being
+    skipped while others still answer).
+    """
 
     tier1_hits: int
     tier1_misses: int
@@ -220,6 +241,7 @@ class EvalQueryError(StrEnum):
 
     PIPELINE_ERROR = "pipeline_error"
     JUDGE_ERROR = "judge_error"
+    PROVIDER_DEGRADED = "provider_degraded"
 
 
 class EvalQueryResult(msgspec.Struct, rename="camel"):
@@ -236,12 +258,53 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     answer_relevance: float | None = None
     answer_correctness: float | None = None
     error: EvalQueryError | None = None
+    # The Route the pipeline chose; None when the pipeline failed before answering
+    chosen_route: Route | None = None
+    # False when chosen_route is the System 1 fallback because Jev could not route
+    route_verified: bool = True
+
+    # Provider that generated the answer; None when nothing was generated
+    # (pipeline error, chitchat, cache hit)
+    provider: GenerationProvider | None = None
+    # Model Pool member's model that answered; None for the FAQ or when nothing was generated
+    model: str | None = None
+    # Graph Recall: share of the query's expected entities among the graph context's
+    # Entities. None when the query lists none or the pipeline failed. Never judged.
+    graph_recall: float | None = None
+    # The Gold Set query's id, filled by the runner; keys Known-Good Queries.
+    # None only in reports written before ids were recorded.
+    query_id: str | None = None
+
+
+class Misroute(msgspec.Struct, rename="camel"):
+    """A Gold Set query whose chosen Route differs from its Expected Route."""
+
+    query_id: str
+    slice: Slice
+    chosen_route: Route
+    expected_route: Route
+
+
+class FloorRule(StrEnum):
+    """Which queries the Live Tier's per-query floor fails the gate for."""
+
+    # Only Known-Good Queries (the baseline's ``known_good``) fail; others are Known-Weak
+    KNOWN_GOOD = "known_good"
+    # Legacy: any query below the floor fails (a baseline without ``known_good``)
+    ANY_QUERY = "any_query"
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):
     """Response DTO for an evaluation run.
 
     Means are over the queries where the metric was judged (``None`` if none were).
+    Route Accuracy is the share of scored queries whose chosen Route equals the Expected
+    Route (``None`` if none were scored). Scored means: outside the chitchat Slice (routed
+    deterministically), the pipeline ran, and Jev chose the Route. Unverified fallback
+    routes and pipeline errors are counted, not scored. Its floor is advisory only.
+    Graph Recall is the mean per-query Graph Recall over the ``graph_recall_scored``
+    queries that list expected entities and whose pipeline ran (``None`` if none). It is
+    unjudged and advisory: it never fails the gate.
     """
 
     total_queries: int
@@ -253,6 +316,25 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     mean_answer_correctness: float | None = None
     failed_queries: int = 0
     results: list[EvalQueryResult] = []
+    route_accuracy: float | None = None
+    route_accuracy_by_slice: dict[str, float] = {}
+    route_accuracy_floor: float | None = None
+    route_accuracy_scored: int = 0
+    route_accuracy_unverified: int = 0
+    route_accuracy_errored: int = 0
+    misroutes: list[Misroute] = []
+    graph_recall: float | None = None
+    graph_recall_by_slice: dict[str, float] = {}
+    graph_recall_scored: int = 0
+    # Model mix: answers per Model Pool member (``provider:model``), plus the FAQ /
+    # offline fallback under its provider name. Queries with no generation are not counted.
+    answers_by_model: dict[str, int] = {}
+    # The per-query floor rule this run was gated on, the Gold Set query ids whose
+    # floor miss failed the gate, and (known_good rule only) the ids below the floor
+    # that are not Known-Good Queries: reported, never gating
+    floor_rule: FloorRule = FloorRule.ANY_QUERY
+    floor_failures: list[str] = []
+    known_weak: list[str] = []
 
 
 class EvalJobStatus(StrEnum):

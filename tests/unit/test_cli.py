@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from click.testing import CliRunner
 
 from lattice_rag import cli
 
 
+@pytest.mark.usefixtures("small_gold_sets")
 def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
     """`seed` only touches storage, so it must not require TYPESAFE_API_KEY (Docker build)."""
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
@@ -30,7 +32,7 @@ def test_seed_runs_without_typesafe_key(monkeypatch, tmp_path):
 
 def _gold_set_with_one_document() -> dict[str, object]:
     return {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [{"document_id": "d1", "title": "D1", "text": "Hello world."}],
         "queries": [
@@ -38,7 +40,8 @@ def _gold_set_with_one_document() -> dict[str, object]:
                 "id": "q1",
                 "query": "What is said?",
                 "slice": "factoid",
-                "expected_route": "vector_exact",
+                "case": "direct",
+                "expected_route": "hybrid",
                 "reference_answer": "Hello world.",
                 "gold_passages": [{"document_id": "d1", "text": "Hello world."}],
             }

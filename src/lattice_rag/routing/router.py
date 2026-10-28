@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Final, cast
 
 import structlog
 from typesafe_sdk import AsyncTypeSafeClient, Choice
 
 from lattice_rag.generation.chitchat import is_pure_chitchat
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
+from lattice_rag.vocabulary import Route
 
 logger = structlog.get_logger(__name__)
 
@@ -16,18 +18,66 @@ _ROUTER_INSTRUCTIONS = (
     "Classify the user query into the single most appropriate routing category "
     "for a Hybrid GraphRAG system."
 )
-_ROUTER_CRITERIA = {
-    "vector_exact": "Precise factual lookups, e.g., 'What is X?', 'Define Y'.",
-    "graph_relational": "Multi-hop relational queries, e.g., 'How does X relate to Y?', 'What connects A to B?'.",
-    "hybrid": "Complex queries needing both vector and graph context, e.g., 'Explain the relationship between X, Y, and Z in the context of W'.",
-    "chitchat": "Greetings, small talk, non-technical conversation.",
-    "massive_context": "Queries requiring cross-document synthesis, e.g., 'Summarize all findings about...', 'Compare everything we know about...'.",
+
+
+@dataclass(frozen=True)
+class RouteGuide:
+    """What Jev is told about one Route: a description and worked examples of it."""
+
+    description: str
+    examples: tuple[str, ...]
+
+    def criterion(self) -> str:
+        quoted = ", ".join(f"'{example}'" for example in self.examples)
+        return f"{self.description} Examples: {quoted}."
+
+
+ROUTE_GUIDES: Final[dict[Route, RouteGuide]] = {
+    "hybrid": RouteGuide(
+        description=(
+            "A question the documents answer from a few specific passages: a single fact, "
+            "name, number or setting (even phrased as 'how' or 'why'), how named entities "
+            "or components are connected, or how two or three parts of one mechanism "
+            "interact. Not a full-system walkthrough."
+        ),
+        examples=(
+            "What model is used for X?",
+            "What threshold does Y use?",
+            "Why was Z chosen over W?",
+            "How is X connected to Y?",
+            "What edges link A, B and C?",
+            "How do traversed results feed into the reranking step?",
+            "How does design A compare with design B?",
+        ),
+    ),
+    "chitchat": RouteGuide(
+        description="Greetings, thanks, goodbyes and small talk with no technical content.",
+        examples=("hello there", "thanks so much!", "what can you do?"),
+    ),
+    "massive_context": RouteGuide(
+        description=(
+            "A request to cover a whole process, stack or set of mechanisms across many "
+            "parts of the documents: an end-to-end flow, a step-by-step walk through "
+            "everything that happens, a summary of the whole system, or a comparison of "
+            "every mechanism of a kind. Multi-part questions that list several areas to "
+            "cover belong here."
+        ),
+        examples=(
+            "Describe the full end-to-end flow of X",
+            "Walk through everything that happens to Y from start to finish",
+            "Summarize the whole stack: A, B, C and D",
+            "Compare every mechanism used to do Z",
+        ),
+    ),
+}
+_ROUTER_CRITERIA: Final[dict[str, str]] = {
+    route: guide.criterion() for route, guide in ROUTE_GUIDES.items()
 }
 
 
 @dataclass(frozen=True)
 class RouteDecision:
-    route: str
+    route: Route
     confidence: float
     # False when the route is a fallback because the Jev check could not run
     verified: bool = True
@@ -123,7 +173,7 @@ class QueryRouter:
 
             confidence = float(getattr(choice_result, "confidence", 1.0))
             decision = RouteDecision(
-                route=chosen_route,
+                route=cast("Route", chosen_route),  # checked against _ROUTER_CRITERIA above
                 confidence=confidence,
             )
             logger.info("Query routed", route=decision.route, confidence=decision.confidence)

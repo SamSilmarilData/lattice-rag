@@ -1,10 +1,39 @@
 {
   "version": "1",
-  "overall": {"recall": 0.9, "mrr": 0.9},
+  "overall": {"recall": 0.67, "mrr": 0.66},
   "slices": {
-    "factoid": {"recall": 0.9, "mrr": 0.9},
-    "multihop": {"recall": 0.9, "mrr": 0.85},
-    "long_context": {"recall": 0.9, "mrr": 0.75}
+    "factoid": {"recall": 0.73, "mrr": 0.64},
+    "multihop": {"recall": 0.67, "mrr": 0.76},
+    "long_context": {"recall": 0.45, "mrr": 0.54}
   },
-  "unanswerable_max_rerank_score": 0.0
+  "measured": {
+    "gold_set_version": "3.0.0",
+    "rule": "Each floor is the lowest value measured across the CPU kernel classes, rounded down to two decimals, with no extra slack (#44). avx2: GitHub ubuntu-latest AMD EPYC 7763; avx512_vnni: GitHub ubuntu-latest AMD EPYC 9V45; arm: Apple Silicon (local). Scores are bit-identical within a kernel class.",
+    "kernel_classes": {
+      "avx2": {
+        "overall": {"recall": 0.6774, "mrr": 0.6625},
+        "slices": {
+          "factoid": {"recall": 0.7317, "mrr": 0.6524},
+          "multihop": {"recall": 0.6778, "mrr": 0.7667},
+          "long_context": {"recall": 0.4544, "mrr": 0.5478}
+        }
+      },
+      "avx512_vnni": {
+        "overall": {"recall": 0.685, "mrr": 0.6665},
+        "slices": {
+          "factoid": {"recall": 0.7317, "mrr": 0.6484},
+          "multihop": {"recall": 0.7111, "mrr": 0.7667},
+          "long_context": {"recall": 0.4544, "mrr": 0.5908}
+        }
+      },
+      "arm": {
+        "overall": {"recall": 0.6774, "mrr": 0.6716},
+        "slices": {
+          "factoid": {"recall": 0.7317, "mrr": 0.6524},
+          "multihop": {"recall": 0.6778, "mrr": 0.7667},
+          "long_context": {"recall": 0.4544, "mrr": 0.6075}
+        }
+      }
+    }
+  }
 }

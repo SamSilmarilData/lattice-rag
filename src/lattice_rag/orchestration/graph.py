@@ -5,29 +5,33 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from lattice_rag.caching.semantic_cache import CacheVerificationError
 from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
-from lattice_rag.generation.resilient_synthesizer import ResilientSynthesizer, StreamOutcome
+from lattice_rag.generation.prompt import graph_for_prompt
+from lattice_rag.generation.resilient_synthesizer import (
+    PoolMember,
+    ResilientSynthesizer,
+    StreamOutcome,
+)
 from lattice_rag.orchestration.state import PipelineState
+from lattice_rag.vocabulary import GraphContextMode
 
 if TYPE_CHECKING:
     from lattice_rag.caching.fallback_cache import FallbackCache
     from lattice_rag.caching.semantic_cache import SemanticCache
     from lattice_rag.generation.chitchat import ChitchatHandler
-    from lattice_rag.generation.gemini_fallback import GeminiFallback
-    from lattice_rag.generation.groq_synthesizer import GroqSynthesizer
     from lattice_rag.retrieval.pipeline import RetrievalPipeline
     from lattice_rag.routing.router import QueryRouter, RouteDecision
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TOP_K = 5
-# Cross-document synthesis goes to Gemini's large context window, so give it more evidence
-# (bounded because every retrieved candidate passes through the CPU cross-encoder)
+# Cross-document synthesis gets more evidence (bounded because every retrieved candidate
+# passes through the CPU cross-encoder)
 MASSIVE_CONTEXT_TOP_K = 12
 
 
@@ -77,25 +81,50 @@ class RAGOrchestrator:
         semantic_cache: SemanticCache,
         fallback_cache: FallbackCache,
         retrieval_pipeline: RetrievalPipeline,
-        groq: GroqSynthesizer,
-        gemini: GeminiFallback,
         chitchat: ChitchatHandler,
         embedding_service: Any,
+        pool: Sequence[PoolMember],
         answer_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
+        graph_context_in_prompt: GraphContextMode = GraphContextMode.OFF,
+        synthesizer: ResilientSynthesizer | None = None,
     ) -> None:
+        """``pool`` is the Model Pool in cascade order (built by ``build_model_pool``).
+
+        ``synthesizer`` reuses an existing :class:`ResilientSynthesizer` over that pool (and
+        its breakers); by default a new one is built.
+        """
         self.router = router
         self.semantic_cache = semantic_cache
         self.fallback_cache = fallback_cache
         self.retrieval = retrieval_pipeline
-        self.groq = groq
-        self.gemini = gemini
+        self.pool: tuple[PoolMember, ...] = tuple(pool)
         self.chitchat = chitchat
         self.embedding_service = embedding_service
-        self.synthesizer = ResilientSynthesizer(
-            groq=self.groq,
-            gemini=self.gemini,
+        self.answer_max_tokens = answer_max_tokens
+        self.graph_context_in_prompt = graph_context_in_prompt
+        self.synthesizer = synthesizer or ResilientSynthesizer(
+            pool=self.pool,
             fallback_cache=self.fallback_cache,
             default_max_tokens=answer_max_tokens,
+        )
+
+    def with_retrieval(self, retrieval_pipeline: RetrievalPipeline) -> RAGOrchestrator:
+        """The same orchestrator over another retrieval pipeline (the eval temp DB).
+
+        Every setting carries over, so a Live Tier arm measures the configuration it names.
+        The synthesizer is shared, so a pool member whose breaker opened stays skipped.
+        """
+        return RAGOrchestrator(
+            router=self.router,
+            semantic_cache=self.semantic_cache,
+            fallback_cache=self.fallback_cache,
+            retrieval_pipeline=retrieval_pipeline,
+            chitchat=self.chitchat,
+            embedding_service=self.embedding_service,
+            pool=self.pool,
+            answer_max_tokens=self.answer_max_tokens,
+            graph_context_in_prompt=self.graph_context_in_prompt,
+            synthesizer=self.synthesizer,
         )
 
     # ── Public Interfaces ────────────────────────────────────────────────
@@ -117,11 +146,15 @@ class RAGOrchestrator:
             route=done["route"],
             cache_hit=done["cached"],
             graph_context=done["graph_path"],
+            prompt_graph_context=done["prompt_graph"],
             filtered_chunks=done["sources"],
             low_grounding=done["low_grounding"],
             unverified=done["unverified"],
+            route_verified=done["route_verified"],
             answer=done["answer"],
             degraded=done["degraded"],
+            provider=done["provider"],
+            model=done["model"],
             timings=done["timings"],
             total_latency_ms=done["latency_ms"],
         )
@@ -154,9 +187,7 @@ class RAGOrchestrator:
         if triage.cached is not None:
             # A Tier 1 entry was verified, grounded and non-degraded when it was stored
             cached = triage.cached
-            route = cached.get("route") or (
-                triage.decision.route if triage.decision else "vector_exact"
-            )
+            route = cached.get("route") or (triage.decision.route if triage.decision else "hybrid")
             answer = cached.get("answer", "")
             logger.info("Tier 1 cache HIT (route=%s)", route)
             yield {"event": "stage", "data": {"stage": "cache_hit", "route": route}}
@@ -167,9 +198,13 @@ class RAGOrchestrator:
                 cached=True,
                 sources=cached.get("sources", []),
                 graph_path=cached.get("graph_path"),
+                prompt_graph=cached.get("prompt_graph"),
                 degraded=False,
+                provider=None,
+                model=None,
                 low_grounding=False,
                 unverified=False,
+                route_verified=True,  # only verified answers are stored in Tier 1
             )
             return
 
@@ -192,9 +227,13 @@ class RAGOrchestrator:
                 cached=False,
                 sources=[],
                 graph_path=None,
+                prompt_graph=None,
                 degraded=False,
+                provider=None,
+                model=None,
                 low_grounding=False,
                 unverified=False,
+                route_verified=decision.verified,
             )
             return
 
@@ -212,13 +251,14 @@ class RAGOrchestrator:
         )
         chunks = retrieved.final_chunks
         graph_dict = subgraph_as_dict(retrieved.graph_context)
+        prompt_graph = graph_for_prompt(graph_dict, route, self.graph_context_in_prompt)
 
         # 3. Generation
         yield {"event": "stage", "data": {"stage": "generation", "chunks_count": len(chunks)}}
         t_stage = time.perf_counter()
         outcome = StreamOutcome()
         tokens: list[str] = []
-        async for tok in self._generate(query, chunks, graph_dict, route, outcome, streaming):
+        async for tok in self._generate(query, chunks, prompt_graph, route, outcome, streaming):
             tokens.append(tok)
             yield {"event": "token", "data": {"delta": tok}}
         if outcome.error:
@@ -228,7 +268,8 @@ class RAGOrchestrator:
         )
         answer = "".join(tokens)
 
-        # 4. Tier 1 write rule: primary-provider answers grounded in verified evidence only
+        # 4. Tier 1 write rule: complete Model Pool answers (any member; not the FAQ, not an
+        #    interrupted stream) grounded in verified evidence only
         unverified = not decision.verified or retrieved.unverified or triage.cache_unverified
         if (
             use_cache
@@ -240,7 +281,13 @@ class RAGOrchestrator:
             self.semantic_cache.put(
                 query,
                 triage.query_embedding,
-                {"answer": answer, "route": route, "sources": chunks, "graph_path": graph_dict},
+                {
+                    "answer": answer,
+                    "route": route,
+                    "sources": chunks,
+                    "graph_path": graph_dict,
+                    "prompt_graph": prompt_graph,
+                },
             )
 
         yield finish(
@@ -249,9 +296,13 @@ class RAGOrchestrator:
             cached=False,
             sources=chunks,
             graph_path=graph_dict,
+            prompt_graph=prompt_graph,
             degraded=outcome.degraded,
+            provider=outcome.provider,
+            model=outcome.model,
             low_grounding=retrieved.low_grounding,
             unverified=unverified,
+            route_verified=decision.verified,
         )
 
     async def _triage(self, query: str, *, use_cache: bool) -> _Triage:
@@ -310,5 +361,6 @@ class RAGOrchestrator:
             query=query, context_chunks=chunks, graph_context=graph_context, route=route
         )
         outcome.provider = synth.provider
+        outcome.model = synth.model
         outcome.degraded = synth.degraded
         yield synth.answer

@@ -9,8 +9,10 @@ from lattice_rag.retrieval.embeddings import EmbeddingService
 from lattice_rag.retrieval.graph_traversal import GraphTraverser
 from lattice_rag.retrieval.reranker import PrecisionReranker
 from lattice_rag.retrieval.vector_search import HybridSearcher
+from lattice_rag.routing.guardrail import RouteGuardrails
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
 from lattice_rag.storage.db import SubgraphResult
+from lattice_rag.vocabulary import Route
 
 logger = logging.getLogger(__name__)
 
@@ -39,26 +41,45 @@ class RetrievalPipeline:
         store: Any,
         embedding_service: EmbeddingService,
         router_guardrail: Any = None,
+        *,
+        forced_hops: int | None = None,
     ) -> None:
         """Initialize the unified retrieval pipeline.
 
         Args:
             store: The LatticeDB store instance.
             embedding_service: Service to generate embeddings and rerank.
-            router_guardrail: Optional guardrail to filter chunks (ContextGuardrail).
+            router_guardrail: Optional guardrail to filter chunks (ContextGuardrail), or a
+                :class:`RouteGuardrails` choosing one per Route.
+            forced_hops: Eval-only Route ablation (#46): the three retrieval Routes walk this
+                many hops; ``massive_context`` keeps its own count.
         """
         self.store = store
         self.embedding_service = embedding_service
-        self.guardrail = router_guardrail
+        self.guardrails = (
+            router_guardrail
+            if isinstance(router_guardrail, RouteGuardrails)
+            else RouteGuardrails(router_guardrail)
+        )
+        self.forced_hops = forced_hops
 
         self.searcher = HybridSearcher(self.store, self.embedding_service)
-        self.traverser = GraphTraverser(self.store)
+        self.traverser = GraphTraverser(self.store, forced_hops=forced_hops)
         self.reranker = PrecisionReranker(self.embedding_service)
+
+    def with_store(self, store: Any) -> RetrievalPipeline:
+        """The same pipeline (per-Route guardrails, forced hops) over another store, e.g. an eval temp DB."""
+        return RetrievalPipeline(
+            store,
+            self.embedding_service,
+            router_guardrail=self.guardrails,
+            forced_hops=self.forced_hops,
+        )
 
     async def retrieve(
         self,
         query: str,
-        route: str = "hybrid",
+        route: Route = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
         budget: int = 25,
@@ -72,7 +93,7 @@ class RetrievalPipeline:
            fusion (top_k + RERANK_HEADROOM candidates).
         2. ``rerank``: Stage 3, cross-encoder reranking of every candidate down to top_k.
         3. ``guardrail_filter``: optional TypeSafe Jev Noul context guardrail pruning.
-        4. ``graph_traverse``: Stage 2, 1-to-2 hop graph traversal from the entities of
+        4. ``graph_traverse``: Stage 2, 1-hop graph traversal from the entities of
            the final chunks only.
 
         Stage numbers are the spec's names; graph traversal runs last so it only expands
@@ -118,10 +139,11 @@ class RetrievalPipeline:
         unverified = True
 
         # ── Step 3: Guardrail Context Relevance Filtering ────────────────────
-        if apply_guardrail and self.guardrail is not None:
+        guardrail = self.guardrails.for_route(route) if apply_guardrail else None
+        if guardrail is not None:
             t0 = time.perf_counter()
             try:
-                verdict = await self.guardrail.filter_chunks(query, reranked)
+                verdict = await guardrail.filter_chunks(query, reranked)
                 timings["guardrail_filter"] = (time.perf_counter() - t0) * 1000.0
                 final_chunks = verdict.chunks
                 low_grounding = verdict.low_grounding or not verdict.chunks
@@ -153,7 +175,7 @@ class RetrievalPipeline:
     async def execute(
         self,
         query: str,
-        route: str = "hybrid",
+        route: Route = "hybrid",
         apply_guardrail: bool = True,
         top_k: int = 5,
         budget: int = 25,

@@ -178,7 +178,7 @@ Because LatticeDB uses transactional locking, safe backups can be taken while th
 ### 5.2 Horizontal Scaling
 LatticeDB is an embedded, single-file database, so each process owns its own copy of the graph. Run **one** writable instance (the Cloud Run script pins `--max-instances 1`). Scaling out needs extra work that is not built in:
 - **Read replicas**: copy a seeded `lattice_rag.db` into each replica and route `/api/v1/ingest` to a single writer. Replicas only see new documents after the file is redistributed.
-- **Per-process state**: the Tier 1 semantic cache, the Groq circuit breaker and the rate-limit counters are in-memory per process.
+- **Per-process state**: the Tier 1 semantic cache, the Model Pool circuit breakers and the rate-limit counters are in-memory per process.
 - **Shared FAQ store**: set `REDIS_URL=redis://redis-cluster:6379/0` so every instance serves the same Tier 2 fallback answers.
 
 ---
@@ -207,26 +207,108 @@ LatticeDB is an embedded, single-file database, so each process owns its own cop
 | | Hermetic Tier | Live Tier |
 | :--- | :--- | :--- |
 | Workflow | `eval-gate.yml`, every push and PR | `live-tier.yml`, nightly (03:17 UTC) and `workflow_dispatch` |
-| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the fallback) |
-| Measures | Gold Set validity, retrieval recall and MRR per Slice | Jev-judged faithfulness, context precision, answer relevance, answer correctness |
+| Needs keys | No | `TYPESAFE_API_KEY`, `GROQ_API_KEY` (and `GEMINI_API_KEY` for the Gemini pool member) |
+| Measures | Gold Set validity, retrieval recall and MRR per Slice (gated for Slices of at least 10 queries) and per Case (reported) | Jev-judged faithfulness, context precision, answer relevance, answer correctness; Route Accuracy and Graph Recall (advisory) |
 | Blocks merges | Yes | No: it never runs on PRs |
 | Missing secret | n/a | The run fails with an error annotation naming the secret; it is never skipped |
 
+**Hermetic Tier and the runner's CPU.** The INT8 reranker's logits depend on which onnxruntime kernel the CPU selects. On GitHub's `ubuntu-latest` pool, x86 AVX-512 VNNI runners (AMD EPYC 9V74/9V45, Intel Xeon 8573C/6973P) and AVX2-only runners (AMD EPYC 7763) score the same Gold Set query/Chunk pairs up to 0.90 logits apart (mean 0.16). Scores are bit-identical on any two machines of the same kernel class, and the FP32 export agrees across every CPU. The runner pool is mixed, so the gate:
+- never compares a raw rerank score against a fixed value: the old `unanswerable_max_rerank_score` ceiling flaked on eval_22 (-0.146 on AVX2, +0.080 on VNNI, against a ceiling of 0.0);
+- sets each floor from the lowest kernel class: rankings flip between classes (on Gold Set 3.0.0, eval_42's recall is 1.0 on VNNI and 0.5 on AVX2 and ARM; eval_10's reciprocal rank is 1.0 on VNNI and ARM and 0.5 on AVX2). The `Log reranker kernel class` step in the job's log shows which class ran.
+
+**Hermetic floors** (`hermetic_thresholds.json`, #44). Each floor is the lowest value measured across the CPU kernel classes, rounded down to two decimals, with no extra slack: the tier is deterministic within a kernel class. The measured values sit next to the floors under `measured`, and `load_thresholds` refuses a file whose floor is above any kernel class's measured value. Measured on Gold Set 3.0.0 (recall / MRR):
+
+| Group (queries) | AVX2 (EPYC 7763) | AVX-512 VNNI (EPYC 9V45) | ARM (Apple Silicon, local) | Floor |
+| :--- | :--- | :--- | :--- | :--- |
+| overall (66) | 0.6774 / 0.6625 | 0.6850 / 0.6665 | 0.6774 / 0.6716 | 0.67 / 0.66 |
+| factoid (41) | 0.7317 / 0.6524 | 0.7317 / 0.6484 | 0.7317 / 0.6524 | 0.73 / 0.64 |
+| multihop (15) | 0.6778 / 0.7667 | 0.7111 / 0.7667 | 0.6778 / 0.7667 | 0.67 / 0.76 |
+| long_context (10) | 0.4544 / 0.5478 | 0.4544 / 0.5908 | 0.4544 / 0.6075 | 0.45 / 0.54 |
+
+Recall is below 1.0 on every gated Slice, so the tier discriminates; the weakest Cases are `paraphrase` and `ambiguity` (recall about 0.36). To re-measure, run `lattice-rag hermetic --output` locally and read the per-query table from the `hermetic-tier` job log on at least one AVX2 and one VNNI runner (re-run the job until both classes have appeared), then take the lowest value per group. A floor that proves flaky is re-measured and the reason recorded, not padded with slack.
+
+**Gold Set provenance.** Before 3.0.0 the corpus was assembled arbitrarily: five short hand-written Documents (10 Chunks) chosen for convenience, not drawn from any defined source or sized to make retrieval rank. It was imperfect: Hermetic recall was 1.0 on every Slice, some reference answers claimed behaviour the code does not have, and several `expected_entities` never appeared in it. Numbers measured on it (the 2026-10-25 audit, the #38 checkpoint's 92.6% Route Accuracy) are not comparable with 3.0.0 results. Gold Set 3.0.0 adds the repo's six long-form docs, split into Documents and snapshotted into the file (47 Documents, 169 Chunks), but it keeps the five original Documents, so some of that arbitrariness carries over. Treat the corpus as a test fixture, not a sample of real traffic.
+
 **Live Tier** (`lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output live_tier_report.json`, on an ephemeral database; the report is uploaded as the `live-tier-report` artifact):
 - `lattice-rag eval` itself refuses to start without `TYPESAFE_API_KEY` or `GROQ_API_KEY` (without Groq every answer would come from the fallback, so the run would measure the wrong system).
-- Fails when any query's pipeline or judge errors (such a query is never judged), any judged metric of any query is below `min_query_floor`, or a mean regresses by more than `max_regression_delta`; all thresholds are read from `eval_baseline.json` (`gate_thresholds`). A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. A red nightly is a signal to investigate, not a merge block. Latency SLAs are not part of either tier; check them with `lattice-rag benchmark --sla-check`.
-- **Tolerance from measured variance.** The judge's run-to-run noise sets `max_regression_delta`: run the Live Tier three times on unchanged code, then `lattice-rag measure-baseline r1.json r2.json r3.json`. It sets each baseline mean to the mean of the three run means and `max_regression_delta` to two sample standard deviations of the noisiest metric, rounded up to 0.01. The raw per-run means, the standard deviations and the rule are kept under `measurement` in `eval_baseline.json`. The floor and per-query `pass_thresholds` are policy and are edited by hand. Re-measure when a change intentionally moves the metrics (prompt, model, retrieval, Gold Set).
+- An answer from any Model Pool member (ADR-0004) is judged normally. A degraded answer (no pool member answered, so the FAQ or offline message was served) is retried once after `EVAL_DEGRADED_RETRY_DELAY` seconds (default 5). If the retry is still degraded, the query fails as `provider_degraded` and is not judged. Each result records its `provider` and `model`; the report counts answers per model (`answersByModel`, the Model Mix), and `measure-baseline` writes the mix into the baseline's `measurement.notes`. Compare runs only when their Model Mix is similar.
+- Fails on new failures, not on every hard query. It fails when any query's pipeline or judge errors or is `provider_degraded` (such a query is never judged), a mean regresses by more than `max_regression_delta`, or a **Known-Good Query** has a judged metric below `min_query_floor`. Known-Good Queries are the ids in `known_good` in `eval_baseline.json`: the queries that cleared the floor in every run of the last `measure-baseline`. A query outside `known_good` that falls below the floor is a **Known-Weak Query**: it is listed under `knownWeak` in the report and in the Markdown summary, but does not fail the run. Gold Set 3.0.0 is hard on purpose; under the old rule (any query below the floor fails) the 2026-10-28 confirmation run had 0 errors and means within tolerance, yet 15 queries below the floor kept the nightly red. A baseline without `known_good` keeps that old any-query rule; the report's `floorRule` (`known_good` or `any_query`) says which rule applied, and `floorFailures` lists the ids that failed it. The thresholds are read from `eval_baseline.json` (`gate_thresholds`) and are not relaxed by this rule. A Noul contradiction veto zeroes that query's faithfulness, so it trips the floor. A red nightly is a signal to investigate, not a merge block. Latency SLAs are not part of either tier; check them with `lattice-rag benchmark --sla-check`.
+- **Route Accuracy** is reported overall and per Slice, with every Misrouted query listed, and is compared with the optional `route_accuracy_floor` in `gate_thresholds` (0.80). The floor is advisory: a miss is reported as `MISSED` but never fails the run. The denominator is the scored queries only: the `chitchat` Slice is excluded (routed deterministically), and queries whose pipeline errored or whose Route was the unverified System 1 fallback (Jev unavailable) are counted separately in the report, not scored. Many unverified or errored queries mean the number says little about the router; read those counts first.
+  - **Route set change (ADR-0003, #46).** Collapsing `vector_exact`, `graph_relational` and `hybrid` into the one retrieval Route `hybrid` (Routes: `hybrid`, `massive_context`, `chitchat`) moves Route Accuracy from **0.7375** (5 Routes) to an expected **~0.975** (3 Routes) on the 2026-10-27 default run. The jump comes only from the smaller Route set, since confusions among the three retrieval Routes are no longer misroutes. It is not a router improvement, so do not compare Route Accuracy across the change.
+- **Graph Recall** is reported overall and per Slice: for each query with `expected_entities`, the share of them found among the Entities of the query's graph context, matched by name ignoring case and whitespace. It is computed, not judged, and advisory: it never fails the run. It lives in the Live Tier, not the Hermetic Tier, because it needs real entity extraction: the Hermetic Tier seeds with no entity extractor to stay fast, so its graph is empty. Queries without expected entities and queries whose pipeline errored are not scored. `load_gold_set` rejects any expected entity that the corpus never mentions as a whole term (case-insensitive), so a miss means extraction or traversal did not surface it, not that the Gold Set asked for something absent.
+- **Tolerance from measured variance.** The judge's run-to-run noise sets `max_regression_delta`: run the Live Tier three times on unchanged code, then `lattice-rag measure-baseline r1.json r2.json r3.json`. It sets each baseline mean to the mean of the three run means and `max_regression_delta` to two sample standard deviations of the noisiest metric, rounded up to 0.01. The raw per-run means, the standard deviations and the rule are kept under `measurement` in `eval_baseline.json`. `measure-baseline` also records `known_good`: the Gold Set ids that cleared `min_query_floor` in every run given (it needs reports carrying `queryId`; reports from before ids were recorded leave `known_good` unset, which restores the any-query floor). It also records each run's Route Accuracy and their mean (`route_accuracy_runs`, `route_accuracy`; advisory, never part of the tolerance) and which pool models answered (`notes`). Hand-written run details go after the model mix in `notes`. The floor and per-query `pass_thresholds` are policy and are edited by hand. Re-measure when a change intentionally moves the metrics (prompt, model, retrieval, Gold Set).
 
 ### Rerank-score Noul skip (off by default)
 
 `GUARDRAIL_SKIP_RERANK_SCORE` lets chunks the cross-encoder already rates clearly relevant skip the Jev Noul context guardrail (`RerankScoreGate` in `routing/guardrail.py`). A chunk whose `rerank_score` (the raw bge-reranker logit, not a probability) is at or above the value is kept without a Noul question; the others are still judged by Noul, and the reranker's order is kept. When every chunk clears the value no Noul call is made, which is the only case that saves a network round-trip; otherwise it only shrinks the Noul request. The setting ships **unset (off)**, and the code default must stay off. It is enabled per deployment, through the environment, and only with Live Tier evidence:
 
-1. **Pick a candidate from the Hermetic Tier.** `lattice-rag hermetic --output h.json` lists each query's top rerank score. The candidate must sit well above every `unanswerable` query's top score (at the time of writing the highest is -0.26, eval_22) so unanswerable queries still go to Noul; 3.0 is a reasonable first trial.
+1. **Pick a candidate from the Hermetic Tier.** `lattice-rag hermetic --output h.json` lists each query's top rerank score. The candidate must sit well above every `unanswerable` query's top score on every CPU the deployment can land on (at the time of writing the highest is eval_22: -0.15 on AVX2 and +0.08 on AVX-512 VNNI; see the Hermetic Tier note above), so unanswerable queries still go to Noul; 3.0 is a reasonable first trial.
 2. **Measure with the gate on.** Run the Live Tier three times with the candidate: `GUARDRAIL_SKIP_RERANK_SCORE=<value> lattice-rag eval --dataset eval_dataset.json --baseline eval_baseline.json --output on-rN.json`, or dispatch `live-tier.yml` with the `guardrail_skip_rerank_score` input (the nightly schedule always runs with the gate off). `eval` reuses the served guardrail, so the setting applies to the ephemeral pipeline too.
 3. **Compare against the measured baseline** (`measurement` in `eval_baseline.json`, three gate-off runs) and enable only if all of these hold:
-   - every metric mean, above all `faithfulness` and `context_precision` (the two the guardrail protects), is within `max_regression_delta` (0.06) of the baseline mean;
+   - every metric mean, above all `faithfulness` and `context_precision` (the two the guardrail protects), is within `max_regression_delta` (0.03 since the #49 re-baseline) of the baseline mean;
    - no query that passes in the baseline runs fails in all three gate-on runs;
    - the Noul contradiction vetoes on `long_context` (baseline: 1, 1 and 2 per run) do not increase, and every `unanswerable` query that passes in the baseline still passes.
 4. **Record and enable.** Put the three run means and the veto counts in the PR that sets the variable in the deployment environment (for example the Cloud Run service's env vars), and keep the reports. Re-run this procedure when the reranker model, `top_k`, the Gold Set or the threshold changes.
+
+### Experiment Arms (spec #22)
+
+Three switches let the phase 5 experiments run as Experiment Arms of the Live Tier without code edits. Each default is the configuration the experiment kept (results below), so the baseline describes the unconfigured system once it is re-measured on these defaults. Each arm is one `lattice-rag eval` run with its own `--output`. The shell environment takes precedence over `.env`, so an arm set inline does not need `.env` edited. The decision rules are in the tickets and in ADR-0003. #46's outcome is recorded in ADR-0003; #47 and #48 are summarised below. Results are compared per Slice against `max_regression_delta` in `eval_baseline.json`. `results[i]` in a report is Gold Set query `i`, which gives each query's Slice.
+
+Common arguments: `ARGS="--dataset eval_dataset.json --baseline eval_baseline.json --no-fail-on-regression"`.
+
+**#46 Route ablation (ADR-0003): forced hop count.** `--force-hops 1|2` makes every query the router sends to the retrieval Route (`hybrid`) walk that many graph hops instead of the default 1. The ablation itself ran before the collapse, when the flag covered `vector_exact`, `hybrid` and `graph_relational` alike. `massive_context` keeps its own hop count (1) in both arms, and `chitchat` never retrieves. It is an eval-only CLI option: the app, the API and `.env` have no equivalent. The router still runs, so Route Accuracy reports the router's real pick. There are two arms (before the collapse `vector_exact` and `hybrid` already ran identically):
+
+```bash
+lattice-rag eval $ARGS --force-hops 1 --output ablation-1hop.json
+lattice-rag eval $ARGS --force-hops 2 --output ablation-2hop.json
+```
+
+**#47 Graph context in the prompt: `GRAPH_CONTEXT_IN_PROMPT=on|off|relational`** (default `off`, the kept configuration). The setting decides which part of the traversed subgraph reaches the generation prompt:
+- `on`: the whole subgraph, on `hybrid` and `massive_context`.
+- `off`: none.
+- `relational`: only on the retrieval Route (`hybrid`), capped at the first 10 edges and the Entities they connect.
+
+Traversal runs in every mode, so Graph Recall and the UI's graph path do not change. The Live Tier judge receives exactly the triples the generator received, so `off` is never judged against evidence the answer lacked. `eval --graph-context` overrides the variable for a single run:
+
+```bash
+lattice-rag eval $ARGS --graph-context on  --output graph-on.json
+lattice-rag eval $ARGS --graph-context off --output graph-off.json
+# only if the outcome rule calls for the restricted configuration:
+lattice-rag eval $ARGS --graph-context relational --output graph-relational.json
+```
+
+Result (2026-10-27, Model Pool led by `openai/gpt-oss-120b`, 83 queries, 0 errors; faithfulness / context precision / answer relevance / answer correctness):
+
+| Slice | `on` | `off` |
+|---|---|---|
+| all | 0.774 / 0.728 / 0.850 / 0.759 | 0.793 / 0.746 / 0.854 / 0.750 |
+| factoid | 0.770 / 0.761 / 0.889 / 0.782 | 0.813 / 0.783 / 0.885 / 0.769 |
+| multihop | 0.738 / 0.726 / 0.809 / 0.698 | 0.754 / 0.732 / 0.821 / 0.710 |
+| long_context | 0.629 / 0.593 / 0.718 / 0.525 | 0.577 / 0.614 / 0.742 / 0.519 |
+| unanswerable (faith / corr) | 0.926 / 0.871 | 0.931 / 0.849 |
+
+`on` does not beat `off` by more than 0.06 on `multihop`, so under the tie rule graph context is **dropped**: the default is `off` in `AppConfig`, and so in both composition roots. With `off` the prompt carries no `<graph>` block and no graph rule (`generation/prompt.py` adds both only when graph context is sent), and the judge gets no triples. Traversal still runs for the API's graph path and Graph Recall. `on` and `relational` stay for future experiments.
+
+**#48 Noul on `massive_context`.** Compare the arms on the `long_context` Slice, and within it only the queries whose chosen Route (`chosen_route` in each report result) was `massive_context` in every arm being compared: the switches change nothing on the other Routes, so a `long_context` query routed elsewhere only adds judge noise.
+- `GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD` sets the Noul threshold used by `massive_context` retrieval only. It defaults to 0.35 (the kept variant, below), and the other Routes always keep 0.50.
+- `GUARDRAIL_SKIP_MASSIVE_CONTEXT=true` sends no `massive_context` chunk to Noul. Those answers are Unverified (`unverified: true`) and never written to Tier 1. The skip wins over the threshold.
+
+```bash
+GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.50 lattice-rag eval $ARGS --output noul-050.json
+GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.35 lattice-rag eval $ARGS --output noul-035.json
+GUARDRAIL_SKIP_MASSIVE_CONTEXT=true      lattice-rag eval $ARGS --output noul-skip.json
+```
+
+Result (2026-10-27, Model Pool, `long_context` Slice, 10 queries, 0 errors; faithfulness / context precision / answer relevance / answer correctness):
+
+| Arm | Scores |
+|---|---|
+| 0.50 | 0.577 / 0.598 / 0.726 / 0.536 |
+| 0.35 | 0.624 / 0.592 / 0.727 / 0.533 |
+| skip | 0.471 / 0.595 / 0.719 / 0.557 |
+
+0.50 and 0.35 are within the 0.06 tolerance, a tie, so the per-route threshold is kept: **`GUARDRAIL_MASSIVE_CONTEXT_THRESHOLD=0.35`** is the default. Skip does not beat the best threshold by more than 0.06 on any metric, so `GUARDRAIL_SKIP_MASSIVE_CONTEXT` stays `false` (a skipped guardrail would leave every `massive_context` answer Unverified and out of Tier 1; `test_phase5_switches.py` checks this). Caveat: the arms were answered by a mix of pool models, and only 2 of 10 queries had the same model in all three arms, so this comparison is noisier than #47's.
+
+The kept configuration of #47 and #48 is the `AppConfig` default, which `app.py` `lifespan()` and `cli.py` `_build_harness()` both read, and is recorded in `.env.example`. An arm overrides it through the environment.
 
 Container images are built by Cloud Run from source at deploy time (`scripts/deploy_cloud_run.sh`); there is no registry publishing step in CI.

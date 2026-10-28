@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import msgspec
 import pytest
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
 from lattice_rag.eval.runner import EvalRunner
+from tests.unit.pool_helpers import pool_of
+
+pytestmark = pytest.mark.usefixtures("small_gold_sets")
 
 PASS_THRESHOLDS = {
     "faithfulness": 0.70,
@@ -21,7 +25,7 @@ PASS_THRESHOLDS = {
 
 def _baseline(**metrics: float) -> dict:
     return {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "metrics": metrics
         or {"faithfulness": 0.85, "context_precision": 0.80, "answer_relevance": 0.88},
         "gate_thresholds": {
@@ -44,7 +48,7 @@ def _result(query: str = "q", score: float = 0.9, **overrides: float) -> EvalQue
 def mock_dataset_and_baseline(tmp_path: Path):
     """Create sample dataset and baseline files."""
     dataset = {
-        "version": "2.0.0",
+        "version": "3.0.0",
         "domain": "test",
         "corpus": [],
         "queries": [
@@ -52,6 +56,7 @@ def mock_dataset_and_baseline(tmp_path: Path):
                 "id": "q1",
                 "query": "Test query 1",
                 "slice": "unanswerable",
+                "case": "direct",
                 "expected_route": "hybrid",
                 "reference_answer": "Expected 1",
                 "gold_passages": [],
@@ -60,7 +65,8 @@ def mock_dataset_and_baseline(tmp_path: Path):
                 "id": "q2",
                 "query": "Test query 2",
                 "slice": "unanswerable",
-                "expected_route": "vector_exact",
+                "case": "direct",
+                "expected_route": "hybrid",
                 "reference_answer": "Expected 2",
                 "gold_passages": [],
             },
@@ -86,6 +92,8 @@ async def test_eval_runner_passes_gate(mock_dataset_and_baseline):
     mock_orch.run.return_value = MagicMock(
         answer="Valid answer",
         filtered_chunks=[{"text": "Valid context"}],
+        degraded=False,
+        provider="groq",
     )
     mock_orch.semantic_cache = None
 
@@ -120,6 +128,8 @@ async def test_eval_runner_fails_on_regression(mock_dataset_and_baseline):
     mock_orch.run.return_value = MagicMock(
         answer="Regressed answer",
         filtered_chunks=[{"text": "Context"}],
+        degraded=False,
+        provider="groq",
     )
     mock_orch.semantic_cache = None
 
@@ -148,7 +158,9 @@ async def test_eval_runner_fails_on_floor_violation(mock_dataset_and_baseline):
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="Ans", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="Ans", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = None
 
     mock_evaluator = AsyncMock()
@@ -195,7 +207,9 @@ async def test_eval_runner_bypasses_and_preserves_live_semantic_cache(mock_datas
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = MagicMock()
 
     mock_evaluator = AsyncMock()
@@ -243,8 +257,7 @@ async def test_orchestrator_run_without_cache_skips_lookup_and_store():
         semantic_cache=sem_cache,
         fallback_cache=MagicMock(),
         retrieval_pipeline=pipeline,
-        groq=groq,
-        gemini=MagicMock(),
+        pool=pool_of(groq=groq, gemini=MagicMock()),
         chitchat=MagicMock(),
         embedding_service=embed,
     )
@@ -263,7 +276,9 @@ async def test_eval_runner_records_evaluator_failure_instead_of_aborting(mock_da
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_orch.semantic_cache = None
 
     good = EvalQueryResult(
@@ -295,7 +310,9 @@ async def test_eval_runner_judges_against_the_reference_answer(mock_dataset_and_
     ds_path, base_path = mock_dataset_and_baseline
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = EvalQueryResult(
         query="q", faithfulness=0.9, context_precision=0.9, answer_relevance=0.9, passed=True
@@ -317,7 +334,7 @@ async def test_eval_runner_rejects_invalid_gold_set_before_running(tmp_path: Pat
     ds_path.write_text(
         json.dumps(
             {
-                "version": "2.0.0",
+                "version": "3.0.0",
                 "domain": "test",
                 "corpus": [],
                 "queries": [{"id": "q1", "query": "Q", "ground_truth": "old v1 field"}],
@@ -338,6 +355,7 @@ def _gold_query(qid: str, query: str, slice_name: str, **extra: object) -> dict:
         "id": qid,
         "query": query,
         "slice": slice_name,
+        "case": "direct",
         "expected_route": "hybrid",
         "reference_answer": "R",
         "gold_passages": [],
@@ -358,7 +376,7 @@ async def test_pipeline_error_fails_query_without_judging(mock_dataset_and_basel
     mock_orch = AsyncMock()
     mock_orch.run.side_effect = [
         RuntimeError("groq exploded"),
-        MagicMock(answer="fine", filtered_chunks=[]),
+        MagicMock(answer="fine", filtered_chunks=[], degraded=False, provider="groq"),
     ]
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result("Test query 2")
@@ -386,7 +404,9 @@ async def test_floor_applies_to_answer_correctness(mock_dataset_and_baseline):
     """The per-query floor from the baseline covers every metric, not just faithfulness."""
     ds_path, base_path = mock_dataset_and_baseline
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.side_effect = [
         _result("Test query 1", 0.95),
@@ -407,7 +427,7 @@ async def test_floor_and_pass_thresholds_come_from_the_baseline_file(tmp_path: P
     ds_path = _write(
         tmp_path / "ds.json",
         {
-            "version": "2.0.0",
+            "version": "3.0.0",
             "domain": "t",
             "corpus": [],
             "queries": [_gold_query("q1", "Q", "unanswerable")],
@@ -419,7 +439,9 @@ async def test_floor_and_pass_thresholds_come_from_the_baseline_file(tmp_path: P
     base_path = _write(tmp_path / "base.json", baseline)
 
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result("Q", 0.9)
 
@@ -446,7 +468,9 @@ async def test_correctness_regression_against_baseline_fails_gate(
         ),
     )
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result(score=0.9, answer_correctness=0.75)
 
@@ -482,13 +506,13 @@ async def test_baseline_without_pass_thresholds_is_rejected(
 
 @pytest.mark.asyncio
 async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_dataset_and_baseline):
-    """Chitchat is judged on the reply only; unanswerable has no context-precision target."""
+    """Chitchat is judged on the reply only; unanswerable on faithfulness and correctness."""
     _, base_path = mock_dataset_and_baseline
     doc_text = "LatticeDB is embedded."
     ds_path = _write(
         tmp_path / "slices.json",
         {
-            "version": "2.0.0",
+            "version": "3.0.0",
             "domain": "t",
             "corpus": [{"document_id": "d", "title": "D", "text": doc_text}],
             "queries": [
@@ -504,7 +528,9 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
         },
     )
     mock_orch = AsyncMock()
-    mock_orch.run.return_value = MagicMock(answer="a", filtered_chunks=[])
+    mock_orch.run.return_value = MagicMock(
+        answer="a", filtered_chunks=[], degraded=False, provider="groq"
+    )
     mock_evaluator = AsyncMock()
     mock_evaluator.evaluate_query.return_value = _result()
 
@@ -517,7 +543,7 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
     }
     assert by_query == {
         "hello": {"answer_relevance", "answer_correctness"},
-        "unknowable": {"faithfulness", "answer_relevance", "answer_correctness"},
+        "unknowable": {"faithfulness", "answer_correctness"},
         "what is it": {
             "faithfulness",
             "context_precision",
@@ -525,3 +551,170 @@ async def test_slice_decides_which_metrics_are_judged(tmp_path: Path, mock_datas
             "answer_correctness",
         },
     }
+
+
+class _MetricHonouringEvaluator:
+    """Fake evaluator: scores only the requested metrics; a refusal is irrelevant to the query."""
+
+    SCORES = {
+        "faithfulness": 0.95,
+        "context_precision": 0.9,
+        "answer_relevance": 0.1,
+        "answer_correctness": 0.9,
+    }
+
+    async def evaluate_query(self, *, query, metrics, thresholds, **_: object) -> EvalQueryResult:
+        scores = {m: self.SCORES[m] for m in metrics}
+        passed = all(v >= getattr(thresholds, m) for m, v in scores.items())
+        return EvalQueryResult(query=query, passed=passed, **scores)
+
+
+@pytest.mark.asyncio
+async def test_correct_refusal_on_unanswerable_passes_without_answer_relevance(tmp_path: Path):
+    ds_path = _write(
+        tmp_path / "ds.json",
+        {
+            "version": "3.0.0",
+            "domain": "t",
+            "corpus": [],
+            "queries": [_gold_query("u", "unknowable", "unanswerable")],
+        },
+    )
+    base_path = _write(tmp_path / "base.json", _baseline(faithfulness=0.9))
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(
+        answer="The knowledge base does not contain this.",
+        filtered_chunks=[],
+        degraded=False,
+        provider="groq",
+    )
+
+    runner = EvalRunner(orchestrator=mock_orch, evaluator=_MetricHonouringEvaluator())  # type: ignore[arg-type]
+    resp = await runner.run_evaluation(dataset_path=ds_path, baseline_path=base_path)
+
+    (result,) = resp.results
+    assert result.passed is True
+    assert result.answer_relevance is None
+    assert resp.mean_answer_relevance is None
+    assert resp.passed_gate is True
+    report = runner.format_markdown_report(resp)
+    row = next(line for line in report.splitlines() if "unknowable" in line)
+    assert row.split("|")[4].strip() == "n/a"  # the Relevance column
+
+
+# --- Known-Good Queries: the gate fails on new failures, not on every hard query --------
+
+
+def _runner_scoring(*faithfulness: float) -> EvalRunner:
+    """A runner whose judge gives the Gold Set's queries these faithfulness scores, in order."""
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(
+        answer="Ans", filtered_chunks=[], degraded=False, provider="groq"
+    )
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.side_effect = [
+        EvalQueryResult(query="q", faithfulness=f, answer_correctness=0.9, passed=f >= 0.7)
+        for f in faithfulness
+    ]
+    return EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+
+
+def _with_known_good(base_path: Path, known_good: list[str]) -> None:
+    data = json.loads(base_path.read_text(encoding="utf-8"))
+    data["known_good"] = known_good
+    base_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_each_result_carries_its_gold_set_query_id(mock_dataset_and_baseline):
+    ds_path, base_path = mock_dataset_and_baseline
+
+    resp = await _runner_scoring(0.9, 0.9).run_evaluation(
+        dataset_path=ds_path, baseline_path=base_path
+    )
+
+    assert [r.query_id for r in resp.results] == ["q1", "q2"]
+    wire = msgspec.json.encode(EvalQueryResult(query="q", passed=True, query_id="q1"))
+    assert b'"queryId":"q1"' in wire
+
+
+def _gate_files(tmp_path: Path, mock_dataset_and_baseline, known_good: list[str] | None):
+    """Dataset q1, q2; a baseline whose only mean (correctness 0.9) never regresses here."""
+    ds_path, _ = mock_dataset_and_baseline
+    baseline = _baseline(answer_correctness=0.9)
+    if known_good is not None:
+        baseline["known_good"] = known_good
+    return ds_path, _write(tmp_path / "known_good_base.json", baseline)
+
+
+@pytest.mark.asyncio
+async def test_known_weak_query_below_floor_is_reported_but_does_not_fail(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+
+    resp = await _runner_scoring(0.9, 0.3).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is True
+    assert resp.floor_rule == "known_good"
+    assert resp.known_weak == ["q2"]
+    assert resp.floor_failures == []
+
+
+@pytest.mark.asyncio
+async def test_known_good_query_below_floor_fails_the_gate(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+
+    resp = await _runner_scoring(0.3, 0.9).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.floor_failures == ["q1"]
+    assert resp.known_weak == []
+
+
+@pytest.mark.asyncio
+async def test_baseline_without_known_good_keeps_the_any_query_floor(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=None)
+
+    resp = await _runner_scoring(0.9, 0.3).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.floor_rule == "any_query"
+    assert resp.floor_failures == ["q2"]
+    assert resp.known_weak == []
+
+
+@pytest.mark.asyncio
+async def test_error_on_a_query_outside_known_good_still_fails(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+    runner = _runner_scoring(0.9)
+    runner.evaluator.evaluate_query.side_effect = [
+        EvalQueryResult(query="q", faithfulness=0.9, answer_correctness=0.9, passed=True),
+        RuntimeError("judge down"),
+    ]
+
+    resp = await runner.run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.failed_queries == 1
+
+
+def test_markdown_report_names_the_floor_rule_and_known_weak_queries():
+    report = EvalRunResponse(
+        total_queries=2,
+        passed_gate=True,
+        regression_delta=0.0,
+        floor_rule="known_good",
+        known_weak=["q2"],
+    )
+
+    text = EvalRunner.format_markdown_report(report)
+
+    assert "Known-Good Queries" in text
+    assert "q2" in text

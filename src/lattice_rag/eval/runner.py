@@ -3,11 +3,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+from collections import Counter
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Any, cast
 
+import msgspec
 import structlog
 
-from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import (
+    EvalQueryError,
+    EvalQueryResult,
+    EvalRunResponse,
+    FloorRule,
+    Misroute,
+)
 from lattice_rag.eval.gate import (
     METRICS,
     Baseline,
@@ -20,10 +30,10 @@ from lattice_rag.eval.gold_set import GoldQuery, load_gold_set
 from lattice_rag.eval.triage_gate import JevEvaluator
 from lattice_rag.orchestration.graph import RAGOrchestrator
 from lattice_rag.retrieval.embeddings import EmbeddingService
-from lattice_rag.retrieval.pipeline import RetrievalPipeline
 from lattice_rag.security import query_fingerprint, sanitize_error_detail
-from lattice_rag.storage.db import LatticeStore
+from lattice_rag.storage.db import LatticeStore, normalize_entity_name
 from lattice_rag.storage.extract import EntityExtractor
+from lattice_rag.vocabulary import Route, answered_by
 
 logger = structlog.get_logger(__name__)
 
@@ -41,12 +51,16 @@ class EvalRunner:
         evaluator: JevEvaluator,
         embedding_service: EmbeddingService | None = None,
         extractor: EntityExtractor | None = None,
+        degraded_retry_delay: float = 5.0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Initialize EvalRunner with orchestrator, Jev evaluator, and optional support services."""
         self.orchestrator = orchestrator
         self.evaluator = evaluator
         self.embedding_service = embedding_service
         self.extractor = extractor
+        self.degraded_retry_delay = degraded_retry_delay
+        self._sleep = sleep
 
     async def run_evaluation(
         self,
@@ -100,22 +114,10 @@ class EvalRunner:
                 for doc in corpus_data:
                     await ingester.ingest(doc_id=doc.document_id, title=doc.title, text=doc.text)
 
-                # Build ephemeral retrieval pipeline and orchestrator
-                ephemeral_retrieval = RetrievalPipeline(
-                    store=temp_store,
-                    embedding_service=embed_svc,
-                    router_guardrail=self.orchestrator.retrieval.guardrail,
-                )
-
-                active_orchestrator = RAGOrchestrator(
-                    router=self.orchestrator.router,
-                    semantic_cache=self.orchestrator.semantic_cache,
-                    fallback_cache=self.orchestrator.fallback_cache,
-                    retrieval_pipeline=ephemeral_retrieval,
-                    groq=self.orchestrator.groq,
-                    gemini=self.orchestrator.gemini,
-                    chitchat=self.orchestrator.chitchat,
-                    embedding_service=embed_svc,
+                # Same pipeline and orchestrator settings (guardrails, forced hops, graph
+                # context in the prompt, answer budget) over the ephemeral store
+                active_orchestrator = self.orchestrator.with_retrieval(
+                    self.orchestrator.retrieval.with_store(temp_store)
                 )
 
             # For suites with >5 queries, enforce concurrency 1 and inter-query pacing to avoid Groq 1000 OTPM rate limits
@@ -133,6 +135,14 @@ class EvalRunner:
                         # Bypass Tier 1 so every query is freshly evaluated and eval
                         # answers (possibly from the ephemeral corpus) never reach users
                         pipeline_state = await active_orchestrator.run(query, use_cache=False)
+                        if pipeline_state.degraded:
+                            # No pool member answered: one retry after a pause; a still
+                            # degraded answer fails the query.
+                            # The pause keeps the semaphore slot on purpose: releasing it would
+                            # let the next query call Groq inside the same rate-limit window
+                            # the pause is waiting out.
+                            await self._sleep(self.degraded_retry_delay)
+                            pipeline_state = await active_orchestrator.run(query, use_cache=False)
                     except Exception as e:
                         # A pipeline error fails the query; it is never judged as an answer
                         logger.error(
@@ -142,14 +152,49 @@ class EvalRunner:
                         )
                         return EvalQueryResult(query=query, passed=False, error=PIPELINE_ERROR)
 
+                    chosen_route = cast("Route", pipeline_state.route)
+                    route_verified = pipeline_state.route_verified
+                    provider = pipeline_state.provider
+                    model = pipeline_state.model
+                    graph_recall = graph_recall_of(
+                        item.expected_entities, pipeline_state.graph_context
+                    )
+                    if pipeline_state.degraded:
+                        logger.error(
+                            "eval_query_provider_degraded",
+                            **query_fingerprint(query),
+                            provider=provider,
+                            model=model,
+                        )
+                        return EvalQueryResult(
+                            query=query,
+                            passed=False,
+                            error=EvalQueryError.PROVIDER_DEGRADED,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
+                            model=model,
+                            graph_recall=graph_recall,
+                        )
+
                     try:
-                        return await self.evaluator.evaluate_query(
+                        judged = await self.evaluator.evaluate_query(
                             query=query,
                             retrieved_chunks=pipeline_state.filtered_chunks,
                             generated_answer=pipeline_state.answer,
                             ground_truth=item.reference_answer,
                             metrics=metrics_for_slice(item.slice),
                             thresholds=pass_thresholds,
+                            # Judge the graph the generator received, not the whole traversal
+                            graph_context=pipeline_state.prompt_graph_context,
+                        )
+                        return msgspec.structs.replace(
+                            judged,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
+                            model=model,
+                            graph_recall=graph_recall,
                         )
                     except Exception as e:
                         # Fail the query rather than aborting the run
@@ -158,11 +203,25 @@ class EvalRunner:
                             **query_fingerprint(query),
                             error=sanitize_error_detail(str(e)),
                         )
-                        return EvalQueryResult(query=query, passed=False, error=JUDGE_ERROR)
+                        return EvalQueryResult(
+                            query=query,
+                            passed=False,
+                            error=JUDGE_ERROR,
+                            chosen_route=chosen_route,
+                            route_verified=route_verified,
+                            provider=provider,
+                            model=model,
+                            graph_recall=graph_recall,
+                        )
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
-            results = await asyncio.gather(*eval_tasks)
+            results = [
+                msgspec.structs.replace(result, query_id=item.id)
+                for item, result in zip(
+                    queries_data, await asyncio.gather(*eval_tasks), strict=True
+                )
+            ]
         finally:
             # Clean up ephemeral resources
             if temp_store is not None:
@@ -173,7 +232,7 @@ class EvalRunner:
                 with contextlib.suppress(Exception):
                     temp_dir_obj.cleanup()
 
-        return _apply_gate(list(results), baseline)
+        return _apply_gate(queries_data, list(results), baseline)
 
     @staticmethod
     def format_markdown_report(report: EvalRunResponse) -> str:
@@ -188,19 +247,24 @@ class EvalRunner:
             f"- **Mean Context Precision**: {_fmt(report.mean_context_precision)}",
             f"- **Mean Answer Relevance**: {_fmt(report.mean_answer_relevance)}",
             f"- **Mean Answer Correctness**: {_fmt(report.mean_answer_correctness)}",
+            *_route_accuracy_lines(report),
+            *_graph_recall_lines(report),
+            *_model_mix_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
+            *_floor_lines(report),
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
             "## Query Breakdown",
             "",
-            "| Query | Faithfulness | Precision | Relevance | Correctness | Passed |",
-            "| :--- | :---: | :---: | :---: | :---: | :---: |",
+            "| Query | Model | Faithfulness | Precision | Relevance | Correctness | Passed |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for res in report.results:
             q_short = (res.query[:50] + "...") if len(res.query) > 50 else res.query
             status = "✅" if res.passed else f"❌ {res.error or ''}".rstrip()
             lines.append(
-                f"| {q_short} | {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
+                f"| {q_short} | {answered_by(res.provider, res.model) or '-'} "
+                f"| {_fmt(res.faithfulness, 3)} | {_fmt(res.context_precision, 3)} "
                 f"| {_fmt(res.answer_relevance, 3)} | {_fmt(res.answer_correctness, 3)} | {status} |"
             )
         return "\n".join(lines)
@@ -219,13 +283,19 @@ class EvalRunner:
         return out
 
 
-def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunResponse:
+def _apply_gate(
+    queries: list[GoldQuery], results: list[EvalQueryResult], baseline: Baseline
+) -> EvalRunResponse:
     """Apply the baseline file's gate rules to per-query results.
 
-    The gate fails when any query failed (pipeline or judge error), when any judged
-    metric of any query is below ``min_query_floor``, or when a mean drops more than
-    ``max_regression_delta`` below its baseline. A metric without a baseline mean is
-    reported but not regression-checked.
+    The gate fails when any query failed (pipeline or judge error, or still degraded
+    after its retry), when a mean drops more than ``max_regression_delta`` below its
+    baseline, or when a query below ``min_query_floor`` (any judged metric) is a
+    Known-Good Query. Below-floor queries outside ``known_good`` are reported as
+    Known-Weak and do not fail. A baseline without ``known_good`` applies the legacy
+    rule: any query below the floor fails. A metric without a baseline mean is
+    reported but not regression-checked. Route Accuracy is reported alongside and never
+    gates (ADR-0002). ``results[i]`` is the result of ``queries[i]``.
     """
     rules = baseline.gate_thresholds
     judged = [r for r in results if r.error is None]
@@ -242,9 +312,19 @@ def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunRe
         if mean is not None and m in baseline.metrics
     }
     regression_passed = all(d >= -rules.max_regression_delta for d in deltas.values())
-    floor_passed = all(
-        score >= rules.min_query_floor for r in judged for score in judged_scores(r).values()
-    )
+    below_floor = [
+        r for r in judged if any(s < rules.min_query_floor for s in judged_scores(r).values())
+    ]
+    if baseline.known_good is None:
+        floor_rule = FloorRule.ANY_QUERY
+        floor_failures = [_label(r) for r in below_floor]
+        known_weak: list[str] = []
+    else:
+        floor_rule = FloorRule.KNOWN_GOOD
+        known_good = set(baseline.known_good)
+        floor_failures = [_label(r) for r in below_floor if r.query_id in known_good]
+        known_weak = [_label(r) for r in below_floor if r.query_id not in known_good]
+    floor_passed = not floor_failures
     passed_gate = failed == 0 and regression_passed and floor_passed
     min_delta = min(deltas.values(), default=0.0)
 
@@ -255,7 +335,9 @@ def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunRe
         **{f"mean_{m}": v for m, v in means.items()},
         **{f"delta_{m}": d for m, d in deltas.items()},
         passed_gate=passed_gate,
-        floor_passed=floor_passed,
+        floor_rule=floor_rule,
+        floor_failures=len(floor_failures),
+        known_weak=len(known_weak),
     )
 
     return EvalRunResponse(
@@ -268,4 +350,151 @@ def _apply_gate(results: list[EvalQueryResult], baseline: Baseline) -> EvalRunRe
         mean_answer_correctness=means["answer_correctness"],
         failed_queries=failed,
         results=results,
+        route_accuracy_floor=rules.route_accuracy_floor,
+        **_route_accuracy(queries, results),
+        **_graph_recall(queries, results),
+        answers_by_model=model_mix(results),
+        floor_rule=floor_rule,
+        floor_failures=floor_failures,
+        known_weak=known_weak,
     )
+
+
+def _label(result: EvalQueryResult) -> str:
+    """A result's Gold Set id; the query text only for results recorded without one."""
+    return result.query_id or result.query
+
+
+def _route_accuracy(queries: list[GoldQuery], results: list[EvalQueryResult]) -> dict[str, Any]:
+    """Route Accuracy fields over the scored queries.
+
+    A query is scored when it is outside the chitchat Slice (routed deterministically, never
+    by Jev), its pipeline ran, and Jev chose the Route. Pipeline errors and unverified
+    fallback routes are counted instead, so an outage cannot read as accurate routing.
+    """
+    routed = [(q, r) for q, r in zip(queries, results, strict=True) if q.slice != "chitchat"]
+    errored = sum(r.chosen_route is None for _, r in routed)
+    ran = [(q, r) for q, r in routed if r.chosen_route is not None]
+    scored = [(q, r) for q, r in ran if r.route_verified]
+
+    by_slice: dict[str, list[bool]] = {}
+    for q, r in scored:
+        by_slice.setdefault(q.slice, []).append(r.chosen_route == q.expected_route)
+    hits = sum(ok for oks in by_slice.values() for ok in oks)
+    return {
+        "route_accuracy": round(hits / len(scored), 4) if scored else None,
+        "route_accuracy_by_slice": {s: round(sum(o) / len(o), 4) for s, o in by_slice.items()},
+        "route_accuracy_scored": len(scored),
+        "route_accuracy_unverified": len(ran) - len(scored),
+        "route_accuracy_errored": errored,
+        "misroutes": [
+            Misroute(
+                query_id=q.id,
+                slice=q.slice,
+                chosen_route=r.chosen_route,
+                expected_route=q.expected_route,
+            )
+            for q, r in scored
+            if r.chosen_route is not None and r.chosen_route != q.expected_route
+        ],
+    }
+
+
+def graph_recall_of(expected: list[str], graph_context: object) -> float | None:
+    """Share of ``expected`` entity names among the graph context's Entity names.
+
+    ``None`` when the query lists no expected entities. A missing or malformed graph
+    context surfaced no Entities, so its recall is 0.0.
+    """
+    wanted = {normalize_entity_name(e) for e in expected}
+    if not wanted:
+        return None
+    nodes = graph_context.get("nodes") if isinstance(graph_context, dict) else None
+    surfaced = {
+        normalize_entity_name(str(n["name"]))
+        for n in nodes or []
+        if isinstance(n, dict) and n.get("name")
+    }
+    return round(len(wanted & surfaced) / len(wanted), 4)
+
+
+def _graph_recall(queries: list[GoldQuery], results: list[EvalQueryResult]) -> dict[str, Any]:
+    """Graph Recall fields: per-query means, overall and per Slice. Advisory, never gates."""
+    by_slice: dict[str, list[float]] = {}
+    for q, r in zip(queries, results, strict=True):
+        if r.graph_recall is not None:
+            by_slice.setdefault(q.slice, []).append(r.graph_recall)
+    scored = [v for vs in by_slice.values() for v in vs]
+    return {
+        "graph_recall": round(sum(scored) / len(scored), 4) if scored else None,
+        "graph_recall_by_slice": {s: round(sum(v) / len(v), 4) for s, v in by_slice.items()},
+        "graph_recall_scored": len(scored),
+    }
+
+
+def model_mix(results: list[EvalQueryResult]) -> dict[str, int]:
+    """Answers per model (see :func:`lattice_rag.vocabulary.answered_by`), most answers first."""
+    counts = Counter(who for r in results if (who := answered_by(r.provider, r.model)) is not None)
+    return dict(counts.most_common())
+
+
+def _model_mix_lines(report: EvalRunResponse) -> list[str]:
+    if not report.answers_by_model:
+        return ["- **Model Mix** (answers per model): none generated"]
+    return ["- **Model Mix** (answers per model):"] + [
+        f"  - {who}: {n}" for who, n in report.answers_by_model.items()
+    ]
+
+
+def _plural(n: int, noun: str, plural: str | None = None) -> str:
+    return f"{n} {noun if n == 1 else plural or noun + 's'}"
+
+
+def _graph_recall_lines(report: EvalRunResponse) -> list[str]:
+    scored = report.graph_recall_scored
+    lines = [
+        f"- **Graph Recall** (advisory, unjudged): {_fmt(report.graph_recall)} over "
+        f"{_plural(scored, 'query', 'queries')} with expected entities"
+    ]
+    lines += [
+        f"  - {name}: {_fmt(rec)}" for name, rec in sorted(report.graph_recall_by_slice.items())
+    ]
+    return lines
+
+
+def _floor_lines(report: EvalRunResponse) -> list[str]:
+    if report.floor_rule == FloorRule.KNOWN_GOOD:
+        rule = "Known-Good Queries only (others below it are Known-Weak, reported)"
+    else:
+        rule = "any query (baseline has no known_good)"
+    lines = [f"- **Query Floor Rule**: {rule}"]
+    if report.floor_failures:
+        lines.append(f"  - below the floor, failing: {', '.join(report.floor_failures)}")
+    if report.known_weak:
+        lines.append(f"  - Known-Weak, not failing: {', '.join(report.known_weak)}")
+    return lines
+
+
+def _route_accuracy_lines(report: EvalRunResponse) -> list[str]:
+    excluded = [
+        _plural(report.route_accuracy_unverified, "unverified fallback route"),
+        _plural(report.route_accuracy_errored, "pipeline error"),
+    ]
+    lines = [
+        f"- **Route Accuracy**: {_fmt(report.route_accuracy)} over "
+        f"{report.route_accuracy_scored} routed "
+        f"{'query' if report.route_accuracy_scored == 1 else 'queries'}"
+        f" (not scored: {', '.join(excluded)}; chitchat Slice excluded)"
+    ]
+    floor = report.route_accuracy_floor
+    if floor is not None and report.route_accuracy is not None:
+        status = "met" if report.route_accuracy >= floor else "MISSED"
+        lines.append(f"  - advisory floor {floor:.2f}: {status}")
+    lines += [
+        f"  - {name}: {_fmt(acc)}" for name, acc in sorted(report.route_accuracy_by_slice.items())
+    ]
+    lines += [
+        f"  - misroute {m.query_id} ({m.slice}): chose {m.chosen_route}, expected {m.expected_route}"
+        for m in report.misroutes
+    ]
+    return lines

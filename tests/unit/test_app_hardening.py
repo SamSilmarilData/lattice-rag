@@ -39,6 +39,19 @@ async def test_app_boots_without_llm_keys(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_lifespan_gives_every_pool_member_the_llm_timeout(tmp_path):
+    from lattice_rag.config import ModelSpec
+    from lattice_rag.vocabulary import GenerationProvider
+
+    pool = (ModelSpec(GenerationProvider.GROQ, "a"), ModelSpec(GenerationProvider.GEMINI, "g", "0"))
+    app = create_app(_config(tmp_path, llm_timeout_seconds=9.0, llm_pool=pool))
+    async with AsyncTestClient(app):
+        members = app.state.orchestrator.pool
+        assert [m.label for m in members] == ["groq:a", "gemini:g"]
+        assert [m.client.timeout_seconds for m in members] == [9.0, 9.0]
+
+
+@pytest.mark.asyncio
 async def test_query_endpoints_are_rate_limited(tmp_path):
     app = create_app(_config(tmp_path))
     async with AsyncTestClient(app) as client:
@@ -236,3 +249,10 @@ async def test_rerank_score_noul_skip_follows_the_setting(
 
     assert resp.status_code == 201
     assert jev_calls.await_count == expected_jev_calls
+
+
+@pytest.mark.asyncio
+async def test_eval_runner_uses_configured_degraded_retry_delay(tmp_path):
+    app = create_app(_config(tmp_path, eval_degraded_retry_delay=9.0))
+    async with AsyncTestClient(app):
+        assert app.state.eval_runner.degraded_retry_delay == 9.0
