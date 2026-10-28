@@ -11,7 +11,13 @@ from typing import Any, cast
 import msgspec
 import structlog
 
-from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse, Misroute
+from lattice_rag.api.dtos import (
+    EvalQueryError,
+    EvalQueryResult,
+    EvalRunResponse,
+    FloorRule,
+    Misroute,
+)
 from lattice_rag.eval.gate import (
     METRICS,
     Baseline,
@@ -210,7 +216,12 @@ class EvalRunner:
 
             logger.info("running_eval_suite", total_queries=len(queries_data))
             eval_tasks = [_eval_single(q, idx) for idx, q in enumerate(queries_data)]
-            results = await asyncio.gather(*eval_tasks)
+            results = [
+                msgspec.structs.replace(result, query_id=item.id)
+                for item, result in zip(
+                    queries_data, await asyncio.gather(*eval_tasks), strict=True
+                )
+            ]
         finally:
             # Clean up ephemeral resources
             if temp_store is not None:
@@ -240,6 +251,7 @@ class EvalRunner:
             *_graph_recall_lines(report),
             *_model_mix_lines(report),
             f"- **Regression Delta**: {report.regression_delta:+.4f}",
+            *_floor_lines(report),
             f"- **Gate Status**: {'PASSED' if report.passed_gate else 'FAILED'}",
             "",
             "## Query Breakdown",
@@ -276,9 +288,12 @@ def _apply_gate(
 ) -> EvalRunResponse:
     """Apply the baseline file's gate rules to per-query results.
 
-    The gate fails when any query failed (pipeline or judge error), when any judged
-    metric of any query is below ``min_query_floor``, or when a mean drops more than
-    ``max_regression_delta`` below its baseline. A metric without a baseline mean is
+    The gate fails when any query failed (pipeline or judge error, or still degraded
+    after its retry), when a mean drops more than ``max_regression_delta`` below its
+    baseline, or when a query below ``min_query_floor`` (any judged metric) is a
+    Known-Good Query. Below-floor queries outside ``known_good`` are reported as
+    Known-Weak and do not fail. A baseline without ``known_good`` applies the legacy
+    rule: any query below the floor fails. A metric without a baseline mean is
     reported but not regression-checked. Route Accuracy is reported alongside and never
     gates (ADR-0002). ``results[i]`` is the result of ``queries[i]``.
     """
@@ -297,9 +312,19 @@ def _apply_gate(
         if mean is not None and m in baseline.metrics
     }
     regression_passed = all(d >= -rules.max_regression_delta for d in deltas.values())
-    floor_passed = all(
-        score >= rules.min_query_floor for r in judged for score in judged_scores(r).values()
-    )
+    below_floor = [
+        r for r in judged if any(s < rules.min_query_floor for s in judged_scores(r).values())
+    ]
+    if baseline.known_good is None:
+        floor_rule = FloorRule.ANY_QUERY
+        floor_failures = [_label(r) for r in below_floor]
+        known_weak: list[str] = []
+    else:
+        floor_rule = FloorRule.KNOWN_GOOD
+        known_good = set(baseline.known_good)
+        floor_failures = [_label(r) for r in below_floor if r.query_id in known_good]
+        known_weak = [_label(r) for r in below_floor if r.query_id not in known_good]
+    floor_passed = not floor_failures
     passed_gate = failed == 0 and regression_passed and floor_passed
     min_delta = min(deltas.values(), default=0.0)
 
@@ -310,7 +335,9 @@ def _apply_gate(
         **{f"mean_{m}": v for m, v in means.items()},
         **{f"delta_{m}": d for m, d in deltas.items()},
         passed_gate=passed_gate,
-        floor_passed=floor_passed,
+        floor_rule=floor_rule,
+        floor_failures=len(floor_failures),
+        known_weak=len(known_weak),
     )
 
     return EvalRunResponse(
@@ -327,7 +354,15 @@ def _apply_gate(
         **_route_accuracy(queries, results),
         **_graph_recall(queries, results),
         answers_by_model=model_mix(results),
+        floor_rule=floor_rule,
+        floor_failures=floor_failures,
+        known_weak=known_weak,
     )
+
+
+def _label(result: EvalQueryResult) -> str:
+    """A result's Gold Set id; the query text only for results recorded without one."""
+    return result.query_id or result.query
 
 
 def _route_accuracy(queries: list[GoldQuery], results: list[EvalQueryResult]) -> dict[str, Any]:
@@ -424,6 +459,19 @@ def _graph_recall_lines(report: EvalRunResponse) -> list[str]:
     lines += [
         f"  - {name}: {_fmt(rec)}" for name, rec in sorted(report.graph_recall_by_slice.items())
     ]
+    return lines
+
+
+def _floor_lines(report: EvalRunResponse) -> list[str]:
+    if report.floor_rule == FloorRule.KNOWN_GOOD:
+        rule = "Known-Good Queries only (others below it are Known-Weak, reported)"
+    else:
+        rule = "any query (baseline has no known_good)"
+    lines = [f"- **Query Floor Rule**: {rule}"]
+    if report.floor_failures:
+        lines.append(f"  - below the floor, failing: {', '.join(report.floor_failures)}")
+    if report.known_weak:
+        lines.append(f"  - Known-Weak, not failing: {', '.join(report.known_weak)}")
     return lines
 
 

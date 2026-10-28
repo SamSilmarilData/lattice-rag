@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import msgspec
 import pytest
 
 from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
@@ -599,3 +600,121 @@ async def test_correct_refusal_on_unanswerable_passes_without_answer_relevance(t
     report = runner.format_markdown_report(resp)
     row = next(line for line in report.splitlines() if "unknowable" in line)
     assert row.split("|")[4].strip() == "n/a"  # the Relevance column
+
+
+# --- Known-Good Queries: the gate fails on new failures, not on every hard query --------
+
+
+def _runner_scoring(*faithfulness: float) -> EvalRunner:
+    """A runner whose judge gives the Gold Set's queries these faithfulness scores, in order."""
+    mock_orch = AsyncMock()
+    mock_orch.run.return_value = MagicMock(
+        answer="Ans", filtered_chunks=[], degraded=False, provider="groq"
+    )
+    mock_evaluator = AsyncMock()
+    mock_evaluator.evaluate_query.side_effect = [
+        EvalQueryResult(query="q", faithfulness=f, answer_correctness=0.9, passed=f >= 0.7)
+        for f in faithfulness
+    ]
+    return EvalRunner(orchestrator=mock_orch, evaluator=mock_evaluator)
+
+
+def _with_known_good(base_path: Path, known_good: list[str]) -> None:
+    data = json.loads(base_path.read_text(encoding="utf-8"))
+    data["known_good"] = known_good
+    base_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_each_result_carries_its_gold_set_query_id(mock_dataset_and_baseline):
+    ds_path, base_path = mock_dataset_and_baseline
+
+    resp = await _runner_scoring(0.9, 0.9).run_evaluation(
+        dataset_path=ds_path, baseline_path=base_path
+    )
+
+    assert [r.query_id for r in resp.results] == ["q1", "q2"]
+    wire = msgspec.json.encode(EvalQueryResult(query="q", passed=True, query_id="q1"))
+    assert b'"queryId":"q1"' in wire
+
+
+def _gate_files(tmp_path: Path, mock_dataset_and_baseline, known_good: list[str] | None):
+    """Dataset q1, q2; a baseline whose only mean (correctness 0.9) never regresses here."""
+    ds_path, _ = mock_dataset_and_baseline
+    baseline = _baseline(answer_correctness=0.9)
+    if known_good is not None:
+        baseline["known_good"] = known_good
+    return ds_path, _write(tmp_path / "known_good_base.json", baseline)
+
+
+@pytest.mark.asyncio
+async def test_known_weak_query_below_floor_is_reported_but_does_not_fail(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+
+    resp = await _runner_scoring(0.9, 0.3).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is True
+    assert resp.floor_rule == "known_good"
+    assert resp.known_weak == ["q2"]
+    assert resp.floor_failures == []
+
+
+@pytest.mark.asyncio
+async def test_known_good_query_below_floor_fails_the_gate(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+
+    resp = await _runner_scoring(0.3, 0.9).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.floor_failures == ["q1"]
+    assert resp.known_weak == []
+
+
+@pytest.mark.asyncio
+async def test_baseline_without_known_good_keeps_the_any_query_floor(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=None)
+
+    resp = await _runner_scoring(0.9, 0.3).run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.floor_rule == "any_query"
+    assert resp.floor_failures == ["q2"]
+    assert resp.known_weak == []
+
+
+@pytest.mark.asyncio
+async def test_error_on_a_query_outside_known_good_still_fails(
+    tmp_path: Path, mock_dataset_and_baseline
+):
+    ds_path, base_path = _gate_files(tmp_path, mock_dataset_and_baseline, known_good=["q1"])
+    runner = _runner_scoring(0.9)
+    runner.evaluator.evaluate_query.side_effect = [
+        EvalQueryResult(query="q", faithfulness=0.9, answer_correctness=0.9, passed=True),
+        RuntimeError("judge down"),
+    ]
+
+    resp = await runner.run_evaluation(ds_path, base_path)
+
+    assert resp.passed_gate is False
+    assert resp.failed_queries == 1
+
+
+def test_markdown_report_names_the_floor_rule_and_known_weak_queries():
+    report = EvalRunResponse(
+        total_queries=2,
+        passed_gate=True,
+        regression_delta=0.0,
+        floor_rule="known_good",
+        known_weak=["q2"],
+    )
+
+    text = EvalRunner.format_markdown_report(report)
+
+    assert "Known-Good Queries" in text
+    assert "q2" in text

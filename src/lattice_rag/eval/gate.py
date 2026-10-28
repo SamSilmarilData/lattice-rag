@@ -9,7 +9,9 @@ every threshold the gate applies, so the gate's rules are visible in one place:
                                                      # is reported but not regression-checked
   "gate_thresholds": {
      "max_regression_delta": float,                  # allowed drop of any mean vs "metrics"
-     "min_query_floor": float,                       # no judged metric of any query below this
+     "min_query_floor": float,                       # no judged metric of a Known-Good Query
+                                                     # below this (of any query, without
+                                                     # "known_good"); others are Known-Weak
      "route_accuracy_floor": float,                  # optional; ADVISORY, reported, never gates
      "pass_thresholds": {"faithfulness": float, "context_precision": float,
                          "answer_relevance": float, "answer_correctness": float}},
@@ -18,12 +20,16 @@ every threshold the gate applies, so the gate's rules are visible in one place:
      "tolerance": float, "tolerance_rule": str, "measured_at": str,
      "notes": str,                                   # notes: the runs' Model Pool mix
      "route_accuracy_runs": [float, ...],            # ADVISORY; runs with nothing scored
-     "route_accuracy": float | null}}                # are skipped; never sets the tolerance
+     "route_accuracy": float | null},                # are skipped; never sets the tolerance
+  "known_good": [str, ...]}                          # optional; written by measure-baseline:
+                                                     # Gold Set ids that cleared the floor in
+                                                     # every run. Absent: any-query floor rule
 ```
 
 ``metrics`` and ``max_regression_delta`` come from ``measurement`` (``lattice-rag
 measure-baseline`` over three ``lattice-rag eval --output`` reports); the floor and the
-per-query pass thresholds are policy and are set by hand.
+per-query pass thresholds are policy and are set by hand. ``known_good`` comes from the
+same reports, so the gate fails on new failures rather than on every hard query.
 """
 
 from __future__ import annotations
@@ -111,6 +117,9 @@ class Baseline(msgspec.Struct, frozen=True):
     gate_thresholds: GateThresholds
     metrics: dict[str, float] = {}
     measurement: Measurement | None = None
+    # Known-Good Queries: Gold Set ids that cleared the floor in every baseline run.
+    # None (absent) keeps the legacy rule: any query below the floor fails.
+    known_good: list[str] | None = None
 
 
 def _run_means(report: EvalRunResponse) -> dict[str, float]:
@@ -147,6 +156,37 @@ def measure(reports: Sequence[EvalRunResponse], measured_at: str = "") -> Measur
     )
 
 
+def known_good_queries(
+    reports: Sequence[EvalRunResponse], min_query_floor: float
+) -> list[str] | None:
+    """Return the Known-Good Queries: ids that cleared the floor in every run.
+
+    Clearing means the query ran in that run without error and every judged metric is
+    at or above ``min_query_floor`` (a Noul veto zeroes faithfulness, so it does not
+    clear). Returns ``None`` when any result has no ``query_id`` (a report written
+    before ids were recorded), since those runs cannot name the queries.
+    """
+    results = [r for report in reports for r in report.results]
+    if not results or any(r.query_id is None for r in results):
+        return None
+    cleared_per_run = [
+        {r.query_id for r in report.results if _clears_floor(r, min_query_floor)}
+        for report in reports
+    ]
+    cleared = set.intersection(*cleared_per_run)
+    order = [r.query_id for r in reports[0].results]
+    return [qid for qid in order if qid is not None and qid in cleared]
+
+
+def _clears_floor(result: EvalQueryResult, min_query_floor: float) -> bool:
+    scores = judged_scores(result)
+    return (
+        result.error is None
+        and bool(scores)
+        and all(score >= min_query_floor for score in scores.values())
+    )
+
+
 def _model_mix_note(reports: Sequence[EvalRunResponse]) -> str:
     """Which models answered across the runs, so a baseline says what it measured."""
     mix: Counter[str] = Counter()
@@ -173,10 +213,17 @@ def load_baseline(path: str | Path) -> Baseline:
     return baseline
 
 
-def write_measurement(path: str | Path, measurement: Measurement, total_queries: int) -> None:
-    """Record a measurement in the baseline file: means, tolerance and the raw runs.
+def write_measurement(
+    path: str | Path,
+    measurement: Measurement,
+    total_queries: int,
+    known_good: list[str] | None = None,
+) -> None:
+    """Record a measurement in the baseline file: means, tolerance, raw runs, Known-Good.
 
-    The query floor and per-query pass thresholds are policy and stay as they are.
+    ``known_good`` of ``None`` removes any earlier list, so the gate falls back to the
+    any-query floor rather than trusting ids from another measurement. The query floor
+    and per-query pass thresholds are policy and stay as they are.
     """
     file = Path(path)
     load_baseline(file)  # refuse to rewrite a baseline that is already invalid
@@ -186,6 +233,10 @@ def write_measurement(path: str | Path, measurement: Measurement, total_queries:
     data["metrics"] = measurement.means
     data["gate_thresholds"]["max_regression_delta"] = measurement.tolerance
     data["measurement"] = msgspec.to_builtins(measurement)
+    if known_good is None:
+        data.pop("known_good", None)
+    else:
+        data["known_good"] = known_good
     file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 

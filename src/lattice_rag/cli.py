@@ -619,13 +619,21 @@ def measure_baseline(reports: tuple[str, ...], baseline: str) -> None:
     """Set baseline means and tolerance from repeated `eval --output` reports.
 
     Run the Live Tier three times on unchanged code, then pass the three reports here.
+    Also records known_good: the Gold Set ids that cleared min_query_floor in every run.
     """
     from datetime import UTC, datetime
 
     import msgspec
 
     from lattice_rag.api.dtos import EvalRunResponse
-    from lattice_rag.eval.gate import BaselineError, format_metric, measure, write_measurement
+    from lattice_rag.eval.gate import (
+        BaselineError,
+        format_metric,
+        known_good_queries,
+        load_baseline,
+        measure,
+        write_measurement,
+    )
 
     runs = [msgspec.json.decode(Path(p).read_bytes(), type=EvalRunResponse) for p in reports]
     sizes = {r.total_queries for r in runs}
@@ -633,8 +641,11 @@ def measure_baseline(reports: tuple[str, ...], baseline: str) -> None:
         raise click.ClickException(f"Reports cover different query counts: {sorted(sizes)}")
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
+        floor = load_baseline(baseline).gate_thresholds.min_query_floor
         measurement = measure(runs, measured_at=stamp)
-        write_measurement(baseline, measurement, total_queries=sizes.pop())
+        known_good = known_good_queries(runs, floor)
+        total = sizes.pop()
+        write_measurement(baseline, measurement, total_queries=total, known_good=known_good)
     except BaselineError as e:
         raise click.ClickException(str(e)) from e
 
@@ -643,6 +654,15 @@ def measure_baseline(reports: tuple[str, ...], baseline: str) -> None:
             f"{metric:<20} mean {format_metric(mean)}  sd {format_metric(measurement.stdev[metric])}"
         )
     click.echo(f"max_regression_delta -> {measurement.tolerance:.2f} (written to {baseline})")
+    if known_good is None:
+        click.echo(
+            "known_good not recorded: the reports carry no query ids, "
+            "so any query below the floor fails the gate"
+        )
+    else:
+        click.echo(
+            f"known_good -> {len(known_good)} of {total} queries cleared the floor every run"
+        )
 
 
 if __name__ == "__main__":
