@@ -16,7 +16,9 @@ every threshold the gate applies, so the gate's rules are visible in one place:
   "measurement": {                                   # optional; written by measure-baseline
      "runs": [{metric: mean}, ...], "means": {...}, "stdev": {...},
      "tolerance": float, "tolerance_rule": str, "measured_at": str,
-     "notes": str}}                                  # notes: the runs' Model Pool mix
+     "notes": str,                                   # notes: the runs' Model Pool mix
+     "route_accuracy_runs": [float, ...],            # ADVISORY; runs with nothing scored
+     "route_accuracy": float | null}}                # are skipped; never sets the tolerance
 ```
 
 ``metrics`` and ``max_regression_delta`` come from ``measurement`` (``lattice-rag
@@ -98,6 +100,8 @@ class Measurement(msgspec.Struct, frozen=True, forbid_unknown_fields=True):
     tolerance_rule: str = TOLERANCE_RULE
     measured_at: str = ""
     notes: str = ""
+    route_accuracy_runs: list[float] = []  # advisory: recorded, never part of the tolerance
+    route_accuracy: float | None = None  # mean of route_accuracy_runs
 
 
 class Baseline(msgspec.Struct, frozen=True):
@@ -128,6 +132,7 @@ def measure(reports: Sequence[EvalRunResponse], measured_at: str = "") -> Measur
     stdev = {m: round(statistics.stdev(run[m] for run in runs), 4) for m in common}
     widest = TOLERANCE_SIGMAS * max(stdev.values(), default=0.0)
     tolerance = max(MIN_TOLERANCE, math.ceil(round(widest * 100, 6)) / 100)
+    route_accuracy_runs = [r.route_accuracy for r in reports if r.route_accuracy is not None]
     return Measurement(
         runs=runs,
         means=means,
@@ -135,6 +140,10 @@ def measure(reports: Sequence[EvalRunResponse], measured_at: str = "") -> Measur
         tolerance=tolerance,
         measured_at=measured_at,
         notes=_model_mix_note(reports),
+        route_accuracy_runs=route_accuracy_runs,
+        route_accuracy=(
+            round(statistics.fmean(route_accuracy_runs), 4) if route_accuracy_runs else None
+        ),
     )
 
 

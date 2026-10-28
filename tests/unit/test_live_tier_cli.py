@@ -181,6 +181,38 @@ def test_measure_baseline_notes_record_the_model_mix(tmp_path: Path):
     )
 
 
+def test_measure_baseline_records_route_accuracy_per_run_and_mean(tmp_path: Path):
+    """Route Accuracy is advisory, so it is recorded next to the means but sets no tolerance."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = []
+    for i, accuracy in enumerate([0.975, 0.9625, None]):
+        path = tmp_path / f"r{i}.json"
+        path.write_bytes(
+            msgspec.json.encode(
+                EvalRunResponse(
+                    total_queries=3,
+                    passed_gate=True,
+                    regression_delta=0.0,
+                    mean_faithfulness=0.8,
+                    route_accuracy=accuracy,
+                )
+            )
+        )
+        runs.append(str(path))
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    measurement = load_baseline(baseline).measurement
+    assert measurement is not None
+    assert measurement.route_accuracy_runs == [0.975, 0.9625]  # a run with none scored is skipped
+    assert measurement.route_accuracy == pytest.approx(0.9688)
+    assert measurement.tolerance == pytest.approx(0.01)  # Route Accuracy never widens it
+
+
 def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps(_BASELINE))
