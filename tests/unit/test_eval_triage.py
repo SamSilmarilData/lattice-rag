@@ -188,3 +188,29 @@ async def test_pass_thresholds_are_supplied_by_the_caller():
 
     assert result.answer_correctness == 0.8
     assert result.passed is False
+
+
+@pytest.mark.asyncio
+async def test_contradiction_question_allows_following_one_of_disagreeing_sources():
+    """Gold Set 3.0.0's conflicting_sources and ambiguity Cases put passages that disagree
+    into one context. An answer that follows one of them, or reports the disagreement, must
+    not count as contradicting the context, or every correct resolution would be vetoed."""
+    mock_client = AsyncMock()
+    mock_client.system_one.return_value = _judge_response(
+        dict.fromkeys(
+            ("faithfulness", "context_precision", "answer_relevance", "answer_correctness"), 4.0
+        )
+    )
+    evaluator = JevEvaluator(client=mock_client)
+
+    await evaluator.evaluate_query(
+        query="Does a container need 1 GB or 2 GB?",
+        retrieved_chunks=[{"text": "Target: 1 GB."}, {"text": "Requires at least 2 GB."}],
+        generated_answer="At least 2 GB; one document's 1 GB target is out of date.",
+        ground_truth="At least 2 GB.",
+    )
+
+    question = mock_client.system_one.call_args.kwargs["questions"]["contradiction"]
+    instructions = question.instructions.lower()
+    assert "disagree" in instructions
+    assert "not a contradiction" in instructions

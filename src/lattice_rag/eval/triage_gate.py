@@ -52,9 +52,14 @@ ANSWER_CORRECTNESS_CRITERIA = [
     "5: Fully correct; the `answer` states the same facts and conclusion as the `reference_answer`.",
 ]
 
+# The context can hold passages that disagree (the Gold Set's conflicting_sources and
+# ambiguity Cases); resolving that disagreement must not trip the faithfulness veto.
 CONTRADICTION_INSTRUCTIONS = (
     "Does the generated `answer` make any claim, fact, number, or assertion that "
-    "directly contradicts the facts stated in the source `context`?"
+    "directly contradicts the facts stated in the source `context`? When passages in "
+    "the `context` disagree with each other, an answer that follows one of them, or "
+    "reports the disagreement, is not a contradiction; only a claim that no passage "
+    "supports and that the `context` rules out is."
 )
 
 _METRIC_QUESTIONS: dict[str, Score] = {
