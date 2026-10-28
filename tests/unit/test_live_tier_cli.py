@@ -14,7 +14,7 @@ import pytest
 from click.testing import CliRunner
 
 from lattice_rag import cli
-from lattice_rag.api.dtos import EvalQueryResult, EvalRunResponse
+from lattice_rag.api.dtos import EvalQueryError, EvalQueryResult, EvalRunResponse
 
 
 def _report(passed: bool = True) -> EvalRunResponse:
@@ -223,6 +223,77 @@ def test_measure_baseline_needs_at_least_two_runs(tmp_path: Path):
     assert result.exit_code != 0
     assert "at least two" in result.output
     assert json.loads(baseline.read_text()) == _BASELINE
+
+
+def _scored(qid: str, faithfulness: float, error: EvalQueryError | None = None) -> EvalQueryResult:
+    if error is not None:
+        return EvalQueryResult(query=qid, passed=False, error=error, query_id=qid)
+    return EvalQueryResult(
+        query=qid, passed=True, faithfulness=faithfulness, answer_correctness=0.9, query_id=qid
+    )
+
+
+def _run_with_results(tmp_path: Path, name: str, results: list[EvalQueryResult]) -> str:
+    report = EvalRunResponse(
+        total_queries=len(results),
+        passed_gate=False,
+        regression_delta=0.0,
+        mean_faithfulness=0.8,
+        results=results,
+    )
+    path = tmp_path / name
+    path.write_bytes(msgspec.json.encode(report))
+    return str(path)
+
+
+def test_measure_baseline_records_queries_that_cleared_the_floor_in_every_run(tmp_path: Path):
+    """good clears 0.50 in both runs; flaky misses once; erred fails once; vetoed has a
+    Noul veto (faithfulness zeroed) once. Only good is a Known-Good Query."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = [
+        _run_with_results(
+            tmp_path,
+            "r1.json",
+            [
+                _scored("good", 0.9),
+                _scored("flaky", 0.9),
+                _scored("erred", 0.9),
+                _scored("vetoed", 0.0),
+            ],
+        ),
+        _run_with_results(
+            tmp_path,
+            "r2.json",
+            [
+                _scored("good", 0.5),
+                _scored("flaky", 0.49),
+                _scored("erred", 0, EvalQueryError.JUDGE_ERROR),
+                _scored("vetoed", 0.9),
+            ],
+        ),
+    ]
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    from lattice_rag.eval.gate import load_baseline
+
+    assert load_baseline(baseline).known_good == ["good"]
+    assert "known_good -> 1 of 4" in result.output
+
+
+def test_measure_baseline_without_query_ids_leaves_known_good_unset(tmp_path: Path):
+    """Reports written before ids were recorded cannot name Known-Good Queries."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(_BASELINE))
+    runs = [_run_file(tmp_path, f"r{i}.json", 0.8 + i / 100, 0.7) for i in range(2)]
+
+    result = CliRunner().invoke(cli.main, ["measure-baseline", *runs, "--baseline", str(baseline)])
+
+    assert result.exit_code == 0, result.output
+    assert "known_good" not in json.loads(baseline.read_text())
+    assert "any query below the floor fails" in result.output
 
 
 def test_eval_passes_configured_degraded_retry_delay(monkeypatch, mocked_live_eval):

@@ -124,6 +124,8 @@ export interface EvalQueryResult {
   // Graph Recall: share of the query's expected entities among the graph context's Entities;
   // null when the query lists none or the pipeline failed. Unjudged and advisory.
   graphRecall: number | null;
+  // Gold Set query id; null only in reports written before ids were recorded
+  queryId: string | null;
 }
 
 // A query whose chosen Route differs from its Expected Route
@@ -163,7 +165,16 @@ export interface EvalRunResponse {
   // Model mix: answers per Model Pool member ('provider:model'), plus the FAQ / offline
   // fallback under its provider name
   answersByModel: Record<string, number>;
+  // Per-query floor rule the gate applied: 'known_good' fails only Known-Good Queries
+  // below the floor (others are reported in knownWeak); 'any_query' is the legacy rule
+  floorRule: FloorRule;
+  // Gold Set ids whose floor miss failed the gate
+  floorFailures: string[];
+  // Gold Set ids below the floor that are not Known-Good Queries: reported, never gating
+  knownWeak: string[];
 }
+
+export type FloorRule = 'known_good' | 'any_query';
 
 export type EvalJobStatus = 'running' | 'succeeded' | 'failed';
 

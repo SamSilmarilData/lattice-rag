@@ -271,6 +271,9 @@ class EvalQueryResult(msgspec.Struct, rename="camel"):
     # Graph Recall: share of the query's expected entities among the graph context's
     # Entities. None when the query lists none or the pipeline failed. Never judged.
     graph_recall: float | None = None
+    # The Gold Set query's id, filled by the runner; keys Known-Good Queries.
+    # None only in reports written before ids were recorded.
+    query_id: str | None = None
 
 
 class Misroute(msgspec.Struct, rename="camel"):
@@ -280,6 +283,15 @@ class Misroute(msgspec.Struct, rename="camel"):
     slice: Slice
     chosen_route: Route
     expected_route: Route
+
+
+class FloorRule(StrEnum):
+    """Which queries the Live Tier's per-query floor fails the gate for."""
+
+    # Only Known-Good Queries (the baseline's ``known_good``) fail; others are Known-Weak
+    KNOWN_GOOD = "known_good"
+    # Legacy: any query below the floor fails (a baseline without ``known_good``)
+    ANY_QUERY = "any_query"
 
 
 class EvalRunResponse(msgspec.Struct, rename="camel"):
@@ -317,6 +329,12 @@ class EvalRunResponse(msgspec.Struct, rename="camel"):
     # Model mix: answers per Model Pool member (``provider:model``), plus the FAQ /
     # offline fallback under its provider name. Queries with no generation are not counted.
     answers_by_model: dict[str, int] = {}
+    # The per-query floor rule this run was gated on, the Gold Set query ids whose
+    # floor miss failed the gate, and (known_good rule only) the ids below the floor
+    # that are not Known-Good Queries: reported, never gating
+    floor_rule: FloorRule = FloorRule.ANY_QUERY
+    floor_failures: list[str] = []
+    known_weak: list[str] = []
 
 
 class EvalJobStatus(StrEnum):

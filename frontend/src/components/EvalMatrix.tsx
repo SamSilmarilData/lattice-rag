@@ -52,7 +52,7 @@ interface EvalMatrixProps {
 
 // Seed rows were answered by a Groq pool member (model unknown here) on a verified route
 // (unknown here), with no Graph Recall measured, unless they say otherwise
-type SeedDefaults = 'provider' | 'model' | 'chosenRoute' | 'routeVerified' | 'graphRecall';
+type SeedDefaults = 'provider' | 'model' | 'chosenRoute' | 'routeVerified' | 'graphRecall' | 'queryId';
 type SeedRow = Omit<EvalQueryResult, SeedDefaults> & Partial<Pick<EvalQueryResult, SeedDefaults>>;
 
 // 'provider:model' for a Model Pool answer, the provider alone for the FAQ / offline message
@@ -65,6 +65,7 @@ const seedRow = (row: SeedRow): EvalQueryResult => ({
   chosenRoute: null,
   routeVerified: true,
   graphRecall: null,
+  queryId: null,
   ...row,
 });
 
@@ -291,6 +292,26 @@ const RouteAccuracyPanel: React.FC<{ report: EvalRunResponse }> = ({ report }) =
           ))}
         </ul>
       )}
+      <div className="space-y-0.5">
+        <span className="font-semibold">
+          Query Floor:
+          <span className="ml-1 font-normal text-gray-400">
+            {report.floorRule === 'known_good'
+              ? 'fails only Known-Good Queries; others below it are Known-Weak (reported)'
+              : 'any query below it fails (baseline has no known_good)'}
+          </span>
+        </span>
+        {report.floorFailures.length > 0 && (
+          <div className="font-mono text-[11px] text-red-400">
+            failing: {report.floorFailures.join(', ')}
+          </div>
+        )}
+        {report.knownWeak.length > 0 && (
+          <div className="font-mono text-[11px] text-amber-400">
+            Known-Weak, not failing: {report.knownWeak.join(', ')}
+          </div>
+        )}
+      </div>
       <div className="flex items-center justify-between">
         <span className="font-semibold">
           Graph Recall: {report.graphRecall === null ? 'n/a' : pct(report.graphRecall, 1)}
