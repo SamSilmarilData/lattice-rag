@@ -61,7 +61,7 @@ def build_messages(
     parts = ["<evidence>"]
     if not context_chunks:
         parts.append(NO_EVIDENCE)
-    for i, chunk in enumerate(context_chunks):
+    for i, chunk in enumerate(context_chunks, start=1):
         doc_id = chunk.get("doc_id") or chunk.get("document_id") or "unknown"
         text = _escape(str(chunk.get("text", "")))
         parts.append(f'<chunk index="{i}" doc="{_escape(str(doc_id))}">\n{text}\n</chunk>')

@@ -189,7 +189,7 @@
           <rect x="450" y="352" width="80" height="20" rx="4" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
           <text x="490" y="366" fill="#be123c" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="600" text-anchor="middle">Groq Exception</text>
 
-          <!-- 8. Dispatcher -> Gemini (Direct route when OPEN) -->
+          <!-- 8. Dispatcher -> Gemini (breaker OPEN, or massive_context primary) -->
           <line x1="280" y1="437" x2="352" y2="437" stroke="#b45309" stroke-width="2" marker-end="url(#d6-light-arr-ink)"/>
           <rect x="292" y="427" width="52" height="20" rx="4" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
           <text x="318" y="441" fill="#b45309" font-family="'Geist Mono', monospace" font-size="9.5" font-weight="600" text-anchor="middle">OPEN</text>
@@ -268,7 +268,8 @@
           <text x="74" y="372" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• Closed → TIER 1 Groq</text>
           <text x="74" y="390" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• Open → skips to TIER 2</text>
           <text x="74" y="415" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11.5" font-weight="500">2. Special Intent Handling</text>
-          <text x="74" y="435" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• massive_context → Gemini direct</text>
+          <text x="74" y="432" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">• massive_context: Gemini →</text>
+          <text x="84" y="447" fill="#475569" font-family="'Inter', sans-serif" font-size="10.5">Groq (breaker, degraded) → FAQ</text>
           <text x="74" y="465" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="10">No cascade after 1st token</text>
         </g>
 
@@ -290,8 +291,8 @@
           <text x="430" y="415" fill="#4338ca" font-family="'Geist Mono', monospace" font-size="9" font-weight="700" text-anchor="middle">TIER 2 • CASCADE 1</text>
 
           <text x="374" y="441" fill="#0f172a" font-family="'Inter', sans-serif" font-size="13" font-weight="600">Google Gemini 3.8 Flash</text>
-          <text x="374" y="459" fill="#475569" font-family="'Inter', sans-serif" font-size="11">Massive context &amp; API failover</text>
-          <text x="374" y="475" fill="#64748b" font-family="'Geist Mono', monospace" font-size="10">answers marked degraded</text>
+          <text x="374" y="459" fill="#475569" font-family="'Inter', sans-serif" font-size="11">Primary on massive_context · failover</text>
+          <text x="374" y="475" fill="#64748b" font-family="'Geist Mono', monospace" font-size="10">degraded unless primary</text>
         </g>
 
         <!-- NODE 7: CLIENT SSE STREAM (DESTINATION) -->

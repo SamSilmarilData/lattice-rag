@@ -24,7 +24,7 @@ async def test_groq_synthesizer_synthesize_success(mock_groq_client):
 
     mock_resp = MagicMock()
     mock_choice = MagicMock()
-    mock_choice.message.content = "LatticeDB uses native HNSW indexing [Chunk 0]."
+    mock_choice.message.content = "LatticeDB uses native HNSW indexing [Chunk 1]."
     mock_resp.choices = [mock_choice]
     mock_groq_client.chat.completions.create.return_value = mock_resp
 
@@ -32,14 +32,14 @@ async def test_groq_synthesizer_synthesize_success(mock_groq_client):
         "What is LatticeDB?", [{"doc_id": "doc1", "text": "LatticeDB text"}]
     )
 
-    assert answer == "LatticeDB uses native HNSW indexing [Chunk 0]."
+    assert answer == "LatticeDB uses native HNSW indexing [Chunk 1]."
     mock_groq_client.chat.completions.create.assert_awaited_once()
     call_kwargs = mock_groq_client.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "qwen/qwen3.8-27b"
     assert call_kwargs["stream"] is False
     roles = [m["role"] for m in call_kwargs["messages"]]
     assert roles == ["system", "user"]
-    assert '<chunk index="0" doc="doc1">' in call_kwargs["messages"][1]["content"]
+    assert '<chunk index="1" doc="doc1">' in call_kwargs["messages"][1]["content"]
 
 
 @pytest.mark.asyncio

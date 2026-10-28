@@ -147,7 +147,7 @@ class JevEvaluator:
         for i, c in enumerate(retrieved_chunks):
             text = c.get("text", "") if isinstance(c, dict) else str(c)
             if text:
-                context_parts.append(f"[{i + 1}] {text}")
+                context_parts.append(f"[Chunk {i + 1}] {text}")
 
         context_text = "\n\n".join(context_parts) if context_parts else "NO_CONTEXT_RETRIEVED"
 

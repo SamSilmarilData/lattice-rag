@@ -106,7 +106,7 @@ async def test_resilient_synthesizer_streaming_primary_and_fallback():
     # 1. Successful stream
     mock_groq = MagicMock()
 
-    async def _stream_groq(q, c, g):
+    async def _stream_groq(q, c, g, **_kw):
         for token in ["Hello", " ", "from", " ", "Groq"]:
             yield token
 
@@ -123,11 +123,11 @@ async def test_resilient_synthesizer_streaming_primary_and_fallback():
     # 2. Failed stream cascades to Gemini
     mock_groq_fail = MagicMock()
 
-    async def _stream_fail(q, c, g):
+    async def _stream_fail(q, c, g, **_kw):
         raise RuntimeError("Stream disconnect")
         yield "never"
 
-    async def _stream_gemini(q, c, g):
+    async def _stream_gemini(q, c, g, **_kw):
         for token in ["Hello", " ", "from", " ", "Gemini"]:
             yield token
 
@@ -141,7 +141,7 @@ async def test_resilient_synthesizer_streaming_primary_and_fallback():
 
 
 def _failing_stream(exc: Exception):
-    async def _stream(q, c, g):
+    async def _stream(q, c, g, **_kw):
         raise exc
         yield "never"  # pragma: no cover
 
@@ -149,7 +149,7 @@ def _failing_stream(exc: Exception):
 
 
 def _token_stream(tokens: list[str]):
-    async def _stream(q, c, g):
+    async def _stream(q, c, g, **_kw):
         for tok in tokens:
             yield tok
 
@@ -207,7 +207,7 @@ async def test_stream_outcome_reports_gemini_fallback_as_degraded():
 
 @pytest.mark.asyncio
 async def test_stream_failure_after_first_token_does_not_append_second_answer():
-    async def _partial(q, c, g):
+    async def _partial(q, c, g, **_kw):
         yield "Partial "
         raise RuntimeError("connection reset")
 

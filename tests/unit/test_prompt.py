@@ -16,7 +16,7 @@ def test_prompt_delimits_evidence_and_question():
     )
 
     assert msgs.system == SYSTEM_PROMPT
-    assert '<chunk index="0" doc="doc1">\nLatticeDB supports HNSW indexing.\n</chunk>' in msgs.user
+    assert '<chunk index="1" doc="doc1">\nLatticeDB supports HNSW indexing.\n</chunk>' in msgs.user
     assert "- LatticeDB --[USES_INDEX]--> HNSW" in msgs.user
     assert msgs.user.endswith("<question>\nHow does LatticeDB index?\n</question>")
 

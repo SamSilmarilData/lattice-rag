@@ -8,7 +8,9 @@ from typing import Any
 import structlog
 from groq import AsyncGroq
 
+from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.generation.prompt import build_messages
+from lattice_rag.generation.resilient_synthesizer import ProviderOutcome
 from lattice_rag.security import sanitize_error_detail
 
 logger = structlog.get_logger(__name__)
@@ -21,7 +23,7 @@ class GroqSynthesizer:
         self,
         api_key: str | None = None,
         model: str = "qwen/qwen3.8-27b",
-        max_tokens: int = 256,
+        max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
         client: AsyncGroq | None = None,
     ) -> None:
         """Initializes the AsyncGroq client with configurable model and API key.
@@ -50,8 +52,13 @@ class GroqSynthesizer:
         query: str,
         context_chunks: list[dict[str, Any]],
         graph_context: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        outcome: ProviderOutcome | None = None,
     ) -> str:
-        """Non-streaming synthesis of a grounded answer."""
+        """Non-streaming synthesis of a grounded answer.
+
+        A length stop is recorded on ``outcome``; the caller decides how to report it.
+        """
         logger.info("groq_synthesizing_answer", model=self.model)
         client = self._require_client()
         prompt = build_messages(query, context_chunks, graph_context)
@@ -65,9 +72,11 @@ class GroqSynthesizer:
                         {"role": "system", "content": prompt.system},
                         {"role": "user", "content": prompt.user},
                     ],
-                    max_tokens=self.max_tokens,
+                    max_tokens=self.max_tokens if max_tokens is None else max_tokens,
                     stream=False,
                 )
+                if response.choices[0].finish_reason == "length" and outcome is not None:
+                    outcome.truncated = True
                 return response.choices[0].message.content or ""
             except Exception as e:
                 err_str = str(e)
@@ -88,8 +97,13 @@ class GroqSynthesizer:
         query: str,
         context_chunks: list[dict[str, Any]],
         graph_context: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
+        outcome: ProviderOutcome | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Streaming synthesis of a grounded answer yielding delta text tokens."""
+        """Streaming synthesis of a grounded answer yielding delta text tokens.
+
+        A length stop is recorded on ``outcome``; the caller decides how to report it.
+        """
         logger.info("groq_streaming_synthesis", model=self.model)
         client = self._require_client()
         prompt = build_messages(query, context_chunks, graph_context)
@@ -104,13 +118,19 @@ class GroqSynthesizer:
                         {"role": "system", "content": prompt.system},
                         {"role": "user", "content": prompt.user},
                     ],
-                    max_tokens=self.max_tokens,
+                    max_tokens=self.max_tokens if max_tokens is None else max_tokens,
                     stream=True,
                 )
                 async for chunk in response:
                     if chunk.choices and chunk.choices[0].delta.content:
                         emitted = True
                         yield chunk.choices[0].delta.content
+                    if (
+                        chunk.choices
+                        and chunk.choices[0].finish_reason == "length"
+                        and outcome is not None
+                    ):
+                        outcome.truncated = True
                 return
             except Exception as e:
                 err_str = str(e)

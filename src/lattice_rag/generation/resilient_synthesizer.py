@@ -7,13 +7,19 @@ import contextlib
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import pybreaker
 
+from lattice_rag.config import DEFAULT_LLM_MAX_TOKENS
 from lattice_rag.security import sanitize_error_detail
 
 logger = logging.getLogger(__name__)
+
+# Broad cross-document answers need more room: massive_context gets the larger of this
+# floor and the configured default, so raising LLM_MAX_TOKENS never leaves it with less
+# room than the narrow routes.
+MASSIVE_CONTEXT_MIN_MAX_TOKENS = 1536
 
 OFFLINE_MESSAGE = (
     "I'm sorry, all generation services are currently unavailable. Please try again in a moment."
@@ -27,6 +33,14 @@ class SynthesisResult:
     answer: str
     degraded: bool
     provider: str
+    truncated: bool = False
+
+
+@dataclass
+class ProviderOutcome:
+    """Per-call facts a provider adapter records; adapters record, the synthesizer logs."""
+
+    truncated: bool = False
 
 
 @dataclass
@@ -39,10 +53,38 @@ class StreamOutcome:
     provider: str = ""
     degraded: bool = False
     error: str | None = None
+    truncated: bool = False
+
+
+class _Provider(NamedTuple):
+    name: str
+    client: Any
+    use_breaker: bool
+
+
+@dataclass(frozen=True)
+class _RoutePolicy:
+    """How one route generates: provider cascade order and answer budget.
+
+    ``max_tokens=None`` lets each provider use its configured default. The first provider in
+    ``order`` is the primary; any other provider's answer is degraded.
+    """
+
+    order: tuple[str, ...]
+    max_tokens: int | None
+
+    @property
+    def primary(self) -> str:
+        return self.order[0]
 
 
 class ResilientSynthesizer:
     """Single generation path: Groq under a circuit breaker -> Gemini -> Redis FAQ.
+
+    ``massive_context`` reverses the first two: Gemini -> Groq (breaker) -> Redis FAQ, and
+    gets a budget of ``max(MASSIVE_CONTEXT_MIN_MAX_TOKENS, default_max_tokens)``. Other
+    routes keep each provider's configured default. Adapters record a length stop on a
+    :class:`ProviderOutcome`; this class emits the single ``generation_truncated`` log.
 
     Both the buffered and streaming paths record Groq outcomes on the same breaker, so
     repeated Groq failures in either path open it and later requests skip Groq.
@@ -55,10 +97,16 @@ class ResilientSynthesizer:
         fallback_cache: Any = None,
         fail_max: int = 3,
         reset_timeout: int = 30,
+        default_max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
     ) -> None:
         self.groq = groq
         self.gemini = gemini
         self.fallback_cache = fallback_cache
+        self._default_policy = _RoutePolicy(order=("groq", "gemini"), max_tokens=None)
+        self._massive_context_policy = _RoutePolicy(
+            order=("gemini", "groq"),
+            max_tokens=max(MASSIVE_CONTEXT_MIN_MAX_TOKENS, default_max_tokens),
+        )
         # Client disconnects cancel the task / close the stream; those are not Groq failures.
         self.breaker = pybreaker.CircuitBreaker(
             fail_max=fail_max,
@@ -72,6 +120,21 @@ class ResilientSynthesizer:
         """Current state of the synthesis circuit breaker."""
         return str(self.breaker.current_state)
 
+    def _policy(self, route: str) -> _RoutePolicy:
+        return self._massive_context_policy if route == "massive_context" else self._default_policy
+
+    def _providers(self, policy: _RoutePolicy) -> list[_Provider]:
+        """Cascade order for a policy; only Groq runs under the circuit breaker."""
+        clients = {
+            "groq": _Provider("groq", self.groq, True),
+            "gemini": _Provider("gemini", self.gemini, False),
+        }
+        return [clients[name] for name in policy.order]
+
+    @staticmethod
+    def _log_truncated(provider: str, route: str) -> None:
+        logger.warning("generation_truncated", extra={"provider": provider, "route": route})
+
     async def synthesize(
         self,
         query: str,
@@ -80,36 +143,34 @@ class ResilientSynthesizer:
         route: str = "hybrid",
     ) -> SynthesisResult:
         """Synthesize answer with automatic cascading failover: Groq -> Gemini -> Redis FAQ."""
-        # Massive context queries route directly to large-context Gemini
-        if route == "massive_context" and self.gemini is not None:
+        policy = self._policy(route)
+        for name, client, use_breaker in self._providers(policy):
+            if client is None:
+                continue
+            attempt = ProviderOutcome()
             try:
-                answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=False, provider="gemini")
+                guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
+                with guard:
+                    answer = str(
+                        await client.synthesize(
+                            query,
+                            context_chunks,
+                            graph_context,
+                            max_tokens=policy.max_tokens,
+                            outcome=attempt,
+                        )
+                    )
+                if attempt.truncated:
+                    self._log_truncated(name, route)
+                return SynthesisResult(
+                    answer=answer,
+                    degraded=name != policy.primary,
+                    provider=name,
+                    truncated=attempt.truncated,
+                )
             except Exception as e:
                 logger.warning(
-                    "Gemini massive context synthesis failed: %s", sanitize_error_detail(str(e))
-                )
-                return await self._offline_result(query)
-
-        if self.groq is not None:
-            try:
-                with self.breaker.calling():
-                    answer = str(await self.groq.synthesize(query, context_chunks, graph_context))
-                return SynthesisResult(answer=answer, degraded=False, provider="groq")
-            except Exception as e:
-                logger.warning(
-                    "Primary Groq synthesis failed, cascading to Gemini: %s",
-                    sanitize_error_detail(str(e)),
-                )
-
-        if self.gemini is not None:
-            try:
-                answer = await self.gemini.synthesize(query, context_chunks, graph_context)
-                return SynthesisResult(answer=answer, degraded=True, provider="gemini")
-            except Exception as e2:
-                logger.warning(
-                    "Gemini fallback synthesis failed, cascading to Redis FAQ: %s",
-                    sanitize_error_detail(str(e2)),
+                    "%s synthesis failed, cascading: %s", name, sanitize_error_detail(str(e))
                 )
 
         return await self._offline_result(query)
@@ -129,25 +190,30 @@ class ResilientSynthesizer:
         """
         outcome = outcome if outcome is not None else StreamOutcome()
 
-        if route == "massive_context":
-            providers = [("gemini", self.gemini, False)]
-            primary = "gemini"
-        else:
-            providers = [("groq", self.groq, True), ("gemini", self.gemini, False)]
-            primary = "groq"
+        policy = self._policy(route)
 
-        for name, client, use_breaker in providers:
+        for name, client, use_breaker in self._providers(policy):
             if client is None:
                 continue
             emitted = False
+            attempt = ProviderOutcome()
             try:
                 guard = self.breaker.calling() if use_breaker else contextlib.nullcontext()
                 with guard:
-                    async for tok in client.stream(query, context_chunks, graph_context):
+                    async for tok in client.stream(
+                        query,
+                        context_chunks,
+                        graph_context,
+                        max_tokens=policy.max_tokens,
+                        outcome=attempt,
+                    ):
                         emitted = True
                         yield tok
+                if attempt.truncated:
+                    self._log_truncated(name, route)
                 outcome.provider = name
-                outcome.degraded = name != primary
+                outcome.degraded = name != policy.primary
+                outcome.truncated = attempt.truncated
                 return
             except Exception as e:
                 detail = sanitize_error_detail(str(e))

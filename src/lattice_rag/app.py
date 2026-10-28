@@ -130,6 +130,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
     gemini = GeminiFallback(
         api_key=config.gemini_api_key.get_secret_value() if config.gemini_api_key else None,
         model=config.gemini_model,
+        max_output_tokens=config.llm_max_tokens,
     )
     chitchat = ChitchatHandler()
 
@@ -150,6 +151,7 @@ async def lifespan(app: Litestar) -> AsyncGenerator[None, None]:
         gemini=gemini,
         chitchat=chitchat,
         embedding_service=embedding_service,
+        answer_max_tokens=config.llm_max_tokens,
     )
 
     # 8. Document Ingester (deep module)
